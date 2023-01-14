@@ -66,7 +66,7 @@ def process_file(file_path: pathlib.Path, dest_str: str):
     dest_path.mkdir(parents=True, exist_ok=True)
     shutil.copy(file_path, dest_path.joinpath(filename.name))
 
-    return f"{file_path} -> {dest_path}/{filename}"
+    return f"{file_path} -> {dest_path.joinpath(filename.name)}"
 
 
 @click.command()
