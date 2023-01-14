@@ -33,14 +33,24 @@ def _calc_checksum(image_path: pathlib.Path, block_size: int = 8192) -> str:
     return hasher.hexdigest()
 
 
-def _extract_date(im: PIL.Image) -> datetime.datetime:
-    try:
-        exif = im.getexif()
-        cdate = datetime.datetime.strptime(exif[306], '%Y:%m:%d %H:%M:%S')
-    except KeyError:
-        cdate = ERROR_DATE
+def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
+    """
+    Extract the file creation date from EXIF information.
 
-    return cdate
+    :param image_path: the path to a specific image file
+    :return: a datetime object representing the creation date of the image
+    """
+    with PIL.Image.open(image_path, 'r') as im:
+        try:
+            # attempt to extract the creation date from EXIF tag 306
+            exif = im.getexif()
+            cdate = datetime.datetime.strptime(exif[306], '%Y:%m:%d %H:%M:%S')
+
+        # the requested tag doesn't exist, use the ERROR_DATE global to signify such
+        except KeyError:
+            cdate = ERROR_DATE
+
+        return cdate
 
 
 @click.command()
@@ -53,8 +63,7 @@ def cli(src: str, dest: str):
             pass
         elif file_path.is_file():
             hash_str = _calc_checksum(file_path)
-            with PIL.Image.open(file_path, 'r') as im:
-                cdate = _extract_date(im)
+            cdate = _extract_date(file_path)
 
             if cdate == ERROR_DATE:
                 # don't rename file
