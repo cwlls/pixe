@@ -42,5 +42,27 @@ def _extract_date(im: PIL.Image) -> datetime.datetime:
 
 
 @click.command()
-def cli():
-    click.echo("Just a test")
+@click.argument('src')
+@click.option('--dest', default='.', help='desired destination')
+def cli(src: str, dest: str):
+    file_path = pathlib.Path(src)
+    if file_path.exists():
+        if file_path.is_dir():
+            pass
+        elif file_path.is_file():
+            hash_str = _calc_checksum(file_path)
+            with PIL.Image.open(file_path, 'r') as im:
+                cdate = _extract_date(im)
+
+            if cdate == ERROR_DATE:
+                # don't rename file
+                pass
+            else:
+                # rename file
+                pass
+
+            click.echo(f"{file_path.name} -- {cdate} -- {hash_str}")
+        else:
+            raise click.exceptions.BadParameter(src)
+    else:
+        raise click.exceptions.BadParameter(src)
