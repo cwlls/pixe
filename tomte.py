@@ -1,9 +1,8 @@
-import os
-import multiprocessing
 import hashlib
 import io
 import datetime
 import pathlib
+import multiprocessing
 
 import click
 import PIL.Image
@@ -23,8 +22,11 @@ def _calc_checksum(image_path: pathlib.Path, block_size: int = 8192) -> str:
     img_io = io.BytesIO()
 
     # open the image file and save the image data portion as a io.BytesIO object
-    with PIL.Image.open(image_path, 'r') as im:
+    with PIL.Image.open(image_path) as im:
         im.save(img_io, im.format)
+
+    # reset the cursor
+    img_io.seek(0)
 
     # chunk_size at a time, update our hash until complete
     while chunk := img_io.read(block_size):
@@ -53,26 +55,38 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
         return cdate
 
 
+def process_file(file_path: pathlib.Path):
+    hash_str = _calc_checksum(file_path)
+    cdate = _extract_date(file_path)
+
+    return f"{file_path.name} -- {cdate} -- {hash_str}"
+
+
 @click.command()
 @click.argument('src')
 @click.option('--dest', default='.', help='desired destination')
-def cli(src: str, dest: str):
+@click.option('--recurse/--no-recurse', default=False)
+def cli(src: str, dest: str, recurse: bool):
     file_path = pathlib.Path(src)
     if file_path.exists():
         if file_path.is_dir():
-            pass
-        elif file_path.is_file():
-            hash_str = _calc_checksum(file_path)
-            cdate = _extract_date(file_path)
-
-            if cdate == ERROR_DATE:
-                # don't rename file
-                pass
+            file_list = [ ]
+            if recurse:
+                for img in file_path.rglob('*.jpg'):
+                    file_list.append(img)
             else:
-                # rename file
-                pass
+                for img in file_path.glob('*.jpg'):
+                    file_list.append(img)
+            click.echo(f"COUNT: {len(file_list)}")
 
-            click.echo(f"{file_path.name} -- {cdate} -- {hash_str}")
+            pool = multiprocessing.Pool()
+            for file in file_list:
+                pool.apply_async(process_file, args=(file, ), callback=(lambda r: print(r, flush=True)))
+            pool.close()
+            pool.join()
+
+        elif file_path.is_file():
+            print(process_file(file_path))
         else:
             raise click.exceptions.BadParameter(src)
     else:
