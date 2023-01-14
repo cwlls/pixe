@@ -77,7 +77,6 @@ def cli(src: str, dest: str, recurse: bool):
             else:
                 for img in file_path.glob('*.jpg'):
                     file_list.append(img)
-            click.echo(f"COUNT: {len(file_list)}")
 
             pool = multiprocessing.Pool()
             for file in file_list:
