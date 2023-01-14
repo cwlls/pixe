@@ -22,9 +22,11 @@ def _calc_checksum(image_path: pathlib.Path, block_size: int = 8192) -> str:
     hasher = hashlib.sha1()
     img_io = io.BytesIO()
 
-    with PIL.Image.open(image_path) as im:
+    # open the image file and save the image data portion as a io.BytesIO object
+    with PIL.Image.open(image_path, 'r') as im:
         im.save(img_io, im.format)
 
+    # chunk_size at a time, update our hash until complete
     while chunk := img_io.read(block_size):
         hasher.update(chunk)
 
