@@ -33,3 +33,12 @@ def test_process_file(test_file, tmp_path):
     tomte._process_file(test_file, tmp_path)
 
     assert expected_file.exists()
+
+
+def test_process_file_no_date(tmp_path):
+    test_file = pathlib.Path('data/img/no_date.jpg')
+    new_file = pathlib.Path(tmp_path).joinpath('1902', '2', '19020220_000000_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg')
+
+    tomte._process_file(test_file, tmp_path)
+
+    assert new_file.exists()
