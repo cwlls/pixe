@@ -8,7 +8,9 @@ import shutil
 import click
 import PIL.Image
 
-ERROR_DATE = datetime.datetime(1900, 1, 1)
+# Using a date that shouldn't appear in our collection, but that also isn't a common default.
+# In this case, Ansel Adams birthday.
+ERROR_DATE = datetime.datetime(1902, 2, 20)
 
 
 def _calc_checksum(image_path: pathlib.Path, block_size: int = 8192) -> str:
