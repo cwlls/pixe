@@ -47,7 +47,7 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
     """
     with PIL.Image.open(image_path, 'r') as im:
         try:
-            # attempt to extract the creation date from EXIF tag 306
+            # attempt to extract the creation date from EXIF tag 36867
             exif = im._getexif()
             cdate = datetime.datetime.strptime(exif[36867], '%Y:%m:%d %H:%M:%S')
 
