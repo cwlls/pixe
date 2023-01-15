@@ -28,3 +28,8 @@ jobs:
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           # check for general errors or bad practices. Ignore line length and minor nits
           flake8 . --count --exit-zero --max-complexity=10 --ignore=E402,F401,W503,E501 --statistics
+
+      - name: Unit testing
+        working-directory: ./tests
+        run: |
+          pipenv run pytest test_unit.py
