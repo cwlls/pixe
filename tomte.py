@@ -83,6 +83,7 @@ def serial_process_files(file_list: list, dest: str):
     for file in file_list:
         print(_process_file(file, dest))
 
+
 @click.command()
 @click.argument('src')
 @click.option('--dest', default='.', help='desired destination')
