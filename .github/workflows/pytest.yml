@@ -1,0 +1,21 @@
+name: pytest
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pipenv'
+      - name: Install pipenv
+        run: curl https://raw.githubusercontent.com/pypa/pipenv/master/get-pipenv.py | python
+      - run: pipenv install --dev
+      - name: Unit tests
+        run: pipenv run pytest tests/test_unit.py
+      - name: Integration tests
+        run: pipenv run pytest tests/test_integration.py
