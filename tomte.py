@@ -58,7 +58,7 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
         return cdate
 
 
-def process_file(file_path: pathlib.Path, dest_str: str):
+def _process_file(file_path: pathlib.Path, dest_str: str):
     cdate = _extract_date(file_path)
     cdate_str = cdate.strftime('%Y%m%d_%H%M%S')
     hash_str = _calc_checksum(file_path)
@@ -71,11 +71,24 @@ def process_file(file_path: pathlib.Path, dest_str: str):
     return f"{file_path} -> {dest_path.joinpath(filename.name)}"
 
 
+def parallel_process_files(file_list: list, dest: str):
+    pool = multiprocessing.Pool()
+    for file in file_list:
+        pool.apply_async(_process_file, args=(file, dest), callback=(lambda res: print(res, flush=True)))
+    pool.close()
+    pool.join()
+
+
+def serial_process_files(file_list: list, dest: str):
+    for file in file_list:
+        print(_process_file(file, dest))
+
 @click.command()
 @click.argument('src')
 @click.option('--dest', default='.', help='desired destination')
 @click.option('--recurse/--no-recurse', default=False)
-def cli(src: str, dest: str, recurse: bool):
+@click.option('--parallel/--no-parallel', default=True)
+def cli(src: str, dest: str, recurse: bool, parallel: bool):
     file_path = pathlib.Path(src)
     if file_path.exists():
         if file_path.is_dir():
@@ -87,14 +100,13 @@ def cli(src: str, dest: str, recurse: bool):
                 for img in file_path.glob('*.jpg'):
                     file_list.append(img)
 
-            pool = multiprocessing.Pool()
-            for file in file_list:
-                pool.apply_async(process_file, args=(file, dest), callback=(lambda res: print(res, flush=True)))
-            pool.close()
-            pool.join()
+            if parallel:
+                parallel_process_files(file_list, dest)
+            else:
+                serial_process_files(file_list, dest)
 
         elif file_path.is_file():
-            print(process_file(file_path, dest))
+            print(_process_file(file_path, dest))
         else:
             raise click.exceptions.BadParameter(src)
     else:
