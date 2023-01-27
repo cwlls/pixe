@@ -45,11 +45,11 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
     :param image_path: the path to a specific image file
     :return: a datetime object representing the creation date of the image
     """
-    with PIL.Image.open(image_path, 'r') as im:
+    with PIL.Image.open(image_path, "r") as im:
         try:
             # attempt to extract the creation date from EXIF tag 36867
             exif = im._getexif()
-            cdate = datetime.datetime.strptime(exif[36867], '%Y:%m:%d %H:%M:%S')
+            cdate = datetime.datetime.strptime(exif[36867], "%Y:%m:%d %H:%M:%S")
 
         # the requested tag doesn't exist, use the ERROR_DATE global to signify such
         except KeyError:
@@ -60,9 +60,11 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
 
 def _process_file(file_path: pathlib.Path, dest_str: str):
     cdate = _extract_date(file_path)
-    cdate_str = cdate.strftime('%Y%m%d_%H%M%S')
+    cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = _calc_checksum(file_path)
-    filename = file_path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file_path.suffix.lower())
+    filename = file_path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(
+        file_path.suffix.lower()
+    )
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
 
     dest_path.mkdir(parents=True, exist_ok=True)
@@ -74,7 +76,11 @@ def _process_file(file_path: pathlib.Path, dest_str: str):
 def parallel_process_files(file_list: list, dest: str):
     pool = multiprocessing.Pool()
     for file in file_list:
-        pool.apply_async(_process_file, args=(file, dest), callback=(lambda res: print(res, flush=True)))
+        pool.apply_async(
+            _process_file,
+            args=(file, dest),
+            callback=(lambda res: print(res, flush=True)),
+        )
     pool.close()
     pool.join()
 
@@ -85,20 +91,20 @@ def serial_process_files(file_list: list, dest: str):
 
 
 @click.command()
-@click.argument('src')
-@click.option('--dest', default='.', help='desired destination')
-@click.option('--recurse/--no-recurse', default=False)
-@click.option('--parallel/--no-parallel', default=True)
+@click.argument("src")
+@click.option("--dest", default=".", help="desired destination")
+@click.option("--recurse/--no-recurse", default=False)
+@click.option("--parallel/--no-parallel", default=True)
 def cli(src: str, dest: str, recurse: bool, parallel: bool):
     file_path = pathlib.Path(src)
     if file_path.exists():
         if file_path.is_dir():
-            file_list = [ ]
+            file_list = []
             if recurse:
-                for img in file_path.rglob('*.jpg'):
+                for img in file_path.rglob("*.jpg"):
                     file_list.append(img)
             else:
-                for img in file_path.glob('*.jpg'):
+                for img in file_path.glob("*.jpg"):
                     file_list.append(img)
 
             if parallel:
