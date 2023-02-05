@@ -71,7 +71,11 @@ def _process_file(file_path: pathlib.Path, dest_str: str):
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
 
     if dest_path.joinpath(filename.name).exists():
-        dest_path = pathlib.Path(dest_str).joinpath(f"dups/{START_TIME.strftime('%Y%m%d_%H%M%S')}", str(cdate.year), str(cdate.month))
+        dest_path = pathlib.Path(dest_str).joinpath(
+            f"dups/{START_TIME.strftime('%Y%m%d_%H%M%S')}",
+            str(cdate.year),
+            str(cdate.month),
+        )
 
     dest_path.mkdir(parents=True, exist_ok=True)
     shutil.copy(file_path, dest_path.joinpath(filename.name))
