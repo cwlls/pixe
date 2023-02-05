@@ -12,6 +12,9 @@ import PIL.Image
 # In this case, Ansel Adams birthday.
 ERROR_DATE = datetime.datetime(1902, 2, 20)
 
+# store a datetime of when this run began
+START_TIME = datetime.datetime.now()
+
 
 def _calc_checksum(image_path: pathlib.Path, block_size: int = 8192) -> str:
     """
@@ -66,6 +69,9 @@ def _process_file(file_path: pathlib.Path, dest_str: str):
         file_path.suffix.lower()
     )
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
+
+    if dest_path.joinpath(filename.name).exists():
+        dest_path = pathlib.Path(dest_str).joinpath(f"dups/{START_TIME.strftime('%Y%m%d_%H%M%S')}", str(cdate.year), str(cdate.month))
 
     dest_path.mkdir(parents=True, exist_ok=True)
     shutil.copy(file_path, dest_path.joinpath(filename.name))
