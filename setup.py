@@ -4,10 +4,10 @@ setup(
     name="tomte",
     version="0.1.0",
     py_modules=["tomte"],
-    url="https://github.com/fosforics/tomte",
+    url="https://github.com/ithuna/tomte",
     license="Apache-2",
     author="Chris Wells",
-    author_email="chris@fosforics.com",
+    author_email="chris@ithuna.com",
     description="A digital house gnome to keep your files neat and tidy",
     include_package_data=True,
     install_requires=[
