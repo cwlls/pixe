@@ -1,5 +1,6 @@
 import pathlib
 import os
+import datetime
 
 import pytest
 from click.testing import CliRunner
@@ -47,6 +48,18 @@ def test_single_file_bad(runner, tmp_path):
     results = runner.invoke(tomte.cli, f"--dest {tmp_path} /dev/zero")
 
     assert results.exit_code == 2
+
+
+def test_single_file_duplicate(runner, src_file, tmp_path):
+    import_time = datetime.datetime.now()
+    dest_file = tmp_path.joinpath(
+        f"dups/{import_time.strftime('%Y%m%d_%H%M%S')}/2021/6/20210628_093121_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
+    )
+    runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
+    results = runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
+
+    assert results.exit_code == 0
+    assert dest_file.exists()
 
 
 def test_files_parallel(runner, src_path, tmp_path):
