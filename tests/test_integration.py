@@ -62,6 +62,18 @@ def test_single_file_duplicate(runner, src_file, tmp_path):
     assert dest_file.exists()
 
 
+def test_single_file_move(runner, src_file, tmp_path):
+    dest_file = tmp_path.joinpath(
+        "2021/6/20210628_093121_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
+    )
+
+    results = runner.invoke(tomte.cli, f"--move --dest {tmp_path} {src_file}")
+
+    assert results.exit_code == 0
+    assert dest_file.exists()
+    assert not src_file.exists()
+
+
 def test_files_parallel(runner, src_path, tmp_path):
     results = runner.invoke(tomte.cli, f"--dest {tmp_path} {src_path}")
 
