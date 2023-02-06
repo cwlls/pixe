@@ -61,7 +61,7 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
         return cdate
 
 
-def _process_file(file_path: pathlib.Path, dest_str: str, move: bool):
+def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False):
     cdate = _extract_date(file_path)
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = _calc_checksum(file_path)
