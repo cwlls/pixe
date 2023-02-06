@@ -101,10 +101,10 @@ def serial_process_files(file_list: list, dest: str):
 
 
 @click.command()
-@click.argument("src")
+@click.argument("src", )
 @click.option("--dest", default=".", help="desired destination")
-@click.option("--recurse/--no-recurse", default=False)
-@click.option("--parallel/--no-parallel", default=True)
+@click.option("--recurse/--no-recurse", default=False, help="recurse into subdirs (default: --no-recurse)")
+@click.option("--parallel/--no-parallel", default=True, help="process files in parallel (default: --parallel)")
 def cli(src: str, dest: str, recurse: bool, parallel: bool):
     file_path = pathlib.Path(src)
     if file_path.exists():
