@@ -62,6 +62,7 @@ def test_single_file_duplicate(runner, src_file, tmp_path):
     assert dest_file.exists()
 
 
+# TODO: this removes our test file. We must refactor the conftest.py to create our test files dynamically
 def test_single_file_move(runner, src_file, tmp_path):
     dest_file = tmp_path.joinpath(
         "2021/6/20210628_093121_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"

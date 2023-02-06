@@ -61,7 +61,7 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
         return cdate
 
 
-def _process_file(file_path: pathlib.Path, dest_str: str):
+def _process_file(file_path: pathlib.Path, dest_str: str, move: bool):
     cdate = _extract_date(file_path)
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = _calc_checksum(file_path)
@@ -76,28 +76,31 @@ def _process_file(file_path: pathlib.Path, dest_str: str):
             str(cdate.year),
             str(cdate.month),
         )
-
     dest_path.mkdir(parents=True, exist_ok=True)
-    shutil.copy(file_path, dest_path.joinpath(filename.name))
+
+    if move:
+        shutil.move(file_path, dest_path.joinpath(filename.name))
+    else:
+        shutil.copy(file_path, dest_path.joinpath(filename.name))
 
     return f"{file_path} -> {dest_path.joinpath(filename.name)}"
 
 
-def parallel_process_files(file_list: list, dest: str):
+def parallel_process_files(file_list: list, dest: str, move: bool):
     pool = multiprocessing.Pool()
     for file in file_list:
         pool.apply_async(
             _process_file,
-            args=(file, dest),
+            args=(file, dest, move),
             callback=(lambda res: print(res, flush=True)),
         )
     pool.close()
     pool.join()
 
 
-def serial_process_files(file_list: list, dest: str):
+def serial_process_files(file_list: list, dest: str, move: bool):
     for file in file_list:
-        print(_process_file(file, dest))
+        print(_process_file(file, dest, move))
 
 
 @click.command()
@@ -115,7 +118,14 @@ def serial_process_files(file_list: list, dest: str):
     default=True,
     help="process files in parallel (default: --parallel)",
 )
-def cli(src: str, dest: str, recurse: bool, parallel: bool):
+@click.option(
+    "--move",
+    "--mv",
+    is_flag=True,
+    default=False,
+    help="move files into DEST rather than copying (default: copy)",
+)
+def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool):
     file_path = pathlib.Path(src)
     if file_path.exists():
         if file_path.is_dir():
@@ -128,12 +138,12 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool):
                     file_list.append(img)
 
             if parallel:
-                parallel_process_files(file_list, dest)
+                parallel_process_files(file_list, dest, move)
             else:
-                serial_process_files(file_list, dest)
+                serial_process_files(file_list, dest, move)
 
         elif file_path.is_file():
-            print(_process_file(file_path, dest))
+            print(_process_file(file_path, dest, move))
         else:
             raise click.exceptions.BadParameter(src)
     else:
