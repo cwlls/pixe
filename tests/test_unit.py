@@ -8,19 +8,12 @@ import tomte
 
 
 @pytest.fixture
-def src_path():
-    return pathlib.Path(os.path.dirname(os.path.realpath(__file__))).joinpath(
-        "data/img"
-    )
-
-
-@pytest.fixture
 def src_file(src_path):
-    return src_path.joinpath("chocolate.jpg")
+    return src_path.joinpath("red.jpg")
 
 
 def test_calc_checksum(src_file):
-    expected_checksum = "9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485"
+    expected_checksum = "1cdef99be68dbdea159ec6fa8469b41ca13e9e6f"
 
     calculated_checksum = tomte._calc_checksum(src_file)
 
@@ -28,27 +21,29 @@ def test_calc_checksum(src_file):
 
 
 def test_extract_date(src_file):
-    expected_date = datetime.datetime(2021, 6, 28, 9, 31, 21)
+    expected_date = datetime.datetime(2020, 3, 21, 3, 13, 12)
 
     extracted_date = tomte._extract_date(src_file)
 
     assert expected_date == extracted_date
 
 
-def test_process_file(src_file, tmp_path):
-    expected_file = pathlib.Path(tmp_path).joinpath("2021/6")
+def test_process_file(src_file, dst_path):
+    expected_file = pathlib.Path(dst_path).joinpath(
+        "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
+    )
 
-    tomte._process_file(src_file, tmp_path)
+    tomte._process_file(src_file, dst_path)
 
     assert expected_file.exists()
 
 
-def test_process_file_no_date(src_path, tmp_path):
-    src_file = src_path.joinpath("no_date.jpg")
-    new_file = pathlib.Path(tmp_path).joinpath(
-        "1902", "2", "19020220_000000_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
+def test_process_file_no_date(src_path, dst_path):
+    src_file = src_path.joinpath("chocolate.jpg")
+    new_file = pathlib.Path(dst_path).joinpath(
+        "1902", "2", "19020220_000000_2a00d2b48e39f63cf834d4f7c50b2c1aa3b43a9c.jpg"
     )
 
-    tomte._process_file(src_file, tmp_path)
+    tomte._process_file(src_file, dst_path)
 
     assert new_file.exists()
