@@ -14,23 +14,16 @@ def runner():
 
 
 @pytest.fixture
-def src_path():
-    return pathlib.Path(os.path.dirname(os.path.realpath(__file__))).joinpath(
-        "data/img"
-    )
-
-
-@pytest.fixture
 def src_file(src_path):
-    return src_path.joinpath("chocolate.jpg")
+    return src_path.joinpath("red.jpg")
 
 
-def test_single_file(runner, src_file, tmp_path):
-    dest_file = tmp_path.joinpath(
-        "2021/6/20210628_093121_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
+def test_single_file(runner, src_file, dst_path):
+    dest_file = pathlib.Path(dst_path).joinpath(
+        "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
-    results = runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
+    results = runner.invoke(tomte.cli, f"--dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -53,7 +46,11 @@ def test_single_file_bad(runner, tmp_path):
 def test_single_file_duplicate(runner, src_file, tmp_path):
     import_time = datetime.datetime.now()
     dest_file = tmp_path.joinpath(
-        f"dups/{import_time.strftime('%Y%m%d_%H%M%S')}/2021/6/20210628_093121_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
+        "dups",
+        import_time.strftime("%Y%m%d_%H%M%S"),
+        "2020",
+        "3",
+        "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
     runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
     results = runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
@@ -62,10 +59,9 @@ def test_single_file_duplicate(runner, src_file, tmp_path):
     assert dest_file.exists()
 
 
-# TODO: this removes our test file. We must refactor the conftest.py to create our test files dynamically
 def test_single_file_move(runner, src_file, tmp_path):
     dest_file = tmp_path.joinpath(
-        "2021/6/20210628_093121_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
+        "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
     results = runner.invoke(tomte.cli, f"--move --dest {tmp_path} {src_file}")
@@ -75,43 +71,36 @@ def test_single_file_move(runner, src_file, tmp_path):
     assert not src_file.exists()
 
 
-def test_files_parallel(runner, src_path, tmp_path):
-    results = runner.invoke(tomte.cli, f"--dest {tmp_path} {src_path}")
+def test_files_parallel(runner, src_path, dst_path):
+    results = runner.invoke(tomte.cli, f"--dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
-    assert tmp_path.joinpath(
-        "1902/2/19020220_000000_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
-    ).exists()
-    assert tmp_path.joinpath(
-        "2021/10/20211013_145024_193618a9c1dad0600f5d571268404d73d5a16173.jpg"
-    ).exists()
-    assert tmp_path.joinpath(
-        "2022/9/20220928_020550_141e2b9762f60952aa0510ac9309a4ae6126b817.jpg"
-    ).exists()
-    assert not tmp_path.joinpath(
-        "2022/3/20220305_225114_93f3c5c0b3d0e23349e238231131b3f297889be4.jpg"
+    assert dst_path.joinpath(
+        "2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg"
     ).exists()
 
 
-def test_files_serial(runner, src_path, tmp_path):
-    results = runner.invoke(tomte.cli, f"--no-parallel --dest {tmp_path} {src_path}")
+def test_files_serial(runner, src_path, dst_path):
+    results = runner.invoke(tomte.cli, f"--no-parallel --dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
-    assert tmp_path.joinpath(
-        "1902/2/19020220_000000_9c12b09015e8fe1bdd3c9aa765d08c5cdd60a485.jpg"
-    ).exists()
-    assert tmp_path.joinpath(
-        "2021/10/20211013_145024_193618a9c1dad0600f5d571268404d73d5a16173.jpg"
-    ).exists()
-    assert tmp_path.joinpath(
-        "2022/9/20220928_020550_141e2b9762f60952aa0510ac9309a4ae6126b817.jpg"
+    assert dst_path.joinpath(
+        "2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg"
     ).exists()
 
 
-def test_files_recurse(runner, src_path, tmp_path):
-    results = runner.invoke(tomte.cli, f"--recurse --dest {tmp_path} {src_path}")
+def test_files_recurse(runner, src_path, dst_path):
+    results = runner.invoke(tomte.cli, f"--recurse --dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
-    assert tmp_path.joinpath(
-        "2022/3/20220305_225114_93f3c5c0b3d0e23349e238231131b3f297889be4.jpg"
+    assert dst_path.joinpath(
+        "2022", "2", "20220226_001821_476bf667385499407e1405f5909f88875dab1873.jpg"
     ).exists()
+    assert dst_path.joinpath(
+        "2018", "3", "20180319_100139_b78473e5c10d8fd945dd1eee9da7a82320d464d1.jpg"
+    ).exists()
+    assert dst_path.joinpath(
+        "2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg"
+    ).exists()
+
+
