@@ -81,7 +81,7 @@ def test_files_parallel(runner, src_path, dst_path):
 
 
 def test_files_serial(runner, src_path, dst_path):
-    results = runner.invoke(tomte.cli, f"--no-parallel --dest {dst_path} {src_path}")
+    results = runner.invoke(tomte.cli, f"--serial --dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
     assert dst_path.joinpath(
