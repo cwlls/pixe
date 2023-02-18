@@ -15,4 +15,4 @@ pytest-cov = "==4.0.0"
 flake8 = "==6.0.0"
 
 [requires]
-python_version = "3"
+python_version = "3.11"
