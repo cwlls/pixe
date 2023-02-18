@@ -114,16 +114,16 @@ def serial_process_files(file_list: list, dest: str, move: bool):
     help="recurse into sub-directories (default: off)",
 )
 @click.option(
-    "--parallel/--no-parallel",
+    "--parallel/--serial",
     default=True,
     help="process files in parallel (default: --parallel)",
 )
 @click.option(
-    "--move",
-    "--mv",
+    "--move/--copy",
+    "--mv/--cp",
     is_flag=True,
     default=False,
-    help="move files into DEST rather than copying (default: copy)",
+    help="move files into DEST rather than copying (default: --copy)",
 )
 def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool):
     file_path = pathlib.Path(src)
