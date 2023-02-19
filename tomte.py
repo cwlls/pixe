@@ -78,9 +78,7 @@ def _new_tags(image_path: pathlib.Path, **kwargs) -> bytes:
         exif_dict["Exif"][0xA430] = kwargs.get("owner").encode("ascii")
 
     if "copyright" in kwargs:
-        exif_dict["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode(
-            "ascii"
-        )
+        exif_dict["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
 
     return piexif.dump(exif_dict)
 
@@ -89,9 +87,7 @@ def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False):
     cdate = _extract_date(file_path)
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = _calc_checksum(file_path)
-    filename = file_path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(
-        file_path.suffix.lower()
-    )
+    filename = file_path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file_path.suffix.lower())
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
 
     if dest_path.joinpath(filename.name).exists():
