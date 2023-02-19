@@ -29,38 +29,38 @@ def test_single_file(runner, src_file, dst_path):
     assert dest_file.exists()
 
 
-def test_single_file_no_exist(runner, tmp_path):
-    results = runner.invoke(tomte.cli, f"--dest {tmp_path} this/file/really/does/not/exist")
+def test_single_file_no_exist(runner, dst_path):
+    results = runner.invoke(tomte.cli, f"--dest {dst_path} this/file/really/does/not/exist")
 
     assert results.exit_code == 2
 
 
-def test_single_file_bad(runner, tmp_path):
-    results = runner.invoke(tomte.cli, f"--dest {tmp_path} /dev/zero")
+def test_single_file_bad(runner, dst_path):
+    results = runner.invoke(tomte.cli, f"--dest {dst_path} /dev/zero")
 
     assert results.exit_code == 2
 
 
-def test_single_file_duplicate(runner, src_file, tmp_path):
+def test_single_file_duplicate(runner, src_file, dst_path):
     import_time = datetime.datetime.now()
-    dest_file = tmp_path.joinpath(
+    dest_file = dst_path.joinpath(
         "dups",
         import_time.strftime("%Y%m%d_%H%M%S"),
         "2020",
         "3",
         "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg",
     )
-    runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
-    results = runner.invoke(tomte.cli, f"--dest {tmp_path} {src_file}")
+    runner.invoke(tomte.cli, f"--dest {dst_path} {src_file}")
+    results = runner.invoke(tomte.cli, f"--dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
 
 
-def test_single_file_move(runner, src_file, tmp_path):
-    dest_file = tmp_path.joinpath("2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
+def test_single_file_move(runner, src_file, dst_path):
+    dest_file = dst_path.joinpath("2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
 
-    results = runner.invoke(tomte.cli, f"--move --dest {tmp_path} {src_file}")
+    results = runner.invoke(tomte.cli, f"--move --dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
