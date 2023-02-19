@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="tomte",
-    version="0.2.0",
+    version="0.5.0",
     py_modules=["tomte"],
     url="https://github.com/ithuna/tomte",
     license="Apache-2",
