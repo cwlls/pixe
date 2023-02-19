@@ -7,7 +7,7 @@ from PIL import Image
 from PIL import ImageColor
 import piexif
 
-DATA_DIR = pathlib.Path(os.path.dirname(__file__)).joinpath('data')
+DATA_DIR = pathlib.Path(os.path.dirname(__file__)).joinpath("data")
 
 
 @pytest.fixture
@@ -23,9 +23,9 @@ def dst_path():
 def pytest_configure():
     print("Setting up test files")
     src_dir = DATA_DIR.joinpath("src")
-    light_dir = src_dir.joinpath('light')
+    light_dir = src_dir.joinpath("light")
     light_dir.mkdir(parents=True)
-    dark_dir = src_dir.joinpath('dark')
+    dark_dir = src_dir.joinpath("dark")
     dark_dir.mkdir()
 
     # Create color files
@@ -43,7 +43,7 @@ def pytest_configure():
         date_idx += 1
 
     # create file with no exif date
-    create_img('chocolate', None, src_dir)
+    create_img("chocolate", None, src_dir)
 
 
 def pytest_unconfigure():
