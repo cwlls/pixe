@@ -7,6 +7,7 @@ import shutil
 
 import click
 import PIL.Image
+import piexif
 
 # Using a date that shouldn't appear in our collection, but that also isn't a common default.
 # In this case, Ansel Adams birthday.
@@ -48,6 +49,7 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
     :param image_path: the path to a specific image file
     :return: a datetime object representing the creation date of the image
     """
+    # TODO: use piexif: exif_dict['Exif'][piexif.ExifIFD.DateTimeOriginal]
     with PIL.Image.open(image_path, "r") as im:
         try:
             # attempt to extract the creation date from EXIF tag 36867
@@ -59,6 +61,28 @@ def _extract_date(image_path: pathlib.Path) -> datetime.datetime:
             cdate = ERROR_DATE
 
         return cdate
+
+
+def _new_tags(image_path: pathlib.Path, **kwargs) -> bytes:
+    """
+    Insert tags into image exif
+    :param image_path: path to a given image
+    :param owner: the camera owner
+    :param copyright: a copyright string
+    :return: a bytes object containing the new exif data
+    """
+    path_str = str(image_path)
+    exif_dict = piexif.load(path_str)
+
+    if "owner" in kwargs:
+        exif_dict["Exif"][0xA430] = kwargs.get("owner").encode("ascii")
+
+    if "copyright" in kwargs:
+        exif_dict["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode(
+            "ascii"
+        )
+
+    return piexif.dump(exif_dict)
 
 
 def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False):

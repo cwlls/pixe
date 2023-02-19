@@ -3,6 +3,7 @@ import datetime
 import os
 
 import pytest
+import piexif
 
 import tomte
 
@@ -26,6 +27,28 @@ def test_extract_date(src_file):
     extracted_date = tomte._extract_date(src_file)
 
     assert expected_date == extracted_date
+
+
+def test_new_tag_owner(src_file):
+    path_str = str(src_file)
+    orig_exif = piexif.load(path_str)
+
+    new_exif = piexif.load(tomte._new_tags(src_file, owner="Joe User"))
+
+    assert orig_exif != new_exif
+    assert new_exif["Exif"][0xA430] == b"Joe User"
+
+
+def test_new_tag_copyright(src_file):
+    path_str = str(src_file)
+    orig_exif = piexif.load(path_str)
+
+    new_exif = piexif.load(
+        tomte._new_tags(src_file, copyright="Copyright 2023 Joe User.")
+    )
+
+    assert orig_exif != new_exif
+    assert new_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2023 Joe User."
 
 
 def test_process_file(src_file, dst_path):
