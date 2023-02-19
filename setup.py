@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="tomte",
+    name="pixe",
     version="0.5.0",
-    py_modules=["tomte"],
-    url="https://github.com/ithuna/tomte",
+    py_modules=["pixe"],
+    url="https://github.com/ithuna/pixe",
     license="Apache-2",
     author="Chris Wells",
     author_email="chris@ithuna.com",
-    description="A digital house gnome to keep your files neat and tidy",
+    description="A digital helper to keep your files neat and tidy",
     include_package_data=True,
     install_requires=[
         "Click>=8.1.3,<8.2",
@@ -16,7 +16,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "tomte = tomte:cli",
+            "pixe = pixe:cli",
         ],
     },
 )

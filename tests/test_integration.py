@@ -6,7 +6,7 @@ import pytest
 from click.testing import CliRunner
 import piexif
 
-import tomte
+import pixe
 
 
 @pytest.fixture
@@ -24,20 +24,20 @@ def test_single_file(runner, src_file, dst_path):
         "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
-    results = runner.invoke(tomte.cli, f"--dest {dst_path} {src_file}")
+    results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
 
 
 def test_single_file_no_exist(runner, dst_path):
-    results = runner.invoke(tomte.cli, f"--dest {dst_path} this/file/really/does/not/exist")
+    results = runner.invoke(pixe.cli, f"--dest {dst_path} this/file/really/does/not/exist")
 
     assert results.exit_code == 2
 
 
 def test_single_file_bad(runner, dst_path):
-    results = runner.invoke(tomte.cli, f"--dest {dst_path} /dev/zero")
+    results = runner.invoke(pixe.cli, f"--dest {dst_path} /dev/zero")
 
     assert results.exit_code == 2
 
@@ -51,8 +51,8 @@ def test_single_file_duplicate(runner, src_file, dst_path):
         "3",
         "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg",
     )
-    runner.invoke(tomte.cli, f"--dest {dst_path} {src_file}")
-    results = runner.invoke(tomte.cli, f"--dest {dst_path} {src_file}")
+    runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
+    results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -61,7 +61,7 @@ def test_single_file_duplicate(runner, src_file, dst_path):
 def test_single_file_move(runner, src_file, dst_path):
     dest_file = dst_path.joinpath("2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
 
-    results = runner.invoke(tomte.cli, f"--move --dest {dst_path} {src_file}")
+    results = runner.invoke(pixe.cli, f"--move --dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -74,11 +74,11 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     old_checksum = dest_file.stem.split("_")[2]
 
     results = runner.invoke(
-        tomte.cli, f"--copy --owner 'Joe User' --copyright 'Copyright 2020 Joe User.' --dest {dst_path} {src_file}"
+        pixe.cli, f"--copy --owner 'Joe User' --copyright 'Copyright 2020 Joe User.' --dest {dst_path} {src_file}"
     )
     src_exif = piexif.load(str(src_file))
     dst_exif = piexif.load(str(dest_file))
-    new_checksum = tomte._calc_checksum(dest_file)
+    new_checksum = pixe._calc_checksum(dest_file)
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -89,21 +89,21 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
 
 
 def test_files_parallel(runner, src_path, dst_path):
-    results = runner.invoke(tomte.cli, f"--dest {dst_path} {src_path}")
+    results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
 
 
 def test_files_serial(runner, src_path, dst_path):
-    results = runner.invoke(tomte.cli, f"--serial --dest {dst_path} {src_path}")
+    results = runner.invoke(pixe.cli, f"--serial --dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
 
 
 def test_files_recurse(runner, src_path, dst_path):
-    results = runner.invoke(tomte.cli, f"--recurse --dest {dst_path} {src_path}")
+    results = runner.invoke(pixe.cli, f"--recurse --dest {dst_path} {src_path}")
 
     assert results.exit_code == 0
     assert dst_path.joinpath("2022", "2", "20220226_001821_476bf667385499407e1405f5909f88875dab1873.jpg").exists()
