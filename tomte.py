@@ -74,16 +74,16 @@ def _new_tags(image_path: pathlib.Path, **kwargs) -> bytes:
     path_str = str(image_path)
     exif_dict = piexif.load(path_str)
 
-    if "owner" in kwargs:
-        exif_dict["Exif"][0xA430] = kwargs.get("owner").encode("ascii")
+    if "owner" in kwargs and kwargs.get("owner") != '':
+        exif_dict["Exif"][0xa430] = kwargs.get("owner").encode("ascii")
 
-    if "copyright" in kwargs:
+    if "copyright" in kwargs and kwargs.get("copyright") != '':
         exif_dict["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
 
     return piexif.dump(exif_dict)
 
 
-def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False):
+def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False, **kwargs):
     cdate = _extract_date(file_path)
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = _calc_checksum(file_path)
@@ -97,16 +97,19 @@ def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False):
             str(cdate.month),
         )
     dest_path.mkdir(parents=True, exist_ok=True)
+    dest_file = dest_path.joinpath(filename.name)
 
     if move:
-        shutil.move(file_path, dest_path.joinpath(filename.name))
+        shutil.move(file_path, dest_file)
     else:
-        shutil.copy(file_path, dest_path.joinpath(filename.name))
+        shutil.copy(file_path, dest_file)
+
+    piexif.insert(_new_tags(dest_file, **kwargs), str(dest_file))
 
     return f"{file_path} -> {dest_path.joinpath(filename.name)}"
 
 
-def parallel_process_files(file_list: list, dest: str, move: bool):
+def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
     pool = multiprocessing.Pool()
     for file in file_list:
         pool.apply_async(
@@ -118,7 +121,7 @@ def parallel_process_files(file_list: list, dest: str, move: bool):
     pool.join()
 
 
-def serial_process_files(file_list: list, dest: str, move: bool):
+def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
     for file in file_list:
         print(_process_file(file, dest, move))
 
@@ -145,7 +148,17 @@ def serial_process_files(file_list: list, dest: str, move: bool):
     default=False,
     help="move files into DEST rather than copying (default: --copy)",
 )
-def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool):
+@click.option(
+    "--owner",
+    default='',
+    help="add camera owner to exif tags",
+)
+@click.option(
+    "--copyright",
+    default='',
+    help="add copyright string to exif tags"
+)
+def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs):
     file_path = pathlib.Path(src)
     if file_path.exists():
         if file_path.is_dir():
@@ -158,12 +171,12 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool):
                     file_list.append(img)
 
             if parallel:
-                parallel_process_files(file_list, dest, move)
+                parallel_process_files(file_list, dest, move, **kwargs)
             else:
-                serial_process_files(file_list, dest, move)
+                serial_process_files(file_list, dest, move, **kwargs)
 
         elif file_path.is_file():
-            print(_process_file(file_path, dest, move))
+            print(_process_file(file_path, dest, move, **kwargs))
         else:
             raise click.exceptions.BadParameter(src)
     else:

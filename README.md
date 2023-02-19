@@ -11,9 +11,12 @@ A digital house gnome to keep your files neat and tidy
 Usage: tomte [OPTIONS] SRC
 
 Options:
-  --dest TEXT                 desired destination
-  --recurse / --no-recurse    recurse into subdirs (default: --no-recurse)
-  --parallel / --no-parallel  process files in parallel (default: --parallel)
-  --help                      Show this message and exit.
-
+  -d, --dest TEXT              desired destination
+  -r, --recurse                recurse into sub-directories (default: off)
+  --parallel / --serial        process files in parallel (default: --parallel)
+  --move, --mv / --copy, --cp  move files into DEST rather than copying
+                               (default: --copy)
+  --owner TEXT                 add camera owner to exif tags
+  --copyright TEXT             add copyright string to exif tags
+  --help                       Show this message and exit.
 ```
