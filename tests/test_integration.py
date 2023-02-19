@@ -73,7 +73,9 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     dest_file = dst_path.joinpath("2020", "12", "20201209_015501_a810b8552a4acf4e13164a74aab3016e583cc93e.jpg")
     old_checksum = dest_file.stem.split("_")[2]
 
-    results = runner.invoke(tomte.cli, f"--copy --owner 'Joe User' --dest {dst_path} {src_file}")
+    results = runner.invoke(
+        tomte.cli, f"--copy --owner 'Joe User' --copyright 'Copyright 2020 Joe User.' --dest {dst_path} {src_file}"
+    )
     src_exif = piexif.load(str(src_file))
     dst_exif = piexif.load(str(dest_file))
     new_checksum = tomte._calc_checksum(dest_file)
@@ -81,7 +83,8 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     assert results.exit_code == 0
     assert dest_file.exists()
     assert src_exif != dst_exif
-    assert dst_exif["Exif"][0xa430] == b"Joe User"
+    assert dst_exif["Exif"][0xA430] == b"Joe User"
+    assert dst_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2020 Joe User."
     assert old_checksum == new_checksum
 
 
