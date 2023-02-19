@@ -36,7 +36,7 @@ def test_new_tag_owner(src_file):
     new_exif = piexif.load(tomte._new_tags(src_file, owner="Joe User"))
 
     assert orig_exif != new_exif
-    assert new_exif["Exif"][0xA430] == b"Joe User"
+    assert new_exif["Exif"][0xa430] == b"Joe User"
 
 
 def test_new_tag_copyright(src_file):
