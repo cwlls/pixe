@@ -20,3 +20,27 @@ Options:
   --copyright TEXT             add copyright string to exif tags
   --help                       Show this message and exit.
 ```
+
+### Options
+
+#### -d, --dest TEXT
+The base directory of where you want the processed files to end up. If this option is not specified, 
+the current working directory will be used.
+
+#### -r, --recurse
+`pixe` will recurse into any subdirectories it finds beneath SRC. The default is to not recurse.
+
+#### --parallel / --serial
+Should `pixe` process multiple files at once, in parallel using multiprocessing using all 
+available cores. If `--serial` is chosen one file will be processed at a time. The default is
+to process files in parallel if there is more than one file specified for processing.
+
+#### --move, --mv / --copy, --cp
+By default, `pixe` will copy files into DEST and leave the source files untouched. This can be
+overridden by specifying `--move`.
+
+#### --owner
+A string which will be inserted into the CameraOwnerName EXIF tag [0xa430]
+
+#### --copyright
+A string which will be inserted into the Copyright EXIF tag [0x8298]
