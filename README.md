@@ -1,7 +1,30 @@
 # pixe
 [![flake8](https://github.com/ithuna/pixe/actions/workflows/flake8.yml/badge.svg)](https://github.com/ithuna/pixe/actions/workflows/flake8.yml) [![pytest](https://github.com/ithuna/pixe/actions/workflows/pytest.yml/badge.svg)](https://github.com/ithuna/pixe/actions/workflows/pytest.yml) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A digital helper to keep your files neat and tidy
+A digital helper to keep your files neat and tidy.
+
+In its most basic invocation: `pixe <directory with files>` `pixe` will copy all JPG files from a source directory into a new set of subdirectories based on capture date. These files will also be renamed based on said capture date and a calculated SHA1 hash.
+
+```
+dirA
+├── IMG_0001.jpg
+├── IMG_0002.jpg
+└── IMG_1234.jpg
+```
+
+If I were to run `pixe` from within a second directory `dirB` with the aforementioned invocation, `dirB` would look like this:
+
+```
+dirB
+├── 2021
+│   └── 12
+│       └── 20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg
+└── 2022
+    ├── 2
+    │   └── 20220202_123101_447d306060631570b7713ea48e74103c68eab0a3.jpg
+    └── 3
+        └── 20220316_321c7d6f5be8739a8974e4c3512e3226eb6704a7.jpg
+```
 
 ## Installation
 `$ pip install pixe`
