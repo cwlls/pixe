@@ -5,6 +5,16 @@ A digital helper to keep your files neat and tidy.
 
 In its most basic invocation: `pixe <directory with files>` `pixe` will copy all JPG files from a source directory into a new set of subdirectories based on capture date. These files will also be renamed based on said capture date and a calculated SHA1 hash.
 
+### subdirectories
+
+Subdirectories will be created, as needed, in the destination folder to match the creation date of the files being processed and will take the following form: `YYYY/M`
+
+### renamed files
+Each file (whether moved or copied) will have a new name applied to it based on the following pattern:
+`YYYYMMDD_hhmmss_<SHA1SUM>.jpg`
+
+The datetime info is taken from the image capture datetime. The SHA1SUM is calculated based on the image data only (does not include image metadata).
+
 ```
 dirA
 ├── IMG_0001.jpg
@@ -12,7 +22,7 @@ dirA
 └── IMG_1234.jpg
 ```
 
-If I were to run `pixe` from within a second directory `dirB` with the aforementioned invocation, `dirB` would look like this:
+If I were to run `pixe` from within a second directory, `dirB` with the aforementioned invocation, `dirB` would end up looking like this:
 
 ```
 dirB
@@ -23,7 +33,7 @@ dirB
     ├── 2
     │   └── 20220202_123101_447d306060631570b7713ea48e74103c68eab0a3.jpg
     └── 3
-        └── 20220316_321c7d6f5be8739a8974e4c3512e3226eb6704a7.jpg
+        └── 20220316_232122_321c7d6f5be8739a8974e4c3512e3226eb6704a7.jpg
 ```
 
 ## Installation
