@@ -17,7 +17,7 @@ The datetime info is taken from the image capture datetime. The SHA1SUM is calcu
 
 ### example
 
-Given a directory of images, `dirA` which loo
+Given a directory of images, `dirA` which contains a few image files:
 ```
 dirA
 ├── IMG_0001.jpg
