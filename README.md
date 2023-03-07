@@ -15,6 +15,9 @@ Each file (whether moved or copied) will have a new name applied to it based on 
 
 The datetime info is taken from the image capture datetime. The SHA1SUM is calculated based on the image data only (does not include image metadata).
 
+### example
+
+Given a directory of images, `dirA` which loo
 ```
 dirA
 ├── IMG_0001.jpg
@@ -22,7 +25,7 @@ dirA
 └── IMG_1234.jpg
 ```
 
-If I were to run `pixe` from within a second directory, `dirB` with the aforementioned invocation, `dirB` would end up looking like this:
+Running `pixe /path/to/dirA` from within a second directory, `dirB` would result in the following directory structure:
 
 ```
 dirB
