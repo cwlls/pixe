@@ -98,7 +98,7 @@ def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False, **
     filename = file_path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file_path.suffix.lower())
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
 
-    # if the a similarly named file exists at the destination it means we have a duplicate file
+    # if a similarly named file exists at the destination it means we have a duplicate file
     # prepend 'dups' and the START_TIME of this move process to the destination filepath
     if dest_path.joinpath(filename.name).exists():
         dest_path = pathlib.Path(dest_str).joinpath(
