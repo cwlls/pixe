@@ -4,6 +4,9 @@ import datetime
 import pathlib
 import multiprocessing
 import shutil
+import re
+import os
+import fnmatch
 
 import click
 import PIL.Image
@@ -189,15 +192,17 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
 )
 def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs):
     file_path = pathlib.Path(src)
+    # jpg pattern (case insensitive)
+    file_re = re.compile(fnmatch.translate("*.jpg"), re.IGNORECASE)
     if file_path.exists():
         if file_path.is_dir():
             file_list = []
-            if recurse:
-                for img in file_path.rglob("*.jpg"):
-                    file_list.append(img)
-            else:
-                for img in file_path.glob("*.jpg"):
-                    file_list.append(img)
+            for root, dirs, files in os.walk(file_path, topdown=True):
+                for file in files:
+                    if file_re.match(file):
+                        file_list.append(pathlib.Path(root).joinpath(file))
+                if not recurse:
+                    break
 
             if parallel:
                 parallel_process_files(file_list, dest, move, **kwargs)
