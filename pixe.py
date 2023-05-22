@@ -136,6 +136,7 @@ def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
         pool.apply_async(
             _process_file,
             args=(file, dest, move),
+            kwds=kwargs,
             callback=(lambda res: print(res, flush=True)),
         )
     pool.close()
@@ -151,7 +152,7 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
     :param kwargs: additional options (likely exif tags)
     """
     for file in file_list:
-        print(_process_file(file, dest, move))
+        print(_process_file(file, dest, move, **kwargs))
 
 
 @click.command()
