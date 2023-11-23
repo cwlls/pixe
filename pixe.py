@@ -13,6 +13,9 @@ import typing
 import click
 import PIL.Image
 import piexif
+
+import filetypes
+
 # setup logging
 LOGGER = logging.getLogger(__name__)
 
@@ -147,6 +150,7 @@ def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
             args=(file, dest, move),
             kwds=kwargs,
             callback=(lambda res: print(res, flush=True)),
+            error_callback=(lambda res: print(res, flush=True))
         )
     pool.close()
     pool.join()
@@ -162,6 +166,22 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
     """
     for file in file_list:
         print(_process_file(file, dest, move, **kwargs))
+
+
+class PixeApp:
+    """
+    a class for housing application information
+    """
+    def __init__(self):
+        self._extensions = {}
+
+    @property
+    def extensions(self) -> list[str]:
+        return list(self._extensions.keys())
+
+    def add_extensions(self, new_extensions: list, factory_func: typing.Callable):
+        for ext in new_extensions:
+            self._extensions[ext] = factory_func
 
 
 @click.command()
@@ -198,6 +218,14 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
     help="add copyright string to exif tags"
 )
 def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs):
+    app = PixeApp()
+
+    global filetypes
+    filetypes.APP = app
+
+    import filetypes.image_file
+    LOGGER.info(f"loaded extensions: {app.extensions}")
+
     file_path = pathlib.Path(src)
     # jpg pattern (case insensitive)
     file_re = re.compile(fnmatch.translate("*.jpg"), re.IGNORECASE)
