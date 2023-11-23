@@ -6,25 +6,30 @@ import pytest
 import piexif
 
 import pixe
+import filetypes
+
+global filetypes
+filetypes.APP = pixe.PixeApp()
 
 
 @pytest.fixture
-def src_file(src_path):
-    return src_path.joinpath("red.jpg")
+def src_img_file(src_path):
+    import filetypes.image_file
+    return filetypes.image_file.ImageFile(src_path.joinpath("red.jpg"))
 
 
-def test_calc_checksum(src_file):
+def test_img_file_checksum(src_img_file):
     expected_checksum = "1cdef99be68dbdea159ec6fa8469b41ca13e9e6f"
 
-    calculated_checksum = pixe._calc_checksum(src_file)
+    calculated_checksum = src_img_file.checksum
 
     assert expected_checksum == calculated_checksum
 
 
-def test_extract_date(src_file):
+def test_img_file_create_date(src_img_file):
     expected_date = datetime.datetime(2020, 3, 21, 3, 13, 12)
 
-    extracted_date = pixe._extract_date(src_file)
+    extracted_date = src_img_file.create_date
 
     assert expected_date == extracted_date
 
