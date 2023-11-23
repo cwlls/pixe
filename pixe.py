@@ -7,10 +7,13 @@ import shutil
 import re
 import os
 import fnmatch
+import typing
 
 import click
 import PIL.Image
 import piexif
+# setup logging
+LOGGER = logging.getLogger(__name__)
 
 # Using a date that shouldn't appear in our collection, but that also isn't a common default.
 # In this case, Ansel Adams birthday.
