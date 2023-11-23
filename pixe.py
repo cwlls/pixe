@@ -7,6 +7,7 @@ import shutil
 import re
 import os
 import fnmatch
+import logging
 import typing
 
 import click
