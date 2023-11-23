@@ -49,7 +49,7 @@ class ImageFile(filetypes.PixeFile):
         return hasher.hexdigest()
 
     @property
-    def create_date(self) -> datetime.datetime:
+    def creation_date(self) -> datetime.datetime:
         """
         Extract the file creation date from EXIF information.
 
