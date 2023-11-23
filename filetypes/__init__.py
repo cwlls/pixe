@@ -41,7 +41,7 @@ class PixeFile:
 
     # helper functions
     @property
-    def create_date(self) -> datetime.datetime:
+    def creation_date(self) -> datetime.datetime:
         raise NotImplementedError
 
     @property
