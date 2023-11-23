@@ -7,7 +7,6 @@ import shutil
 import re
 import os
 import fnmatch
-import pkg_resources
 
 import click
 import PIL.Image
@@ -20,8 +19,8 @@ ERROR_DATE = datetime.datetime(1902, 2, 20)
 # store a datetime of when this run began
 START_TIME = datetime.datetime.now()
 
-# Package introspection
-PKG_RESOURCES = pkg_resources.get_distribution('pixe')
+__version__ = "0.5.6"
+
 
 def _calc_checksum(image_path: pathlib.Path, block_size: int = 8192) -> str:
     """
@@ -163,7 +162,7 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
 
 @click.command()
 @click.argument("src")
-@click.version_option(PKG_RESOURCES.version, '-v', '--version')
+@click.version_option(__version__, '-v', '--version')
 @click.option("--dest", "-d", default=".", help="desired destination")
 @click.option(
     "--recurse",
