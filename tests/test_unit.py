@@ -70,12 +70,13 @@ def test_process_file(src_img_file, dst_path):
     assert expected_file.exists()
 
 
-def test_process_file_no_date(src_path, dst_path):
+def test_process_img_file_no_date(src_path, dst_path):
     src_file = src_path.joinpath("chocolate.jpg")
     new_file = pathlib.Path(dst_path).joinpath(
         "1902", "2", "19020220_000000_2a00d2b48e39f63cf834d4f7c50b2c1aa3b43a9c.jpg"
     )
+    test_file = filetypes.image_file.ImageFile(src_file)
 
-    pixe._process_file(src_file, dst_path)
+    pixe.process_file(test_file, dst_path)
 
     assert new_file.exists()
