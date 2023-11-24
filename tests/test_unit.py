@@ -60,12 +60,12 @@ def test_img_file_add_metadata_copyright(src_img_file_path):
     assert new_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2023 Joe User."
 
 
-def test_process_file(src_file, dst_path):
+def test_process_file(src_img_file, dst_path):
     expected_file = pathlib.Path(dst_path).joinpath(
         "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
-    pixe._process_file(src_file, dst_path)
+    pixe.process_file(src_img_file, dst_path)
 
     assert expected_file.exists()
 

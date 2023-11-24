@@ -95,19 +95,19 @@ def _new_tags(image_path: pathlib.Path, **kwargs) -> bytes:
     return piexif.dump(exif_dict)
 
 
-def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False, **kwargs) -> str:
+def process_file(file: filetypes.PixeFile, dest_str: str, move: bool = False, **kwargs) -> str:
     """
     process a single file
-    :param file_path: the path to the file to process
+    :param file: a file to process
     :param dest_str: where should the processed files be moved/copied to
     :param move: should the file be moved or copied
     :param kwargs: additional options (likely exif tags)
     :return: a string representing the operation that has been performed
     """
-    cdate = _extract_date(file_path)
+    cdate = file.creation_date
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
-    hash_str = _calc_checksum(file_path)
-    filename = file_path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file_path.suffix.lower())
+    hash_str = file.checksum
+    filename = file.path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file.path.suffix.lower())
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
 
     # if a similarly named file exists at the destination it means we have a duplicate file
@@ -122,9 +122,9 @@ def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False, **
     dest_file = dest_path.joinpath(filename.name)
 
     if move:
-        shutil.move(file_path, dest_file)
+        shutil.move(file.path, dest_file)
     else:
-        shutil.copy(file_path, dest_file)
+        shutil.copy(file.path, dest_file)
 
     # pass **kwargs to _new_tags so that known tags can be inserted
     # into the file at its destination so we don't muck up the src_file
@@ -132,7 +132,7 @@ def _process_file(file_path: pathlib.Path, dest_str: str, move: bool = False, **
     piexif.insert(_new_tags(dest_file, **kwargs), str(dest_file))
 
     # return a string showing what file has been moved, so it can be displayed
-    return f"{file_path} -> {dest_path.joinpath(filename.name)}"
+    return f"{file.path} -> {dest_path.joinpath(filename.name)}"
 
 
 def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
@@ -146,7 +146,7 @@ def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
     pool = multiprocessing.Pool()
     for file in file_list:
         pool.apply_async(
-            _process_file,
+            process_file,
             args=(file, dest, move),
             kwds=kwargs,
             callback=(lambda res: print(res, flush=True)),
@@ -165,7 +165,7 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
     :param kwargs: additional options (likely exif tags)
     """
     for file in file_list:
-        print(_process_file(file, dest, move, **kwargs))
+        print(process_file(file, dest, move, **kwargs))
 
 
 class PixeApp:
@@ -245,7 +245,7 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
                 serial_process_files(file_list, dest, move, **kwargs)
 
         elif file_path.is_file():
-            print(_process_file(file_path, dest, move, **kwargs))
+            print(process_file(file_path, dest, move, **kwargs))
         else:
             raise click.exceptions.BadParameter(src)
     else:
