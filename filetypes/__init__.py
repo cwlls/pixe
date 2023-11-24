@@ -48,5 +48,13 @@ class PixeFile:
     def checksum(self, block_size: int = 8192) -> str:
         raise NotImplementedError
 
-    def _set_metadata(self, tag: str, value: str):
+    @classmethod
+    def add_metadata(cls, file: pathlib.Path, tag: str, value: str):
+        """
+        Add a metadata tag to a given file.
+
+        :param file: the file to be acted upon
+        :param tag: a supported tag name
+        :param value: a string to be written to tag
+        """
         raise NotImplementedError
