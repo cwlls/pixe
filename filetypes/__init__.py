@@ -49,7 +49,7 @@ class PixeFile:
         raise NotImplementedError
 
     @classmethod
-    def add_metadata(cls, file: pathlib.Path, tag: str, value: str):
+    def add_metadata(cls, file: pathlib.Path, **kwargs):
         """
         Add a metadata tag to a given file.
 

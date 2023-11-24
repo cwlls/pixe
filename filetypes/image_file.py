@@ -71,17 +71,16 @@ class ImageFile(filetypes.PixeFile):
             return cdate
 
     @classmethod
-    def add_metadata(cls, file: pathlib.Path, tag: str, value: str) -> bytes:
+    def add_metadata(cls, file: pathlib.Path, **kwargs) -> bytes:
         assert file.suffix.lstrip('.').lower() in cls.FILE_EXTENSIONS
-        assert tag in cls.ALLOWED_TAGS
-        assert isinstance(value, str)
+        for key in kwargs.keys():
+            assert key in cls.ALLOWED_TAGS
 
         exif_data = piexif.load(str(file))
 
-        match tag:
-            case 'copyright':
-                exif_data["0th"][piexif.ImageIFD.Copyright] = value.encode('ascii')
-            case 'owner':
-                exif_data["Exif"][0xa430] = value.encode("ascii")
+        if "owner" in kwargs and kwargs.get("owner") != '':
+            exif_data["Exif"][0xa430] = kwargs.get("owner").encode("ascii")
+        if "copyright" in kwargs and kwargs.get("copyright") != '':
+            exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
 
         return piexif.dump(exif_data)
