@@ -2,6 +2,7 @@ import logging
 import datetime
 import hashlib
 import io
+import pathlib
 import fnmatch
 
 import PIL.Image
@@ -19,6 +20,7 @@ class ImageFile(filetypes.PixeFile):
     """
     NAME = 'ImageFile'
     FILE_EXTENSIONS = ["jpg", "jpeg"]
+    ALLOWED_TAGS = ["copyright", "owner"]
 
     def __init__(self, path: str):
         super().__init__(path)
@@ -67,3 +69,19 @@ class ImageFile(filetypes.PixeFile):
                 cdate = self.ERROR_DATE
 
             return cdate
+
+    @classmethod
+    def add_metadata(cls, file: pathlib.Path, tag: str, value: str) -> bytes:
+        assert file.suffix.lstrip('.').lower() in cls.FILE_EXTENSIONS
+        assert tag in cls.ALLOWED_TAGS
+        assert isinstance(value, str)
+
+        exif_data = piexif.load(str(file))
+
+        match tag:
+            case 'copyright':
+                exif_data["0th"][piexif.ImageIFD.Copyright] = value.encode('ascii')
+            case 'owner':
+                exif_data["Exif"][0xa430] = value.encode("ascii")
+
+        return piexif.dump(exif_data)
