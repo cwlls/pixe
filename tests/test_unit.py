@@ -44,8 +44,7 @@ def test_img_file_add_metadata_owner(src_img_file_path):
     orig_exif = piexif.load(path_str)
 
     new_exif = piexif.load(filetypes.image_file.ImageFile.add_metadata(src_img_file_path,
-                                                                       'owner',
-                                                                       'Joe User'))
+                                                                       owner='Joe User'))
     assert orig_exif != new_exif
     assert new_exif["Exif"][0xa430] == b"Joe User"
 
@@ -55,8 +54,7 @@ def test_img_file_add_metadata_copyright(src_img_file_path):
     orig_exif = piexif.load(path_str)
 
     new_exif = piexif.load(filetypes.image_file.ImageFile.add_metadata(src_img_file_path,
-                                                                       'copyright',
-                                                                       'Copyright 2023 Joe User.'))
+                                                                       copyright='Copyright 2023 Joe User.'))
 
     assert orig_exif != new_exif
     assert new_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2023 Joe User."
