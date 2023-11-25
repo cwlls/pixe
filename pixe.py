@@ -1,18 +1,11 @@
-import hashlib
-import io
 import datetime
 import pathlib
 import multiprocessing
 import shutil
-import re
 import os
-import fnmatch
 import logging
-import typing
 
 import click
-import PIL.Image
-import piexif
 
 import filetypes
 
