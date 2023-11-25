@@ -19,8 +19,7 @@ class PixeFile:
         else:
             raise ValueError
 
-    @property
-    def extension_regex(self) -> re.Pattern:
+    def get_ext_regex(self) -> re.Pattern:
         lst = [fnmatch.translate(f"*.{ext}") for ext in self._filetypes]
         pattern_str = "|".join(lst)
 
