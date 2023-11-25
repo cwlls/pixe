@@ -9,6 +9,9 @@ import click
 
 import filetypes
 
+# create global reference to filetypes factory
+PIXE_FILE = filetypes.factory
+
 # setup logging
 LOGGER = logging.getLogger(__name__)
 
@@ -134,8 +137,8 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
             file_list = []
             for root, dirs, files in os.walk(file_path, topdown=True):
                 for file in files:
-                    if filetypes.factory.get_ext_regex().match(file):
-                        file_list.append(filetypes.factory.get_file_obj(pathlib.Path(file)))
+                    if PIXE_FILE.get_ext_regex().match(file):
+                        file_list.append(PIXE_FILE.get_file_obj(pathlib.Path(file)))
                 if not recurse:
                     break
 
@@ -145,7 +148,7 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
                 serial_process_files(file_list, dest, move, **kwargs)
 
         elif file_path.is_file():
-            print(process_file(filetypes.factory.get_file_obj(file_path), dest, move, **kwargs))
+            print(process_file(PIXE_FILE.get_file_obj(file_path), dest, move, **kwargs))
         else:
             raise click.exceptions.BadParameter(src)
     else:
