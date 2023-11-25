@@ -116,7 +116,6 @@ def process_file(file: filetypes.PixeFile, dest_str: str, move: bool = False, **
         dest_path = pathlib.Path(dest_str).joinpath(
             f"dups/{START_TIME.strftime('%Y%m%d_%H%M%S')}",
             str(cdate.year),
-            str(cdate.month),
         )
     dest_path.mkdir(parents=True, exist_ok=True)
     dest_file = dest_path.joinpath(filename.name)

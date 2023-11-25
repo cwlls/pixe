@@ -48,7 +48,6 @@ def test_single_file_duplicate(runner, src_file, dst_path):
         "dups",
         import_time.strftime("%Y%m%d_%H%M%S"),
         "2020",
-        "3",
         "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg",
     )
     runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
