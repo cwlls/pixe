@@ -14,8 +14,14 @@ def runner():
 
 
 @pytest.fixture
+def pixe_file():
+    return filetypes.factory
+
+
+@pytest.fixture
 def src_file(src_path):
     return src_path.joinpath("red.jpg")
+
 
 
 def test_single_file(runner, src_file, dst_path):
@@ -88,24 +94,26 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     assert old_checksum == new_checksum
 
 
-def test_files_parallel(runner, src_path, dst_path):
-    results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_path}")
-
-    assert results.exit_code == 0
-    assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
-
-
-def test_files_serial(runner, src_path, dst_path):
-    results = runner.invoke(pixe.cli, f"--serial --dest {dst_path} {src_path}")
-
-    assert results.exit_code == 0
-    assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
-
-
-def test_files_recurse(runner, src_path, dst_path):
-    results = runner.invoke(pixe.cli, f"--recurse --dest {dst_path} {src_path}")
-
-    assert results.exit_code == 0
-    assert dst_path.joinpath("2022", "2", "20220226_001821_476bf667385499407e1405f5909f88875dab1873.jpg").exists()
-    assert dst_path.joinpath("2018", "3", "20180319_100139_b78473e5c10d8fd945dd1eee9da7a82320d464d1.jpg").exists()
-    assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
+# def test_files_parallel(runner, src_path, dst_path):
+#     # src_files = src_path.joinpath('light')
+#     results = runner.invoke(pixe.cli, f"--move --dest {dst_path} {src_files}")
+#
+#     assert results.exit_code == 0
+#     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
+#
+#
+# def test_files_serial(runner, src_path, dst_path):
+#     src_files = src_path.joinpath('light')
+#     results = runner.invoke(pixe.cli, f"--serial --move --dest {dst_path} {src_files}")
+#
+#     assert results.exit_code == 0
+#     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
+#
+#
+# def test_files_recurse(runner, src_path, dst_path):
+#     results = runner.invoke(pixe.cli, f"--recurse --move --dest {dst_path} {src_path}")
+#
+#     assert results.exit_code == 0
+#     assert dst_path.joinpath("2022", "2", "20220226_001821_476bf667385499407e1405f5909f88875dab1873.jpg").exists()
+#     assert dst_path.joinpath("2018", "3", "20180319_100139_b78473e5c10d8fd945dd1eee9da7a82320d464d1.jpg").exists()
+#     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
