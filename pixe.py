@@ -201,17 +201,7 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
     help="add copyright string to exif tags"
 )
 def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs):
-    app = PixeApp()
-
-    global filetypes
-    filetypes.APP = app
-
-    import filetypes.image_file
-    LOGGER.info(f"loaded extensions: {app.extensions}")
-
     file_path = pathlib.Path(src)
-    # jpg pattern (case insensitive)
-    file_re = re.compile(fnmatch.translate("*.jpg"), re.IGNORECASE)
     if file_path.exists():
         if file_path.is_dir():
             file_list = []
