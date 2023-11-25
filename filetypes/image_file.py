@@ -9,6 +9,7 @@ import piexif
 
 import filetypes
 
+PIXE_FILE = filetypes.factory
 LOGGER = logging.getLogger(__name__)
 
 
@@ -19,7 +20,7 @@ class ImageFile:
     FILE_EXTENSIONS = ["jpg", "jpeg"]
     ALLOWED_TAGS = ["copyright", "owner"]
 
-    def __init__(self, path: str):
+    def __init__(self, path: pathlib.Path):
         self.path = path
 
     # helpers
@@ -89,4 +90,4 @@ class ImageFile:
 
 # add ImageFile extensions and creator method to the PixeFile factory
 for ext in ImageFile.FILE_EXTENSIONS:
-    filetypes.factory.register_filetype(ext, ImageFile)
+    PIXE_FILE.register_filetype(ext, ImageFile)
