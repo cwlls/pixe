@@ -218,7 +218,7 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
                 serial_process_files(file_list, dest, move, **kwargs)
 
         elif file_path.is_file():
-            print(process_file(file_path, dest, move, **kwargs))
+            print(process_file(filetypes.factory.get_file_obj(file_path), dest, move, **kwargs))
         else:
             raise click.exceptions.BadParameter(src)
     else:
