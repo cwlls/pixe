@@ -1,6 +1,8 @@
 import typing
 import pathlib
 import datetime
+import re
+import fnmatch
 
 
 class PixeFile:
@@ -16,6 +18,13 @@ class PixeFile:
             return creator(path)
         else:
             raise ValueError
+
+    @property
+    def extension_regex(self) -> re.Pattern:
+        lst = [fnmatch.translate(f"*.{ext}") for ext in self._filetypes]
+        pattern_str = "|".join(lst)
+
+        return re.compile(pattern_str, re.IGNORECASE)
 
 
 # Using a date that shouldn't appear in our collection, but that also isn't a common default.
