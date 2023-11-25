@@ -25,7 +25,7 @@ START_TIME = datetime.datetime.now()
 __version__ = "0.5.6"
 
 
-def process_file(file: filetypes.PixeFile, dest_str: str, move: bool = False, **kwargs) -> str:
+def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -> str:
     """
     process a single file
     :param file: a file to process
@@ -55,8 +55,8 @@ def process_file(file: filetypes.PixeFile, dest_str: str, move: bool = False, **
     else:
         shutil.copy(file.path, dest_file)
 
-    # pass **kwargs to _new_tags so that known tags can be inserted
-    # into the file at its destination so we don't muck up the src_file
+    # pass **kwargs to add_metadata() so that known tags can be inserted
+    # into the file at its destination, so we don't muck up the src_file
     # if a copy operation has been requested.
     file.add_metadata(dest_file, **kwargs)
 
@@ -64,7 +64,7 @@ def process_file(file: filetypes.PixeFile, dest_str: str, move: bool = False, **
     return f"{file.path} -> {dest_path.joinpath(filename.name)}"
 
 
-def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
+def parallel_process_files(file_list: list[filetypes], dest: str, move: bool, **kwargs):
     """
     process a list of files in parallel
     :param file_list: a list of files to be processed
@@ -85,7 +85,7 @@ def parallel_process_files(file_list: list, dest: str, move: bool, **kwargs):
     pool.join()
 
 
-def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
+def serial_process_files(file_list: list[filetypes], dest: str, move: bool, **kwargs):
     """
     process a list of files serially
     :param file_list: a list of files to be processed
