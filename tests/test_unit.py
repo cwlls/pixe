@@ -8,15 +8,10 @@ import piexif
 import pixe
 import filetypes
 
-global filetypes
-filetypes.APP = pixe.PixeApp()
-import filetypes.image_file
-
 
 @pytest.fixture
 def src_img_file(src_path):
-    return filetypes.image_file.ImageFile(src_path.joinpath("red.jpg"))
-
+    return filetypes.factory.get_file_obj("jpg", src_path.joinpath("red.jpg"))
 
 @pytest.fixture
 def src_img_file_path(src_path):
