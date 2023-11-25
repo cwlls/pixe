@@ -207,8 +207,8 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
             file_list = []
             for root, dirs, files in os.walk(file_path, topdown=True):
                 for file in files:
-                    if file_re.match(file):
-                        file_list.append(pathlib.Path(root).joinpath(file))
+                    if filetypes.factory.get_ext_regex().match(file):
+                        file_list.append(filetypes.factory.get_file_obj(pathlib.Path(file)))
                 if not recurse:
                     break
 
