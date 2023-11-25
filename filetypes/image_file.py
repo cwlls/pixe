@@ -68,7 +68,7 @@ class ImageFile:
             return cdate
 
     @classmethod
-    def add_metadata(cls, file: pathlib.Path, **kwargs) -> bytes:
+    def add_metadata(cls, file: pathlib.Path, **kwargs):
         assert file.suffix.lstrip('.').lower() in cls.FILE_EXTENSIONS
         for key in kwargs.keys():
             assert key in cls.ALLOWED_TAGS
@@ -80,7 +80,7 @@ class ImageFile:
         if "copyright" in kwargs and kwargs.get("copyright") != '':
             exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
 
-        return piexif.dump(exif_data)
+        piexif.insert(piexif.dump(exif_data), str(file))
 
 
 # add ImageFile extensions and creator method to the PixeFile factory
