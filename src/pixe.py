@@ -15,10 +15,6 @@ PIXE_FILE = filetypes.factory
 # setup logging
 LOGGER = logging.getLogger(__name__)
 
-# Using a date that shouldn't appear in our collection, but that also isn't a common default.
-# In this case, Ansel Adams birthday.
-ERROR_DATE = datetime.datetime(1902, 2, 20)
-
 # store a datetime of when this run began
 START_TIME = datetime.datetime.now()
 
