@@ -11,8 +11,8 @@ class PixeFile:
     def register_filetype(self, extension: str, creator: typing.Callable):
         self._filetypes[extension] = creator
 
-    def get_file_obj(self, extension: str, path: pathlib.Path) -> typing.Callable:
-        if creator := self._filetypes.get(extension):
+    def get_file_obj(self, path: pathlib.Path) -> typing.Callable:
+        if creator := self._filetypes.get(path.suffix.lower().lstrip('.')):
             return creator(path)
         else:
             raise ValueError
