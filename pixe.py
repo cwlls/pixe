@@ -168,22 +168,6 @@ def serial_process_files(file_list: list, dest: str, move: bool, **kwargs):
         print(process_file(file, dest, move, **kwargs))
 
 
-class PixeApp:
-    """
-    a class for housing application information
-    """
-    def __init__(self):
-        self._extensions = {}
-
-    @property
-    def extensions(self) -> list[str]:
-        return list(self._extensions.keys())
-
-    def add_extensions(self, new_extensions: list, factory_func: typing.Callable):
-        for ext in new_extensions:
-            self._extensions[ext] = factory_func
-
-
 @click.command()
 @click.argument("src")
 @click.version_option(__version__, '-v', '--version')
