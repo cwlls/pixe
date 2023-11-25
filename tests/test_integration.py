@@ -4,9 +4,9 @@ import datetime
 
 import pytest
 from click.testing import CliRunner
-import piexif
 
 import pixe
+import filetypes
 
 
 @pytest.fixture
@@ -69,18 +69,20 @@ def test_single_file_move(runner, src_file, dst_path):
 
 def test_single_file_copy_tagged(runner, src_path, dst_path):
     src_file = src_path.joinpath("dark/darkturquoise.jpg")
-    dest_file = dst_path.joinpath("2020", "12", "20201209_015501_a810b8552a4acf4e13164a74aab3016e583cc93e.jpg")
-    old_checksum = dest_file.stem.split("_")[2]
+    dst_file = dst_path.joinpath("2020", "12", "20201209_015501_a810b8552a4acf4e13164a74aab3016e583cc93e.jpg")
+    src_file_obj = filetypes.factory.get_file_obj(src_file)
+    dst_file_obj = filetypes.factory.get_file_obj(dst_file)
 
     results = runner.invoke(
         pixe.cli, f"--copy --owner 'Joe User' --copyright 'Copyright 2020 Joe User.' --dest {dst_path} {src_file}"
     )
-    src_exif = piexif.load(str(src_file))
-    dst_exif = piexif.load(str(dest_file))
-    new_checksum = pixe._calc_checksum(dest_file)
+    src_exif = src_file_obj.metadata
+    dst_exif = dst_file_obj.metadata
+    old_checksum = src_file_obj.checksum
+    new_checksum = dst_file_obj.checksum
 
     assert results.exit_code == 0
-    assert dest_file.exists()
+    assert dst_file.exists()
     assert src_exif != dst_exif
     assert dst_exif["Exif"][0xA430] == b"Joe User"
     assert dst_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2020 Joe User."

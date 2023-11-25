@@ -67,6 +67,10 @@ class ImageFile:
 
             return cdate
 
+    @property
+    def metadata(self):
+        return piexif.load(str(self.path))
+
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs):
         assert file.suffix.lstrip('.').lower() in cls.FILE_EXTENSIONS
