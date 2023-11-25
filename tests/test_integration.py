@@ -1,5 +1,4 @@
 import pathlib
-import os
 import datetime
 
 import pytest

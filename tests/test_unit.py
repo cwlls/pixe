@@ -1,6 +1,5 @@
 import pathlib
 import datetime
-import os
 
 import pytest
 import piexif
