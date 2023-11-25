@@ -128,7 +128,7 @@ def process_file(file: filetypes.PixeFile, dest_str: str, move: bool = False, **
     # pass **kwargs to _new_tags so that known tags can be inserted
     # into the file at its destination so we don't muck up the src_file
     # if a copy operation has been requested.
-    piexif.insert(file.add_metadata(dest_file, **kwargs), str(dest_file))
+    file.add_metadata(dest_file, **kwargs)
 
     # return a string showing what file has been moved, so it can be displayed
     return f"{file.path} -> {dest_path.joinpath(filename.name)}"
