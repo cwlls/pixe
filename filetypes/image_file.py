@@ -3,27 +3,24 @@ import datetime
 import hashlib
 import io
 import pathlib
-import fnmatch
 
 import PIL.Image
 import piexif
 
 import filetypes
-APP = filetypes.APP
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ImageFile(filetypes.PixeFile):
+class ImageFile:
     """
     Image files
     """
-    NAME = 'ImageFile'
     FILE_EXTENSIONS = ["jpg", "jpeg"]
     ALLOWED_TAGS = ["copyright", "owner"]
 
     def __init__(self, path: str):
-        super().__init__(path)
+        self.path = path
 
     # helpers
     @property
@@ -66,7 +63,7 @@ class ImageFile(filetypes.PixeFile):
 
             # the requested tag doesn't exist, use the ERROR_DATE global to signify such
             except KeyError:
-                cdate = self.ERROR_DATE
+                cdate = filetypes.ERROR_DATE
 
             return cdate
 
@@ -84,3 +81,8 @@ class ImageFile(filetypes.PixeFile):
             exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
 
         return piexif.dump(exif_data)
+
+
+# add ImageFile extensions and creator method to the PixeFile factory
+for ext in ImageFile.FILE_EXTENSIONS:
+    filetypes.factory.register_filetype(ext, ImageFile)
