@@ -22,7 +22,7 @@ ERROR_DATE = datetime.datetime(1902, 2, 20)
 # store a datetime of when this run began
 START_TIME = datetime.datetime.now()
 
-__version__ = "0.5.6"
+__version__ = "0.6.0"
 
 
 def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -> str:
