@@ -1,6 +1,6 @@
 [project]
 name = "pixe"
-dynamic = ["version"]
+version = "0.6.0"
 description = "A digital helper to keep your files neat and tidy"
 readme = "README.md"
 requires-python = ">=3.11"
