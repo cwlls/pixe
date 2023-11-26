@@ -26,6 +26,7 @@ dependencies = [
 tests = [
     "pytest>=7.2.1,<7.3",
     "pytest-cov>=4.0.0,<4.1",
+    "pytest-freezegun>=0.4.2,<0.5.0",
     "flake8>=6.0.0,<6.1",
 ]
 

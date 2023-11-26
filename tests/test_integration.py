@@ -23,7 +23,6 @@ def src_file(src_path):
     return src_path.joinpath("red.jpg")
 
 
-
 def test_single_file(runner, src_file, dst_path):
     dest_file = pathlib.Path(dst_path).joinpath(
         "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
@@ -47,6 +46,7 @@ def test_single_file_bad(runner, dst_path):
     assert results.exit_code == 2
 
 
+@pytest.mark.freeze_time(datetime.datetime.now())
 def test_single_file_duplicate(runner, src_file, dst_path):
     import_time = datetime.datetime.now()
     dest_file = dst_path.joinpath(
