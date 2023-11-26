@@ -85,7 +85,14 @@ class ImageFile:
         if "copyright" in kwargs and kwargs.get("copyright") != '':
             exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
 
-        piexif.insert(piexif.dump(exif_data), str(file))
+        try:
+            exif_bytes = piexif.dump(exif_data)
+        except ValueError as e:
+            LOGGER.info(f"{e}: {str(file)}")
+            del exif_data["Exif"][41729]
+            exif_bytes = piexif.dump(exif_data)
+        finally:
+            piexif.insert(exif_bytes, str(file))
 
 
 # add ImageFile extensions and creator method to the PixeFile factory
