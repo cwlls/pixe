@@ -4,6 +4,7 @@ import multiprocessing
 import shutil
 import os
 import logging
+import time
 
 import click
 
@@ -127,6 +128,9 @@ def serial_process_files(file_list: list[filetypes], dest: str, move: bool, **kw
     help="add copyright string to exif tags"
 )
 def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs):
+    start_time = time.perf_counter()
+    file_count = 0
+
     file_path = pathlib.Path(src)
     if file_path.exists():
         if file_path.is_dir():
@@ -134,6 +138,7 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
             for root, dirs, files in os.walk(file_path, topdown=True):
                 for file in files:
                     if PIXE_FILE.get_ext_regex().match(file):
+                        file_count += 1
                         file_list.append(PIXE_FILE.get_file_obj(pathlib.Path(file)))
                 if not recurse:
                     break
@@ -144,8 +149,12 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
                 serial_process_files(file_list, dest, move, **kwargs)
 
         elif file_path.is_file():
+            file_count = 1
             print(process_file(PIXE_FILE.get_file_obj(file_path), dest, move, **kwargs))
         else:
             raise click.exceptions.BadParameter(src)
     else:
         raise click.exceptions.BadParameter(src)
+
+    end_time = time.perf_counter()
+    print(f"------------------------\nprocessed {file_count} files in {(end_time - start_time):.2f}secs")
