@@ -16,6 +16,8 @@ jobs:
         run: curl https://raw.githubusercontent.com/pypa/pipenv/master/get-pipenv.py | python
       - run: pipenv install --dev
       - name: Unit tests
-        run: pipenv run pytest tests/test_unit.py
+        working-directory: ./tests
+        run: pipenv run pytest test_unit.py
       - name: Integration tests
-        run: pipenv run pytest tests/test_integration.py
+        working-directory: ./tests
+        run: pipenv run pytest test_integration.py
