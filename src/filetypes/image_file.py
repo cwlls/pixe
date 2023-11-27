@@ -26,12 +26,6 @@ class ImageFile(base.PixeFile):
 
     @property
     def checksum(self, block_size: int = 8192) -> str:
-        """
-        Create a sha1 checksum of just the image data (no meta/exif).
-
-        :param block_size: the block size to use when chunking up the image data
-        :return: a calculated hex digest
-        """
         hasher = hashlib.sha1()
         img_io = io.BytesIO()
 
@@ -50,11 +44,6 @@ class ImageFile(base.PixeFile):
 
     @property
     def creation_date(self) -> datetime.datetime:
-        """
-        Extract the file creation date from EXIF information.
-
-        :return: a datetime object representing the creation date of the image
-        """
         # TODO: use piexif: exif_dict['Exif'][piexif.ExifIFD.DateTimeOriginal]
         with PIL.Image.open(self.path, "r") as im:
             try:

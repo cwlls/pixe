@@ -50,18 +50,45 @@ class PixeFile:
 
     @property
     def checksum(self, block_size: int = 8192) -> str:
+        """
+        Create a sha1 checksum of just the data (no meta/exif).
+
+        :param block_size: the block size to use when chunking up the image data
+        :return: a calculated hex digest
+        """
         return self.DEFAULT_CHECKSUM
 
     @property
     def creation_date(self) -> datetime.datetime:
+        """
+        Extract the file creation date from file metadata and return.
+
+        :return: a datetime object representing the creation date of the file
+        """
         return self.DEFAULT_DATE
 
     @property
     def metadata(self) -> dict:
+        """
+        Extract the file metadata and return as a dict.
+
+        :return: a dict containing the file metadata
+        """
         return {}
 
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs) -> bool:
+        """
+        Add specific metadata, specified in class.ALLOWED_TAGS, to a
+        given file. Because metadata will only be added a file once it's
+        in the final destination (don't write to src files), this is a class
+        method that shouldn't act on the src file specified in self.path, but rather
+        the file in its final location.
+
+        :param file: the path to the file to be acted upon
+        :param kwargs: keyword argument list of tag/value pairs
+        :return: a bool signifying whether the metadata could be added
+        """
         return False
 
 
