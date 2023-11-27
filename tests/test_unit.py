@@ -12,6 +12,7 @@ import filetypes
 def src_img_file(src_path):
     return filetypes.factory.get_file_obj(src_path.joinpath("red.jpg"))
 
+
 @pytest.fixture
 def src_img_file_path(src_path):
     return pathlib.Path(src_path.joinpath("red.jpg"))
@@ -59,7 +60,7 @@ def test_img_file_add_metadata_copyright(src_img_file_path):
 
 def test_process_file(src_img_file, dst_path):
     expected_file = pathlib.Path(dst_path).joinpath(
-        "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
+        "2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
     pixe.process_file(src_img_file, dst_path)
@@ -70,7 +71,7 @@ def test_process_file(src_img_file, dst_path):
 def test_process_img_file_no_date(src_path, dst_path):
     src_file = src_path.joinpath("chocolate.jpg")
     new_file = pathlib.Path(dst_path).joinpath(
-        "1902", "2", "19020220_000000_2a00d2b48e39f63cf834d4f7c50b2c1aa3b43a9c.jpg"
+        "1902", "02-Feb", "19020220_000000_2a00d2b48e39f63cf834d4f7c50b2c1aa3b43a9c.jpg"
     )
     test_file = filetypes.image_file.ImageFile(src_file)
 
