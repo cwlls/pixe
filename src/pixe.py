@@ -35,7 +35,7 @@ def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = file.checksum
     filename = file.path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file.path.suffix.lower())
-    dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.month))
+    dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.strftime("%m-%b")))
 
     # if a similarly named file exists at the destination it means we have a duplicate file
     # prepend 'dups' and the START_TIME of this move process to the destination filepath
