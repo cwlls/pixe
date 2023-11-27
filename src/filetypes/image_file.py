@@ -8,22 +8,22 @@ import PIL.Image
 import piexif
 
 import filetypes
+import base
 
-PIXE_FILE = filetypes.factory
+FACTORY = filetypes.factory
 LOGGER = logging.getLogger(__name__)
 
 
-class ImageFile:
+class ImageFile(base.PixeFile):
     """
     Image files
     """
-    FILE_EXTENSIONS = ["jpg", "jpeg"]
+    EXTENSIONS = ["jpg", "jpeg"]
     ALLOWED_TAGS = ["copyright", "owner"]
 
     def __init__(self, path: pathlib.Path):
-        self.path = path
+        super().__init__(path)
 
-    # helpers
     @property
     def checksum(self, block_size: int = 8192) -> str:
         """
@@ -64,7 +64,7 @@ class ImageFile:
 
             # the requested tag doesn't exist, use the ERROR_DATE global to signify such
             except KeyError:
-                cdate = filetypes.ERROR_DATE
+                cdate = self.DEFAULT_DATE
 
             return cdate
 
@@ -74,7 +74,7 @@ class ImageFile:
 
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs):
-        assert file.suffix.lstrip('.').lower() in cls.FILE_EXTENSIONS
+        assert file.suffix.lstrip('.').lower() in cls.EXTENSIONS
         for key in kwargs.keys():
             assert key in cls.ALLOWED_TAGS
 
@@ -95,6 +95,6 @@ class ImageFile:
             piexif.insert(exif_bytes, str(file))
 
 
-# add ImageFile extensions and creator method to the PixeFile factory
-for ext in ImageFile.FILE_EXTENSIONS:
-    PIXE_FILE.register_filetype(ext, ImageFile)
+# add ImageFile extensions and creator method to the Factory
+for ext in ImageFile.EXTENSIONS:
+    FACTORY.register_filetype(ext, ImageFile)
