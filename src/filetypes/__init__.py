@@ -1,6 +1,4 @@
-import datetime
-
-import base
+from . import base
 factory = base.Factory()
 
 from . import image_file

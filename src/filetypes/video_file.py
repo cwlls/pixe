@@ -8,7 +8,7 @@ import sys
 import ffmpeg
 
 import filetypes
-import base
+from . import base
 
 FACTORY = filetypes.factory
 LOGGER = logging.getLogger(__name__)
