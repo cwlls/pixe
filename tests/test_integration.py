@@ -25,7 +25,7 @@ def src_file(src_path):
 
 def test_single_file(runner, src_file, dst_path):
     dest_file = pathlib.Path(dst_path).joinpath(
-        "2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
+        "2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
     results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
@@ -63,7 +63,7 @@ def test_single_file_duplicate(runner, src_file, dst_path):
 
 
 def test_single_file_move(runner, src_file, dst_path):
-    dest_file = dst_path.joinpath("2020", "3", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
+    dest_file = dst_path.joinpath("2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
 
     results = runner.invoke(pixe.cli, f"--move --dest {dst_path} {src_file}")
 
@@ -74,7 +74,7 @@ def test_single_file_move(runner, src_file, dst_path):
 
 def test_single_file_copy_tagged(runner, src_path, dst_path):
     src_file = src_path.joinpath("dark/darkturquoise.jpg")
-    dst_file = dst_path.joinpath("2020", "12", "20201209_015501_a810b8552a4acf4e13164a74aab3016e583cc93e.jpg")
+    dst_file = dst_path.joinpath("2020", "12-Dec", "20201209_015501_a810b8552a4acf4e13164a74aab3016e583cc93e.jpg")
     src_file_obj = filetypes.factory.get_file_obj(src_file)
     dst_file_obj = filetypes.factory.get_file_obj(dst_file)
 
