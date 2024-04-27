@@ -18,15 +18,26 @@ class VideoFile(base.PixeFile):
     """
     Video files
     """
+
     EXTENSIONS = ["mp4", "m4v"]
     ALLOWED_TAGS = []
 
     def __init__(self, path: pathlib.Path):
         super().__init__(path)
 
-    # @property
-    # def checksum(self, block_size: int = 8192) -> str:
-    #     pass
+    @property
+    def checksum(self, block_size: int = 8192) -> str:
+        try:
+            file = ffmpeg.input(self.path)
+            file = ffmpeg.output(file, "-", f="hash")
+            chksum = ffmpeg.run(file, capture_stdout=True, capture_stderr=True)
+            chksum = chksum[0].decode().lstrip("SHA256=").rstrip()
+            LOGGER.info(f"CHECKSUM: {chksum}")
+        except ffmpeg.Error as e:
+            LOGGER.error(f"{e.stderr}")
+            sys.exit(1)
+
+        return chksum
 
     @property
     def creation_date(self) -> datetime.datetime:
@@ -36,7 +47,7 @@ class VideoFile(base.PixeFile):
             LOGGER.error(f"{e.stderr}")
             sys.exit(1)
 
-        if cdate := probe['format']['tags']['creation_time']:
+        if cdate := probe["format"]["tags"]["creation_time"]:
             return datetime.datetime.strptime(cdate, "%Y-%m-%dT%H:%M:%S.%fZ")
         else:
             return self.DEFAULT_DATE
