@@ -18,6 +18,7 @@ class ImageFile(base.PixeFile):
     """
     Image files
     """
+
     EXTENSIONS = ["jpg", "jpeg"]
     ALLOWED_TAGS = ["copyright", "owner"]
 
@@ -40,7 +41,10 @@ class ImageFile(base.PixeFile):
         while chunk := img_io.read(block_size):
             hasher.update(chunk)
 
-        return hasher.hexdigest()
+        chksum = hasher.hexdigest()
+        LOGGER.info(f"CHECKSUM: {chksum}")
+
+        return chksum
 
     @property
     def creation_date(self) -> datetime.datetime:
@@ -63,16 +67,18 @@ class ImageFile(base.PixeFile):
 
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs):
-        assert file.suffix.lstrip('.').lower() in cls.EXTENSIONS
+        assert file.suffix.lstrip(".").lower() in cls.EXTENSIONS
         for key in kwargs.keys():
             assert key in cls.ALLOWED_TAGS
 
         exif_data = piexif.load(str(file))
 
-        if "owner" in kwargs and kwargs.get("owner") != '':
-            exif_data["Exif"][0xa430] = kwargs.get("owner").encode("ascii")
-        if "copyright" in kwargs and kwargs.get("copyright") != '':
-            exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get("copyright").encode("ascii")
+        if "owner" in kwargs and kwargs.get("owner") != "":
+            exif_data["Exif"][0xA430] = kwargs.get("owner").encode("ascii")
+        if "copyright" in kwargs and kwargs.get("copyright") != "":
+            exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get(
+                "copyright"
+            ).encode("ascii")
 
         try:
             exif_bytes = piexif.dump(exif_data)
