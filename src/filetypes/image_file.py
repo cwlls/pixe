@@ -5,7 +5,9 @@ import io
 import pathlib
 
 import PIL.Image
+import exiftool
 import piexif
+from pillow_heif import HeifImagePlugin
 
 import filetypes
 from . import base
@@ -19,8 +21,9 @@ class ImageFile(base.PixeFile):
     Image files
     """
 
-    EXTENSIONS = ["jpg", "jpeg"]
-    ALLOWED_TAGS = ["copyright", "owner"]
+    EXTENSIONS = ["jpg", "jpeg", "heic", "heif"]
+    # ALLOWED_TAGS = ["copyright", "owner"]
+    ALLOWED_TAGS = []
 
     def __init__(self, path: pathlib.Path):
         super().__init__(path)
@@ -48,46 +51,50 @@ class ImageFile(base.PixeFile):
 
     @property
     def creation_date(self) -> datetime.datetime:
-        # TODO: use piexif: exif_dict['Exif'][piexif.ExifIFD.DateTimeOriginal]
         with PIL.Image.open(self.path, "r") as im:
             try:
                 # attempt to extract the creation date from EXIF tag 36867
-                exif = im._getexif()
-                cdate = datetime.datetime.strptime(exif[36867], "%Y:%m:%d %H:%M:%S")
+                exif = im.getexif()
+                raw_date = exif.get_ifd(34665)[36867]
+                cdate = datetime.datetime.strptime(raw_date, "%Y:%m:%d %H:%M:%S")
+                LOGGER.debug(f"file date: {cdate}")
 
             # the requested tag doesn't exist, use the ERROR_DATE global to signify such
-            except KeyError:
+            except KeyError as e:
+                LOGGER.error(f"{e}")
                 cdate = self.DEFAULT_DATE
 
-            return cdate
+        return cdate
 
-    @property
-    def metadata(self):
-        return piexif.load(str(self.path))
+    ## TODO: this needs to be rewritten to accomodate filetypes other than jpg.
+    ##  also need to fix the ALLOWED_TAGS constant above when done with rewrite.
+    # @property
+    # def metadata(self):
+    #     return piexif.load(str(self.path))
 
-    @classmethod
-    def add_metadata(cls, file: pathlib.Path, **kwargs):
-        assert file.suffix.lstrip(".").lower() in cls.EXTENSIONS
-        for key in kwargs.keys():
-            assert key in cls.ALLOWED_TAGS
+    # @classmethod
+    # def add_metadata(cls, file: pathlib.Path, **kwargs):
+    #     assert file.suffix.lstrip(".").lower() in cls.EXTENSIONS
+    #     for key in kwargs.keys():
+    #         assert key in cls.ALLOWED_TAGS
 
-        exif_data = piexif.load(str(file))
+    #     exif_data = piexif.load(str(file))
 
-        if "owner" in kwargs and kwargs.get("owner") != "":
-            exif_data["Exif"][0xA430] = kwargs.get("owner").encode("ascii")
-        if "copyright" in kwargs and kwargs.get("copyright") != "":
-            exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get(
-                "copyright"
-            ).encode("ascii")
+    #     if "owner" in kwargs and kwargs.get("owner") != "":
+    #         exif_data["Exif"][0xA430] = kwargs.get("owner").encode("ascii")
+    #     if "copyright" in kwargs and kwargs.get("copyright") != "":
+    #         exif_data["0th"][piexif.ImageIFD.Copyright] = kwargs.get(
+    #             "copyright"
+    #         ).encode("ascii")
 
-        try:
-            exif_bytes = piexif.dump(exif_data)
-        except ValueError as e:
-            LOGGER.info(f"{e}: {str(file)}")
-            del exif_data["Exif"][41729]
-            exif_bytes = piexif.dump(exif_data)
-        finally:
-            piexif.insert(exif_bytes, str(file))
+    #     try:
+    #         exif_bytes = piexif.dump(exif_data)
+    #     except ValueError as e:
+    #         LOGGER.error(f"{e}: {str(file)}")
+    #         del exif_data["Exif"][41729]
+    #         exif_bytes = piexif.dump(exif_data)
+    #     finally:
+    #         piexif.insert(exif_bytes, str(file))
 
 
 # add ImageFile extensions and creator method to the Factory
