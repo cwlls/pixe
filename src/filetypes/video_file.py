@@ -32,7 +32,7 @@ class VideoFile(base.PixeFile):
             file = ffmpeg.output(file, "-", f="hash")
             chksum = ffmpeg.run(file, capture_stdout=True, capture_stderr=True)
             chksum = chksum[0].decode().lstrip("SHA256=").rstrip()
-            LOGGER.info(f"CHECKSUM: {chksum}")
+            LOGGER.debug(f"CHECKSUM: {chksum}")
         except ffmpeg.Error as e:
             LOGGER.error(f"{e.stderr}")
             sys.exit(1)
