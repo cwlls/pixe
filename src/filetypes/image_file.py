@@ -51,16 +51,14 @@ class ImageFile(base.PixeFile):
 
     @property
     def creation_date(self) -> datetime.datetime:
-        with PIL.Image.open(self.path, "r") as im:
+        with exiftool.ExifToolHelper() as et:
+            exif = et.get_metadata(self.path)[0]
             try:
-                # attempt to extract the creation date from EXIF tag 36867
-                exif = im.getexif()
-                raw_date = exif.get_ifd(34665)[36867]
-                cdate = datetime.datetime.strptime(raw_date, "%Y:%m:%d %H:%M:%S")
-                LOGGER.debug(f"file date: {cdate}")
-
-            # the requested tag doesn't exist, use the ERROR_DATE global to signify such
-            except KeyError as e:
+                cdate = datetime.datetime.strptime(
+                    exif["EXIF:DateTimeOriginal"], "%Y:%m:%d %H:%M:%S"
+                )
+                LOGGER.debug(f"{self.path}: {cdate}")
+            except exiftool.exceptions.ExifToolTagNameError as e:
                 LOGGER.error(f"{e}")
                 cdate = self.DEFAULT_DATE
 
