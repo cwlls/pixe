@@ -29,9 +29,9 @@ class VideoFile(base.PixeFile):
     def checksum(self, block_size: int = 8192) -> str:
         try:
             file = ffmpeg.input(self.path)
-            file = ffmpeg.output(file, "-", f="hash")
+            file = ffmpeg.output(file, "-", f="hash", hash="SHA160")
             chksum = ffmpeg.run(file, capture_stdout=True, capture_stderr=True)
-            chksum = chksum[0].decode().lstrip("SHA256=").rstrip()
+            chksum = chksum[0].decode().lstrip("SHA160=").rstrip()
             LOGGER.debug(f"CHECKSUM: {chksum}")
         except ffmpeg.Error as e:
             LOGGER.error(f"{e.stderr}")
