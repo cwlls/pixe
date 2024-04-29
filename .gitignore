@@ -133,3 +133,6 @@ dmypy.json
 
 # app specific
 out/
+
+# macOS cruft
+.DS_Store
