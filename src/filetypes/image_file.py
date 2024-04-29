@@ -78,9 +78,9 @@ class ImageFile(base.PixeFile):
         #  the copyright year
         # if copyright := kwargs.get("copyright"):
         #     new_tags["Copyright"] = copyright
-
-        with exiftool.ExifToolHelper() as et:
-            et.set_tags(file, tags=new_tags, params=["-P", "-overwrite_original"])
+        if new_tags:
+            with exiftool.ExifToolHelper() as et:
+                et.set_tags(file, tags=new_tags, params=["-P", "-overwrite_original"])
 
 
 # add ImageFile extensions and creator method to the Factory
