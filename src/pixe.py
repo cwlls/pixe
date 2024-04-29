@@ -34,8 +34,12 @@ def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -
     cdate = file.creation_date
     cdate_str = cdate.strftime("%Y%m%d_%H%M%S")
     hash_str = file.checksum
-    filename = file.path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file.path.suffix.lower())
-    dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.strftime("%m-%b")))
+    filename = file.path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(
+        file.path.suffix.lower()
+    )
+    dest_path = pathlib.Path(dest_str).joinpath(
+        str(cdate.year), str(cdate.strftime("%m-%b"))
+    )
 
     # if a similarly named file exists at the destination it means we have a duplicate file
     # prepend 'dups' and the START_TIME of this move process to the destination filepath
@@ -76,7 +80,7 @@ def parallel_process_files(file_list: list[filetypes], dest: str, move: bool, **
             args=(file, dest, move),
             kwds=kwargs,
             callback=(lambda res: print(res, flush=True)),
-            error_callback=(lambda res: print(res, flush=True))
+            error_callback=(lambda res: print(res, flush=True)),
         )
     pool.close()
     pool.join()
@@ -96,7 +100,7 @@ def serial_process_files(file_list: list[filetypes], dest: str, move: bool, **kw
 
 @click.command()
 @click.argument("src")
-@click.version_option(__version__, '-v', '--version')
+@click.version_option(__version__, "-v", "--version")
 @click.option("--dest", "-d", default=".", help="desired destination")
 @click.option(
     "--recurse",
@@ -119,7 +123,7 @@ def serial_process_files(file_list: list[filetypes], dest: str, move: bool, **kw
 )
 @click.option(
     "--owner",
-    default='',
+    default="",
     help="add camera owner to exif tags",
 )
 # TODO: waiting on implementation in the image_file class
@@ -154,4 +158,6 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
         raise click.exceptions.BadParameter(src)
 
     end_time = time.perf_counter()
-    print(f"------------------------\nprocessed {file_count} files in {(end_time - start_time):.2f}secs")
+    print(
+        f"------------------------\nprocessed {file_count} files in {(end_time - start_time):.2f}secs"
+    )
