@@ -136,3 +136,6 @@ out/
 
 # macOS cruft
 .DS_Store
+
+# poetry
+poetry.lock
