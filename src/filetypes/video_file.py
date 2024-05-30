@@ -19,7 +19,7 @@ class VideoFile(base.PixeFile):
     Video files
     """
 
-    EXTENSIONS = ["mp4", "m4v"]
+    EXTENSIONS = ["mp4", "m4v", "mov"]
     ALLOWED_TAGS = []
 
     def __init__(self, path: pathlib.Path):
