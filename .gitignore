@@ -139,3 +139,6 @@ out/
 
 # poetry
 poetry.lock
+
+# mise
+.mise.toml
