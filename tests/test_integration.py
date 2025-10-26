@@ -1,11 +1,14 @@
 import pathlib
 import datetime
+import logging
 
 import pytest
 from click.testing import CliRunner
 
 import pixe
 import filetypes
+
+LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture

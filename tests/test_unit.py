@@ -1,11 +1,14 @@
 import pathlib
 import datetime
+import logging
 
 import pytest
 import piexif
 
 import pixe.main
 import filetypes
+
+LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture
