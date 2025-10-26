@@ -1,15 +1,18 @@
-[tool.poetry]
+[project]
 name = "pixe"
-version = "0.7.3"
+version = "0.8.0"
 description = "A digital helper to keep your files neat and tidy"
 readme = "README.md"
 license = "Apache-2.0"
-keywords = ["archive",
-	    "photos",
-	    "organize"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+keywords = [
+    "archive",
+    "photos",
+    "organize"
 ]
 authors = [
-    "Chris Wells <ping@cwlls.dev>"
+    {name = "Chris Wells", email="chris@wells.io"},
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -18,29 +21,30 @@ classifiers = [
     "Environment :: Console",
     "Topic :: System :: Archiving"
 ]
+dependencies = [
+    "click>=8.3.0",
+    "ffmpeg-python>=0.2.0",
+    "piexif>=1.1.3",
+    "pillow>=12.0.0",
+    "pillow-heif>=1.1.1",
+    "pyexiftool>=0.5.6",
+]
 
-[tool.poetry.dependencies]
-Python = "^3.11"
-Click = "^8.1.3"
-Pillow = "^10.3.0"
-piexif = "^1.1.3"
-ffmpeg-python = "^0.2.0"
-pillow-heif = "^0.16.0"
-pyexiftool = "^0.5.0"
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+    "pytest-freezer>=0.4.9",
+    "ruff>=0.14.2",
+]
 
-[tool.poetry.group.test.dependencies]
-pytest = "^7.2.1"
-pytest-cov = "^4.0.0"
-pytest-freezegun = "^0.4.2"
-flake8 = "^6.0.0"
-
-[tool.poetry.urls]
-homepage = "https://cwlls.dev/pixe"
+[project.urls]
+homepage = "https://cwlls.com/pixe"
 repository = "https://github.com/cwlls/pixe.git"
 
-[tool.poetry.scripts]
-pixe = "pixe:cli"
+[project.scripts]
+pixe = "pixe.main:cli"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonary.api"
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"

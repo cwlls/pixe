@@ -142,3 +142,6 @@ poetry.lock
 
 # mise
 .mise.toml
+
+# uv
+uv.lock
