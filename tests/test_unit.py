@@ -4,7 +4,7 @@ import datetime
 import pytest
 import piexif
 
-import pixe
+import pixe.main
 import filetypes
 
 
@@ -64,7 +64,7 @@ def test_process_file(src_img_file, dst_path):
         "2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
-    pixe.process_file(src_img_file, dst_path)
+    pixe.main.process_file(src_img_file, dst_path)
 
     assert expected_file.exists()
 
@@ -76,6 +76,6 @@ def test_process_img_file_no_date(src_path, dst_path):
     )
     test_file = filetypes.image_file.ImageFile(src_file)
 
-    pixe.process_file(test_file, dst_path)
+    pixe.main.process_file(test_file, dst_path)
 
     assert new_file.exists()
