@@ -62,8 +62,9 @@ def test_single_file_duplicate(runner, src_file, dst_path):
     assert dest_file.exists()
 
 
-def test_single_file_move(runner, src_file, dst_path):
-    dest_file = dst_path.joinpath("2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
+def test_single_file_move(runner, src_path, dst_path):
+    src_file = src_path.joinpath("dark/darkred.jpg")
+    dest_file = dst_path.joinpath("2021", "06-Jun", "20210614_053114_0e6a2ef81906c98e4735fc9aad4bc6adaae42669.jpg")
 
     results = runner.invoke(pixe.main.cli, f"--move --dest {dst_path} {src_file}")
 
