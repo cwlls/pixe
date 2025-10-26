@@ -28,20 +28,20 @@ def test_single_file(runner, src_file, dst_path):
         "2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg"
     )
 
-    results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
+    results = runner.invoke(pixe.main.cli, f"--dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
 
 
 def test_single_file_no_exist(runner, dst_path):
-    results = runner.invoke(pixe.cli, f"--dest {dst_path} this/file/really/does/not/exist")
+    results = runner.invoke(pixe.main.cli, f"--dest {dst_path} this/file/really/does/not/exist")
 
     assert results.exit_code == 2
 
 
 def test_single_file_bad(runner, dst_path):
-    results = runner.invoke(pixe.cli, f"--dest {dst_path} /dev/zero")
+    results = runner.invoke(pixe.main.cli, f"--dest {dst_path} /dev/zero")
 
     assert results.exit_code == 2
 
@@ -55,8 +55,8 @@ def test_single_file_duplicate(runner, src_file, dst_path):
         "2020",
         "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg",
     )
-    runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
-    results = runner.invoke(pixe.cli, f"--dest {dst_path} {src_file}")
+    runner.invoke(pixe.main.cli, f"--dest {dst_path} {src_file}")
+    results = runner.invoke(pixe.main.cli, f"--dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -65,7 +65,7 @@ def test_single_file_duplicate(runner, src_file, dst_path):
 def test_single_file_move(runner, src_file, dst_path):
     dest_file = dst_path.joinpath("2020", "03-Mar", "20200321_031312_1cdef99be68dbdea159ec6fa8469b41ca13e9e6f.jpg")
 
-    results = runner.invoke(pixe.cli, f"--move --dest {dst_path} {src_file}")
+    results = runner.invoke(pixe.main.cli, f"--move --dest {dst_path} {src_file}")
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -78,9 +78,7 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     src_file_obj = filetypes.factory.get_file_obj(src_file)
     dst_file_obj = filetypes.factory.get_file_obj(dst_file)
 
-    results = runner.invoke(
-        pixe.cli, f"--copy --owner 'Joe User' --copyright 'Copyright 2020 Joe User.' --dest {dst_path} {src_file}"
-    )
+    results = runner.invoke(pixe.main.cli, f"--copy --owner 'Joe User' --dest {dst_path} {src_file}")
     src_exif = src_file_obj.metadata
     dst_exif = dst_file_obj.metadata
     old_checksum = src_file_obj.checksum
