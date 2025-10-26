@@ -52,11 +52,9 @@ class ImageFile(base.PixeFile):
         with exiftool.ExifToolHelper() as et:
             exif = et.get_metadata(self.path)[0]
             try:
-                cdate = datetime.datetime.strptime(
-                    exif["EXIF:DateTimeOriginal"], "%Y:%m:%d %H:%M:%S"
-                )
+                cdate = datetime.datetime.strptime(exif["EXIF:DateTimeOriginal"], "%Y:%m:%d %H:%M:%S")
                 LOGGER.debug(f"{self.path}: {cdate}")
-            except exiftool.exceptions.ExifToolTagNameError as e:
+            except (exiftool.exceptions.ExifToolTagNameError, KeyError) as e:
                 LOGGER.error(f"{e}")
                 cdate = self.DEFAULT_DATE
 
@@ -69,7 +67,7 @@ class ImageFile(base.PixeFile):
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs):
         for tag in kwargs.keys():
-            assert tag in cls.ALLOWED_TAGS
+            assert tag in cls.ALLOWED_TAGS, f"'{tag}' is not in the list of allowed tags!"
 
         new_tags = {}
         if owner := kwargs.get("owner"):
