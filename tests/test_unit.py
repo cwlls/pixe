@@ -46,16 +46,17 @@ def test_img_file_add_metadata_owner(src_img_file_path):
     assert new_exif["Exif"][0xa430] == b"Joe User"
 
 
-def test_img_file_add_metadata_copyright(src_img_file_path):
-    path_str = str(src_img_file_path)
-    orig_exif = piexif.load(path_str)
-    file_obj = filetypes.factory.get_file_obj(src_img_file_path)
+## REMOVED UNTIL COPYRIGHT TAGS ARE ALLOWED
+# def test_img_file_add_metadata_copyright(src_img_file_path):
+#     path_str = str(src_img_file_path)
+#     orig_exif = piexif.load(path_str)
+#     file_obj = filetypes.factory.get_file_obj(src_img_file_path)
 
-    file_obj.add_metadata(src_img_file_path, copyright='Copyright 2023 Joe User.')
-    new_exif = piexif.load(str(src_img_file_path))
+#     file_obj.add_metadata(src_img_file_path, copyright="Copyright 2023 Joe User.")
+#     new_exif = piexif.load(str(src_img_file_path))
 
-    assert orig_exif != new_exif
-    assert new_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2023 Joe User."
+#     assert orig_exif != new_exif
+#     assert new_exif["0th"][piexif.ImageIFD.Copyright] == b"Copyright 2023 Joe User."
 
 
 def test_process_file(src_img_file, dst_path):
