@@ -55,14 +55,16 @@ class ImageFile(base.PixeFile):
                 cdate = datetime.datetime.strptime(exif["EXIF:DateTimeOriginal"], "%Y:%m:%d %H:%M:%S")
                 LOGGER.debug(f"{self.path}: {cdate}")
             except (exiftool.exceptions.ExifToolTagNameError, KeyError) as e:
-                LOGGER.error(f"{e}")
+                LOGGER.info(f"{e}")
                 cdate = self.DEFAULT_DATE
 
         return cdate
 
-    # @property
-    # def metadata(self):
-    #     return piexif.load(str(self.path))
+    @property
+    def metadata(self):
+        with exiftool.ExifToolHelper() as et:
+            exif = et.get_metadata(self.path)[0]
+        return exif
 
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs):
