@@ -39,11 +39,11 @@ def test_img_file_add_metadata_owner(src_img_file_path):
     orig_exif = piexif.load(path_str)
     file_obj = filetypes.factory.get_file_obj(src_img_file_path)
 
-    file_obj.add_metadata(src_img_file_path, owner='Joe User')
+    file_obj.add_metadata(src_img_file_path, owner="Joe User")
     new_exif = piexif.load(str(src_img_file_path))
 
     assert orig_exif != new_exif
-    assert new_exif["Exif"][0xa430] == b"Joe User"
+    assert new_exif["Exif"][0xA430] == b"Joe User"
 
 
 ## REMOVED UNTIL COPYRIGHT TAGS ARE ALLOWED
