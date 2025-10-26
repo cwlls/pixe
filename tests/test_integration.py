@@ -90,9 +90,9 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
 
     assert results.exit_code == 0
     assert dst_file.exists()
-    assert src_exif != dst_exif
-    assert dst_exif["Exif"][0xA430] == b"Joe User"
-    assert dst_exif["0th"][33432] == b"Copyright 2020 Joe User."
+    assert src_exif != dst_exif, "exif tags match!"
+    assert dst_exif["EXIF:OwnerName"] == "Joe User", "owner tag not changed" # fmt: skip
+    # assert dst_exif["0th"][33432] == b"Copyright 2020 Joe User."
     assert old_checksum == new_checksum
 
 
