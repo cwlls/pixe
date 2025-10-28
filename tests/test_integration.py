@@ -9,7 +9,9 @@ import PIL.ExifTags
 import pixe
 import filetypes
 
+logging.basicConfig()
 LOGGER = logging.getLogger(__name__)
+# LOGGER.setLevel(logging.DEBUG)
 
 
 @pytest.fixture
@@ -33,6 +35,7 @@ def test_single_file(runner, src_file, dst_path):
     )
 
     results = runner.invoke(pixe.main.cli, f"--dest {dst_path} {src_file}")
+    LOGGER.debug(results.output)
 
     assert results.exit_code == 0
     assert dest_file.exists()
@@ -98,27 +101,67 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
 
 
 def test_files_parallel(runner, src_path, dst_path):
-    src_files = src_path.joinpath("dark")
-    results = runner.invoke(pixe.main.cli, f"--move --dest {dst_path} {src_files}")
+    src_files_path = src_path.joinpath("dark")
+    num_src_files = 0
+    for f in src_files_path.glob("[!.]*"):
+        if f.is_file():
+            num_src_files += 1
+    LOGGER.debug(num_src_files)
+
+    results = runner.invoke(pixe.main.cli, f"--move --dest {dst_path} {src_files_path}")
+    LOGGER.debug(results.output)
+
+    num_dst_files = 0
+    for f in dst_path.rglob("*"):
+        if f.is_file():
+            num_dst_files += 1
+    LOGGER.debug(num_dst_files)
 
     assert results.exit_code == 0
+    assert num_src_files == num_dst_files
     assert dst_path.joinpath("2022", "05-May", "20220502_182901_6245c093f3e3d43d190688bed0cfd78127c8f799.jpg").exists()
 
 
 def test_files_serial(runner, src_path, dst_path):
-    src_files = src_path.joinpath("light")
-    results = runner.invoke(pixe.main.cli, f"--serial --move --dest {dst_path} {src_files}")
-    LOGGER.info(results)
+    src_files_path = src_path.joinpath("light")
+    num_src_files = 0
+    for f in src_files_path.glob("[!.]*"):
+        if f.is_file():
+            num_src_files += 1
+    LOGGER.debug(num_src_files)
+
+    results = runner.invoke(pixe.main.cli, f"--serial --move --dest {dst_path} {src_files_path}")
+    LOGGER.debug(results.output)
+
+    num_dst_files = 0
+    for f in dst_path.rglob("*"):
+        if f.is_file():
+            num_dst_files += 1
+    LOGGER.debug(num_dst_files)
 
     assert results.exit_code == 0
+    assert num_src_files == num_dst_files
     assert dst_path.joinpath("2018", "10-Oct", "20181029_173758_2322bd54435c6e5587922f581c3584d8f306df1b.jpg").exists()
 
 
-#
-# def test_files_recurse(runner, src_path, dst_path):
-#     results = runner.invoke(pixe.cli, f"--recurse --move --dest {dst_path} {src_path}")
-#
-#     assert results.exit_code == 0
-#     assert dst_path.joinpath("2022", "2", "20220226_001821_476bf667385499407e1405f5909f88875dab1873.jpg").exists()
-#     assert dst_path.joinpath("2018", "3", "20180319_100139_b78473e5c10d8fd945dd1eee9da7a82320d464d1.jpg").exists()
-#     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
+def test_files_recurse(runner, src_path, dst_path):
+    num_src_files = 0
+    for f in src_path.rglob("[!.]*"):
+        if f.is_file():
+            num_src_files += 1
+    LOGGER.debug(num_src_files)
+
+    results = runner.invoke(pixe.main.cli, f"--recurse --move --dest {dst_path} {src_path}")
+    LOGGER.debug(results.output)
+
+    num_dst_files = 0
+    for f in dst_path.rglob("[!.]*"):
+        if f.is_file():
+            num_dst_files += 1
+    LOGGER.debug(num_dst_files)
+
+    assert results.exit_code == 0
+    assert num_src_files == num_dst_files
+    assert dst_path.joinpath("2022", "02-Feb", "20220226_001821_476bf667385499407e1405f5909f88875dab1873.jpg").exists()
+    assert dst_path.joinpath("2018", "03-Mar", "20180319_100139_b78473e5c10d8fd945dd1eee9da7a82320d464d1.jpg").exists()
+    assert dst_path.joinpath("2021", "12-Dec", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()

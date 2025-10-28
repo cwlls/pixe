@@ -1,6 +1,7 @@
 import pathlib
 import os
 import shutil
+import tempfile
 
 import pytest
 from PIL import Image
@@ -11,44 +12,53 @@ DATA_DIR = pathlib.Path(os.path.dirname(__file__)).joinpath("data")
 
 
 @pytest.fixture
-def src_path():
-    return DATA_DIR.joinpath("src")
+def src_path(sandbox):
+    yield sandbox.joinpath("src")
 
 
 @pytest.fixture
-def dst_path():
-    return DATA_DIR.joinpath("dst")
+def dst_path(sandbox):
+    path = sandbox.joinpath("dst")
+    path.mkdir()
+    yield path
 
 
-def pytest_configure():
-    print("Setting up test files")
-    src_dir = DATA_DIR.joinpath("src")
-    light_dir = src_dir.joinpath("light")
-    light_dir.mkdir(parents=True)
-    dark_dir = src_dir.joinpath("dark")
-    dark_dir.mkdir()
-
-    # Create color files
-    date_idx = 0
-    for color in LIGHT_COLORS:
-        create_img(color, DATES[date_idx], light_dir)
-        date_idx += 1
-
-    for color in DARK_COLORS:
-        create_img(color, DATES[date_idx], dark_dir)
-        date_idx += 1
-
-    for color in COLORS:
-        create_img(color, DATES[date_idx], src_dir)
-        date_idx += 1
-
-    # create file with no exif date
-    create_img("chocolate", None, src_dir)
+@pytest.fixture(autouse=True)
+def sandbox():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        shutil.copytree(DATA_DIR, f"{tmpdir}/src")
+        yield pathlib.Path(tmpdir)
 
 
-def pytest_unconfigure():
-    print("Tearing down test files")
-    shutil.rmtree(DATA_DIR)
+# def pytest_configure():
+#     print("Setting up test files")
+#     src_dir = DATA_DIR.joinpath("src")
+#     light_dir = src_dir.joinpath("light")
+#     light_dir.mkdir(parents=True)
+#     dark_dir = src_dir.joinpath("dark")
+#     dark_dir.mkdir()
+
+#     # Create color files
+#     date_idx = 0
+#     for color in LIGHT_COLORS:
+#         create_img(color, DATES[date_idx], light_dir)
+#         date_idx += 1
+
+#     for color in DARK_COLORS:
+#         create_img(color, DATES[date_idx], dark_dir)
+#         date_idx += 1
+
+#     for color in COLORS:
+#         create_img(color, DATES[date_idx], src_dir)
+#         date_idx += 1
+
+#     # create file with no exif date
+#     create_img("chocolate", None, src_dir)
+
+
+# def pytest_unconfigure():
+#     print("Tearing down test files")
+#     shutil.rmtree(DATA_DIR)
 
 
 # a few helper variables and functions
