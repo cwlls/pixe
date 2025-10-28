@@ -21,7 +21,7 @@ LOGGER = logging.getLogger(__name__)
 # store a datetime of when this run began
 START_TIME = datetime.datetime.now()
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 
 def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -> str:

@@ -1,6 +1,6 @@
 [project]
 name = "pixe"
-version = "0.8.0"
+version = "0.8.1"
 description = "A digital helper to keep your files neat and tidy"
 readme = "README.md"
 license = "Apache-2.0"
@@ -48,6 +48,15 @@ pixe = "pixe.main:cli"
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["filetypes", "pixe"]
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple/"
+publish-url = "https://upload.pypi.org/legacy/"
+explicit = true
 
 [tool.pytest.ini_options]
 log_cli = true
