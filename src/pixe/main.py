@@ -127,8 +127,7 @@ def serial_process_files(file_list: list[filetypes], dest: str, move: bool, **kw
     default="",
     help="add camera owner to exif tags",
 )
-# TODO: waiting on implementation in the image_file class
-# @click.option("--copyright", default="", help="add copyright string to exif tags")
+@click.option("--copyright", default="", help="add a copyright string to exif tags")
 def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs):
     start_time = time.perf_counter()
     file_count = 0

@@ -22,7 +22,7 @@ class ImageFile(base.PixeFile):
     """
 
     EXTENSIONS = ["jpg", "jpeg", "heic", "heif"]
-    ALLOWED_TAGS = ["owner"]
+    ALLOWED_TAGS = ["owner", "copyright"]
 
     def __init__(self, path: pathlib.Path):
         super().__init__(path)
@@ -76,8 +76,8 @@ class ImageFile(base.PixeFile):
             new_tags["OwnerName"] = owner
         # TODO: figure out a way to grab the date of the file and use that for
         #  the copyright year
-        # if copyright := kwargs.get("copyright"):
-        #     new_tags["Copyright"] = copyright
+        if copyright := kwargs.get("copyright"):
+            new_tags["Copyright"] = copyright
         if new_tags:
             with exiftool.ExifToolHelper() as et:
                 et.set_tags(file, tags=new_tags, params=["-P", "-overwrite_original"])
