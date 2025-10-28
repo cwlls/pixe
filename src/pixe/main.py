@@ -14,7 +14,9 @@ import filetypes
 PIXE_FILE = filetypes.factory
 
 # setup logging
+logging.basicConfig()
 LOGGER = logging.getLogger(__name__)
+# LOGGER.setLevel(logging.DEBUG)
 
 # store a datetime of when this run began
 START_TIME = datetime.datetime.now()
@@ -36,6 +38,8 @@ def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -
     hash_str = file.checksum
     filename = file.path.with_stem(f"{cdate_str}_{hash_str}").with_suffix(file.path.suffix.lower())
     dest_path = pathlib.Path(dest_str).joinpath(str(cdate.year), str(cdate.strftime("%m-%b")))
+
+    LOGGER.debug(f"SRC: {file} -> {dest_path}")
 
     # if a similarly named file exists at the destination it means we have a duplicate file
     # prepend 'dups' and the START_TIME of this move process to the destination filepath
@@ -90,7 +94,9 @@ def serial_process_files(file_list: list[filetypes], dest: str, move: bool, **kw
     :param move: is this a move or copy operation
     :param kwargs: additional options (likely exif tags)
     """
+    LOGGER.debug(f"DEST: {dest}")
     for file in file_list:
+        LOGGER.debug(f"FILE: {file.path}")
         print(process_file(file, dest, move, **kwargs))
 
 
@@ -135,10 +141,12 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
             for root, dirs, files in os.walk(file_path, topdown=True):
                 for file in files:
                     if PIXE_FILE.get_ext_regex().match(file):
+                        LOGGER.debug(f"OSWALK PATH: {root}, {dirs}, {file}")
                         file_count += 1
                         file_list.append(PIXE_FILE.get_file_obj(pathlib.Path(file)))
                 if not recurse:
                     break
+            LOGGER.debug(f"FILELIST: {file_list}")
 
             if parallel:
                 parallel_process_files(file_list, dest, move, **kwargs)

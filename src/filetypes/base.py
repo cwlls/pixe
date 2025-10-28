@@ -3,6 +3,11 @@ import typing
 import pathlib
 import fnmatch
 import re
+import logging
+
+logging.basicConfig()
+LOGGER = logging.getLogger(__name__)
+# LOGGER.setLevel(logging.DEBUG)
 
 
 class Factory:
@@ -47,6 +52,7 @@ class PixeFile:
 
     def __init__(self, path: pathlib.Path):
         self.path = path
+        LOGGER.debug(f"PIXEFILE_PATH: {path}")
 
     @property
     def checksum(self, block_size: int = 8192) -> str:
