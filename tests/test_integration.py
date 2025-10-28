@@ -97,21 +97,23 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     assert old_checksum == new_checksum
 
 
-# def test_files_parallel(runner, src_path, dst_path):
-#     # src_files = src_path.joinpath('light')
-#     results = runner.invoke(pixe.cli, f"--move --dest {dst_path} {src_files}")
-#
-#     assert results.exit_code == 0
-#     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
-#
-#
-# def test_files_serial(runner, src_path, dst_path):
-#     src_files = src_path.joinpath('light')
-#     results = runner.invoke(pixe.cli, f"--serial --move --dest {dst_path} {src_files}")
-#
-#     assert results.exit_code == 0
-#     assert dst_path.joinpath("2021", "12", "20211222_153825_d05cae67991384d221e95ae8b30994ce186695ed.jpg").exists()
-#
+def test_files_parallel(runner, src_path, dst_path):
+    src_files = src_path.joinpath("dark")
+    results = runner.invoke(pixe.main.cli, f"--move --dest {dst_path} {src_files}")
+
+    assert results.exit_code == 0
+    assert dst_path.joinpath("2022", "05-May", "20220502_182901_6245c093f3e3d43d190688bed0cfd78127c8f799.jpg").exists()
+
+
+def test_files_serial(runner, src_path, dst_path):
+    src_files = src_path.joinpath("light")
+    results = runner.invoke(pixe.main.cli, f"--serial --move --dest {dst_path} {src_files}")
+    LOGGER.info(results)
+
+    assert results.exit_code == 0
+    assert dst_path.joinpath("2018", "10-Oct", "20181029_173758_2322bd54435c6e5587922f581c3584d8f306df1b.jpg").exists()
+
+
 #
 # def test_files_recurse(runner, src_path, dst_path):
 #     results = runner.invoke(pixe.cli, f"--recurse --move --dest {dst_path} {src_path}")
