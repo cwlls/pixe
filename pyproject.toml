@@ -51,3 +51,4 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 log_cli = true
+addopts = "-rf --import-mode=importlib"
