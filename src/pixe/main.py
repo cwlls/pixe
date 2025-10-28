@@ -45,8 +45,7 @@ def process_file(file: filetypes, dest_str: str, move: bool = False, **kwargs) -
     # prepend 'dups' and the START_TIME of this move process to the destination filepath
     if dest_path.joinpath(filename.name).exists():
         dest_path = pathlib.Path(dest_str).joinpath(
-            f"dups/{START_TIME.strftime('%Y%m%d_%H%M%S')}",
-            str(cdate.year),
+            f"dups/{START_TIME.strftime('%Y%m%d_%H%M%S')}", str(cdate.year), str(cdate.strftime("%m-%b"))
         )
     dest_path.mkdir(parents=True, exist_ok=True)
     dest_file = dest_path.joinpath(filename.name)
