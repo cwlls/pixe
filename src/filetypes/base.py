@@ -19,7 +19,7 @@ class Factory:
         self._filetypes[extension] = creator
 
     def get_file_obj(self, path: pathlib.Path) -> typing.Callable:
-        if creator := self._filetypes.get(path.suffix.lower().lstrip('.')):
+        if creator := self._filetypes.get(path.suffix.lower().lstrip(".")):
             return creator(path)
         else:
             raise ValueError
@@ -35,13 +35,14 @@ class PixeFile:
     """
     A base class for other filetypes
     """
+
     # A date that shouldn't appear in our collection, but that also isn't a common default.
     # In this case, Ansel Adams birthday.
     DEFAULT_DATE = datetime.datetime(1902, 2, 20)
 
     # A checksum that "looks" like a normal checksum, but that should be easily identifiable
     # as not a sha1sum and easy to see in directory listings.
-    DEFAULT_CHECKSUM = 'deadc0de'
+    DEFAULT_CHECKSUM = "deadc0de"
 
     # class variables that should be overridden in child classes
     # a list of file extensions that will be processed by this filetype
