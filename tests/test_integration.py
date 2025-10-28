@@ -4,6 +4,7 @@ import logging
 
 import pytest
 from click.testing import CliRunner
+import PIL.ExifTags
 
 import pixe
 import filetypes
@@ -91,7 +92,7 @@ def test_single_file_copy_tagged(runner, src_path, dst_path):
     assert results.exit_code == 0
     assert dst_file.exists()
     assert src_exif != dst_exif, "exif tags match!"
-    assert dst_exif["EXIF:OwnerName"] == "Joe User", "owner tag not changed" # fmt: skip
+    assert dst_exif[PIL.ExifTags.Base.CameraOwnerName] == "Joe User", "owner tag not changed" # fmt: skip
     # assert dst_exif["0th"][33432] == b"Copyright 2020 Joe User."
     assert old_checksum == new_checksum
 
