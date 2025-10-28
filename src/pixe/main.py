@@ -143,7 +143,7 @@ def cli(src: str, dest: str, recurse: bool, parallel: bool, move: bool, **kwargs
                     if PIXE_FILE.get_ext_regex().match(file):
                         LOGGER.debug(f"OSWALK PATH: {root}, {dirs}, {file}")
                         file_count += 1
-                        file_list.append(PIXE_FILE.get_file_obj(pathlib.Path(file)))
+                        file_list.append(PIXE_FILE.get_file_obj(pathlib.Path(root, file)))
                 if not recurse:
                     break
             LOGGER.debug(f"FILELIST: {file_list}")
