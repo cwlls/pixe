@@ -5,6 +5,7 @@ import io
 import pathlib
 
 import PIL.Image
+import PIL.ExifTags
 from pillow_heif import HeifImagePlugin
 import exiftool
 
@@ -49,22 +50,21 @@ class ImageFile(base.PixeFile):
 
     @property
     def creation_date(self) -> datetime.datetime:
-        with exiftool.ExifToolHelper() as et:
-            exif = et.get_metadata(self.path)[0]
-            try:
-                cdate = datetime.datetime.strptime(exif["EXIF:DateTimeOriginal"], "%Y:%m:%d %H:%M:%S")
-                LOGGER.debug(f"{self.path}: {cdate}")
-            except (exiftool.exceptions.ExifToolTagNameError, KeyError) as e:
-                LOGGER.info(f"{e}")
-                cdate = self.DEFAULT_DATE
+        with PIL.Image.open(self.path) as im:
+            exif = im.getexif()
+            exif_ifd = exif.get_ifd(PIL.ExifTags.IFD.Exif)
+        try:
+            cdate = datetime.datetime.strptime(exif_ifd[PIL.ExifTags.Base.DateTimeOriginal], "%Y:%m:%d %H:%M:%S")
+        except KeyError as e:
+            LOGGER.info(f"{e}")
+            cdate = self.DEFAULT_DATE
 
         return cdate
 
     @property
     def metadata(self):
-        with exiftool.ExifToolHelper() as et:
-            exif = et.get_metadata(self.path)[0]
-        return exif
+        with PIL.Image.open(self.path) as im:
+            return im.getexif().get_ifd(PIL.ExifTags.IFD.Exif)
 
     @classmethod
     def add_metadata(cls, file: pathlib.Path, **kwargs):
