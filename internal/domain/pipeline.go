@@ -102,6 +102,7 @@ type ManifestEntry struct {
 // and updated after each file completes a pipeline stage.
 type Manifest struct {
 	Version     int              `json:"version"`
+	PixeVersion string           `json:"pixe_version"`
 	Source      string           `json:"source"`
 	Destination string           `json:"destination"`
 	Algorithm   string           `json:"algorithm"`
@@ -123,6 +124,7 @@ type LedgerEntry struct {
 // It is the only file Pixe writes into the source directory.
 type Ledger struct {
 	Version     int           `json:"version"`
+	PixeVersion string        `json:"pixe_version"`
 	PixeRun     time.Time     `json:"pixe_run"`
 	Algorithm   string        `json:"algorithm"`
 	Destination string        `json:"destination"`

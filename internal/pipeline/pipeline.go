@@ -37,6 +37,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
+	"github.com/cwlls/pixe-go/internal/version"
 )
 
 // SortOptions holds the resolved runtime options for a sort run.
@@ -87,6 +88,7 @@ func Run(opts SortOptions) (SortResult, error) {
 	if m == nil {
 		m = &domain.Manifest{
 			Version:     1,
+			PixeVersion: version.Version,
 			Source:      dirA,
 			Destination: dirB,
 			Algorithm:   opts.Hasher.Algorithm(),
@@ -142,6 +144,7 @@ func Run(opts SortOptions) (SortResult, error) {
 
 	ledger := &domain.Ledger{
 		Version:     1,
+		PixeVersion: version.Version,
 		PixeRun:     m.StartedAt,
 		Algorithm:   opts.Hasher.Algorithm(),
 		Destination: dirB,

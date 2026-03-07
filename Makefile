@@ -9,15 +9,15 @@ BINARY      := pixe
 MAIN        := .
 BUILD_DIR   := .
 
-# Embed version info at link time
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Embed build-time metadata at link time.
+# Version is NOT injected here — it is a const in internal/version/version.go.
+# Only Commit and BuildDate are injected as vars.
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE  ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS     := -s -w \
-               -X '$(MODULE)/cmd.Version=$(VERSION)' \
-               -X '$(MODULE)/cmd.Commit=$(COMMIT)' \
-               -X '$(MODULE)/cmd.BuildDate=$(BUILD_DATE)'
+               -X '$(MODULE)/internal/version.Commit=$(COMMIT)' \
+               -X '$(MODULE)/internal/version.BuildDate=$(BUILD_DATE)'
 
 # Test flags
 TEST_FLAGS  := -race -timeout 120s

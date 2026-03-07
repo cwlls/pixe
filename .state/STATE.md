@@ -20,12 +20,24 @@
 | 16 | CLI: `pixe resume` Command | Medium | @developer | ✅ Complete | 4, 9, 10 | Load manifest, skip completed, re-enter pipeline |
 | 17 | Integration Tests & Safety Audit | High | @tester | ✅ Complete | 10, 15, 16 | End-to-end with fixture files, interrupt simulation |
 | 18 | Makefile & Build Tooling | Medium | @developer | ✅ Complete | 1 | help, build, test, lint, check, install targets; ldflags version injection |
+| 19 | Version Package — Single Source of Truth | High | @developer | ✅ Complete | — | `internal/version/version.go`: const, vars, `Full()` accessor |
+| 20 | CLI: `pixe version` Command | High | @developer | ✅ Complete | 19 | Cobra subcommand in `cmd/version.go` |
+| 21 | Domain Structs — Add `PixeVersion` Field | High | @developer | ✅ Complete | 19 | Add field to `Manifest` and `Ledger` in `internal/domain/pipeline.go` |
+| 22 | Pipeline — Populate `PixeVersion` at Runtime | High | @developer | ✅ Complete | 19, 21 | Wire `version.Version` into manifest/ledger creation in pipeline + worker |
+| 23 | Makefile — Retarget ldflags to `internal/version` | Medium | @developer | ✅ Complete | 19 | Update LDFLAGS paths, remove Version override |
+| 24 | Tests & Verification | High | @tester | ✅ Complete | 19, 20, 21, 22, 23 | Unit tests for version pkg, manifest round-trip with new field, `go vet`, full test suite green |
 
 ---
 
-## Project Complete
+## Milestone: Tasks 1–18 Complete
 
-All 18 tasks have been completed. The pixe-go photo organization tool is fully functional with support for sorting, verifying, and resuming operations across JPEG, HEIC, and MP4 file types.
+All 18 original tasks have been completed. The pixe-go photo organization tool is fully functional with support for sorting, verifying, and resuming operations across JPEG, HEIC, and MP4 file types.
+
+## Feature: Centralized Version Management (Tasks 19–24) — Complete
+
+Adds a single-source-of-truth version package, a `pixe version` CLI command, and embeds the Pixe version into manifests and ledgers. See Architecture Section 3.
+
+All 24 tasks complete. `pixe v0.9.0` ships with full version management.
 
 ---
 
@@ -549,3 +561,432 @@ type SortOptions struct {
 - Test targets exclude integration tests by default using `grep -v '/integration'`.
 - Uses `.PHONY` declarations for all targets to avoid filename conflicts.
 - Coverage output uses atomic mode for accurate parallel test coverage.
+
+---
+
+## Task 19 — Version Package — Single Source of Truth
+
+**Goal:** Create `internal/version/version.go` as the centralized, importable version package. This is the foundation that all other version-related tasks depend on.
+
+**Architecture Reference:** Section 3 (Version Management)
+
+**File to create: `internal/version/version.go`**
+
+```go
+// Copyright 2026 Chris Wells <chris@rhza.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// ...
+
+// Package version provides the centralized version constant for Pixe.
+// This is the single source of truth — update the Version constant here
+// when cutting a new release.
+package version
+
+import "fmt"
+
+// Version is the semantic version of Pixe (without the "v" prefix).
+// Update this value when cutting a new release.
+const Version = "0.9.0"
+
+// Commit is the short git SHA, injected at build time via -ldflags.
+// Example: go build -ldflags "-X 'github.com/cwlls/pixe-go/internal/version.Commit=abc1234'"
+var Commit = "unknown"
+
+// BuildDate is the UTC build timestamp, injected at build time via -ldflags.
+// Example: go build -ldflags "-X 'github.com/cwlls/pixe-go/internal/version.BuildDate=2026-03-06T10:30:00Z'"
+var BuildDate = "unknown"
+
+// Full returns the human-readable version string.
+// Example output: "pixe v0.9.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)"
+func Full() string {
+    return fmt.Sprintf("pixe v%s (commit: %s, built: %s)", Version, Commit, BuildDate)
+}
+```
+
+**Acceptance Criteria:**
+- `internal/version` package compiles.
+- `version.Version` is the string `"0.9.0"`.
+- `version.Commit` defaults to `"unknown"` (overridable by ldflags).
+- `version.BuildDate` defaults to `"unknown"` (overridable by ldflags).
+- `version.Full()` returns `"pixe v0.9.0 (commit: unknown, built: unknown)"` when not built with ldflags.
+- The package is importable by any other internal package (`cmd`, `pipeline`, `manifest`, etc.).
+- Include the standard Apache 2.0 license header matching the project convention.
+
+**Technical Notes:**
+- `Version` is a `const` — it cannot be overridden by ldflags. This is intentional: the Go source file is the single source of truth for the version number.
+- `Commit` and `BuildDate` are `var` — they *can* be overridden by ldflags at build time.
+- No dependencies beyond `fmt`.
+
+---
+
+## Task 20 — CLI: `pixe version` Command
+
+**Goal:** Add a `pixe version` Cobra subcommand that prints the human-readable version string and exits.
+
+**Architecture Reference:** Section 7.1 (`pixe version`)
+
+**Depends on:** Task 19 (the `internal/version` package must exist)
+
+**File to create: `cmd/version.go`**
+
+```go
+// Copyright 2026 Chris Wells <chris@rhza.org>
+// ...
+
+package cmd
+
+import (
+    "fmt"
+
+    "github.com/cwlls/pixe-go/internal/version"
+    "github.com/spf13/cobra"
+)
+
+var versionCmd = &cobra.Command{
+    Use:   "version",
+    Short: "Print the version of Pixe",
+    Long:  "Print the version, git commit, and build date of the Pixe binary.",
+    Args:  cobra.NoArgs,
+    Run: func(cmd *cobra.Command, args []string) {
+        fmt.Println(version.Full())
+    },
+}
+
+func init() {
+    rootCmd.AddCommand(versionCmd)
+}
+```
+
+**Acceptance Criteria:**
+- `pixe version` prints exactly one line to stdout in the format: `pixe v0.9.0 (commit: <hash>, built: <date>)`
+- `pixe version` exits with code 0.
+- `pixe version --help` shows the short/long description.
+- `pixe version` accepts no arguments — `pixe version foo` returns an error.
+- The `version` subcommand appears in `pixe --help` output.
+- No flags on this command.
+- Include the standard Apache 2.0 license header.
+
+---
+
+## Task 21 — Domain Structs — Add `PixeVersion` Field
+
+**Goal:** Add a `PixeVersion` field to both `domain.Manifest` and `domain.Ledger` so that every manifest and ledger records which version of Pixe produced it.
+
+**Architecture Reference:** Section 3.4 (Consumers), Section 8.1/8.2 (updated JSON schemas)
+
+**Depends on:** Task 19 (the field's value will come from `version.Version`, but the struct change itself only needs to know the field type — `string`)
+
+**File to modify: `internal/domain/pipeline.go`**
+
+Add `PixeVersion string` field to both structs, positioned immediately after the `Version int` field for readability:
+
+```go
+// Manifest is the top-level operational journal written to
+// dirB/.pixe/manifest.json.
+type Manifest struct {
+    Version     int              `json:"version"`
+    PixeVersion string           `json:"pixe_version"`   // ← NEW
+    Source      string           `json:"source"`
+    Destination string           `json:"destination"`
+    Algorithm   string           `json:"algorithm"`
+    StartedAt   time.Time        `json:"started_at"`
+    Workers     int              `json:"workers"`
+    Files       []*ManifestEntry `json:"files"`
+}
+
+// Ledger is the source-side record written to dirA/.pixe_ledger.json.
+type Ledger struct {
+    Version     int           `json:"version"`
+    PixeVersion string        `json:"pixe_version"`   // ← NEW
+    PixeRun     time.Time     `json:"pixe_run"`
+    Algorithm   string        `json:"algorithm"`
+    Destination string        `json:"destination"`
+    Files       []LedgerEntry `json:"files"`
+}
+```
+
+**Acceptance Criteria:**
+- `domain.Manifest` has a `PixeVersion string` field with JSON tag `"pixe_version"`.
+- `domain.Ledger` has a `PixeVersion string` field with JSON tag `"pixe_version"`.
+- `go build ./...` succeeds — no compilation errors from existing code that constructs these structs (struct literal fields are named, so adding a new field is backward-compatible).
+- Existing tests in `internal/domain/pipeline_test.go` still pass (they don't reference the new field).
+- JSON round-trip: a manifest serialized with `PixeVersion: "0.9.0"` deserializes back with the same value.
+
+**Impact Analysis — Existing struct literals that must be updated (Task 22):**
+The following locations construct `Manifest` or `Ledger` with named fields and will need `PixeVersion` added:
+1. `internal/pipeline/pipeline.go` line ~88: `m = &domain.Manifest{Version: 1, ...}`
+2. `internal/pipeline/pipeline.go` line ~143: `ledger := &domain.Ledger{Version: 1, ...}`
+3. `internal/pipeline/worker.go` line ~127: `ledger := &domain.Ledger{Version: 1, ...}`
+4. `internal/pipeline/worker.go` line ~384: `ledger := &domain.Ledger{Version: 1, ...}`
+5. `internal/manifest/manifest_test.go` line ~31: `sampleManifest()` — `&domain.Manifest{Version: 1, ...}`
+6. `internal/manifest/manifest_test.go` line ~53: `sampleLedger()` — `&domain.Ledger{Version: 1, ...}`
+7. `internal/integration/integration_test.go` — does not construct Manifest/Ledger directly (uses `pipeline.Run`), so no change needed.
+
+> **Note:** Because Go struct literals use named fields, adding a new field does NOT break compilation. However, the new field will be zero-value (`""`) until Task 22 populates it. Tests in Task 24 will verify the field is populated.
+
+---
+
+## Task 22 — Pipeline — Populate `PixeVersion` at Runtime
+
+**Goal:** Wire `version.Version` into every location that constructs a `domain.Manifest` or `domain.Ledger`, so the version is recorded in the output JSON.
+
+**Architecture Reference:** Section 3.4 (Consumers table)
+
+**Depends on:** Task 19 (`internal/version` package), Task 21 (`PixeVersion` field exists on structs)
+
+**Files to modify:**
+
+### 1. `internal/pipeline/pipeline.go`
+
+Add import:
+```go
+import "github.com/cwlls/pixe-go/internal/version"
+```
+
+At line ~88, where a new manifest is created:
+```go
+// BEFORE:
+m = &domain.Manifest{
+    Version:     1,
+    Source:      dirA,
+    ...
+}
+
+// AFTER:
+m = &domain.Manifest{
+    Version:     1,
+    PixeVersion: version.Version,   // ← ADD
+    Source:      dirA,
+    ...
+}
+```
+
+At line ~143, where the ledger is created:
+```go
+// BEFORE:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeRun:     m.StartedAt,
+    ...
+}
+
+// AFTER:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeVersion: version.Version,   // ← ADD
+    PixeRun:     m.StartedAt,
+    ...
+}
+```
+
+### 2. `internal/pipeline/worker.go`
+
+Add import:
+```go
+import "github.com/cwlls/pixe-go/internal/version"
+```
+
+At line ~127 (`RunConcurrent` ledger creation):
+```go
+// BEFORE:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeRun:     m.StartedAt,
+    ...
+}
+
+// AFTER:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeVersion: version.Version,   // ← ADD
+    PixeRun:     m.StartedAt,
+    ...
+}
+```
+
+At line ~384 (`runSequential` ledger creation):
+```go
+// BEFORE:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeRun:     m.StartedAt,
+    ...
+}
+
+// AFTER:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeVersion: version.Version,   // ← ADD
+    PixeRun:     m.StartedAt,
+    ...
+}
+```
+
+**Acceptance Criteria:**
+- After a `pixe sort` run, `dirB/.pixe/manifest.json` contains `"pixe_version": "0.9.0"`.
+- After a `pixe sort` run, `dirA/.pixe_ledger.json` contains `"pixe_version": "0.9.0"`.
+- The `pixe_version` field appears immediately after the `version` field in the JSON output (Go's `encoding/json` serializes struct fields in declaration order).
+- All existing tests pass — the new field is additive and does not change any existing behavior.
+- `go build ./...` succeeds.
+
+---
+
+## Task 23 — Makefile — Retarget ldflags to `internal/version`
+
+**Goal:** Update the Makefile's LDFLAGS to inject `Commit` and `BuildDate` into `internal/version` instead of the non-existent `cmd` variables. Remove the `Version` ldflags override since the Go const is now authoritative.
+
+**Architecture Reference:** Section 3.2 (Build-Time Metadata)
+
+**Depends on:** Task 19 (`internal/version` package with `var Commit` and `var BuildDate`)
+
+**File to modify: `Makefile`**
+
+```makefile
+# BEFORE (lines 17-20):
+LDFLAGS     := -s -w \
+               -X '$(MODULE)/cmd.Version=$(VERSION)' \
+               -X '$(MODULE)/cmd.Commit=$(COMMIT)' \
+               -X '$(MODULE)/cmd.BuildDate=$(BUILD_DATE)'
+
+# AFTER:
+LDFLAGS     := -s -w \
+               -X '$(MODULE)/internal/version.Commit=$(COMMIT)' \
+               -X '$(MODULE)/internal/version.BuildDate=$(BUILD_DATE)'
+```
+
+Also remove the `VERSION` variable (line 13) since it is no longer injected:
+
+```makefile
+# BEFORE (line 13):
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+
+# AFTER: (remove this line entirely)
+```
+
+**Acceptance Criteria:**
+- `make build` succeeds.
+- `./pixe version` prints `pixe v0.9.0 (commit: <actual-short-sha>, built: <actual-utc-timestamp>)`.
+- The `Commit` value matches `git rev-parse --short HEAD`.
+- The `BuildDate` value is a valid UTC timestamp.
+- `go build ./...` (without ldflags) still works — `./pixe version` prints `pixe v0.9.0 (commit: unknown, built: unknown)`.
+- No references to `cmd.Version`, `cmd.Commit`, or `cmd.BuildDate` remain in the Makefile.
+
+---
+
+## Task 24 — Tests & Verification
+
+**Goal:** Add unit tests for the new version package, update existing manifest tests to cover the `PixeVersion` field, and verify the entire test suite passes.
+
+**Architecture Reference:** Section 3 (Version Management)
+
+**Depends on:** Tasks 19, 20, 21, 22, 23 (all implementation tasks complete)
+
+### 1. New file: `internal/version/version_test.go`
+
+```go
+package version
+
+import (
+    "strings"
+    "testing"
+)
+
+func TestVersion_isSet(t *testing.T) {
+    if Version == "" {
+        t.Error("Version constant must not be empty")
+    }
+}
+
+func TestVersion_semverFormat(t *testing.T) {
+    // Must be MAJOR.MINOR.PATCH — no "v" prefix.
+    parts := strings.Split(Version, ".")
+    if len(parts) != 3 {
+        t.Errorf("Version %q is not in MAJOR.MINOR.PATCH format", Version)
+    }
+    if strings.HasPrefix(Version, "v") {
+        t.Errorf("Version %q should not have a 'v' prefix", Version)
+    }
+}
+
+func TestFull_format(t *testing.T) {
+    s := Full()
+    // Must start with "pixe v"
+    if !strings.HasPrefix(s, "pixe v") {
+        t.Errorf("Full() = %q, want prefix 'pixe v'", s)
+    }
+    // Must contain the version constant
+    if !strings.Contains(s, Version) {
+        t.Errorf("Full() = %q, does not contain Version %q", s, Version)
+    }
+    // Must contain commit and built labels
+    if !strings.Contains(s, "commit:") {
+        t.Errorf("Full() = %q, missing 'commit:' label", s)
+    }
+    if !strings.Contains(s, "built:") {
+        t.Errorf("Full() = %q, missing 'built:' label", s)
+    }
+}
+
+func TestFull_defaultValues(t *testing.T) {
+    // Without ldflags, Commit and BuildDate should be "unknown".
+    s := Full()
+    if !strings.Contains(s, "unknown") {
+        t.Logf("Full() = %q — Commit=%q BuildDate=%q", s, Commit, BuildDate)
+        // This is not a hard failure because ldflags may have been set.
+        // But in a normal `go test` run, they should be "unknown".
+    }
+}
+```
+
+### 2. Update: `internal/manifest/manifest_test.go`
+
+Update `sampleManifest()` and `sampleLedger()` to include the `PixeVersion` field, and add assertions:
+
+In `sampleManifest()` (~line 31):
+```go
+// ADD after Version: 1,
+PixeVersion: "0.9.0",
+```
+
+In `sampleLedger()` (~line 53):
+```go
+// ADD after Version: 1,
+PixeVersion: "0.9.0",
+```
+
+Add a new test or extend `TestManifest_SaveLoad_roundtrip` to assert:
+```go
+if got.PixeVersion != m.PixeVersion {
+    t.Errorf("PixeVersion: got %q, want %q", got.PixeVersion, m.PixeVersion)
+}
+```
+
+Add a similar assertion to `TestLedger_SaveLoad_roundtrip`:
+```go
+if got.PixeVersion != l.PixeVersion {
+    t.Errorf("PixeVersion: got %q, want %q", got.PixeVersion, l.PixeVersion)
+}
+```
+
+### 3. Verification commands
+
+After all implementation tasks are complete, run:
+
+```bash
+go vet ./...                                    # No warnings
+go build ./...                                  # Compiles cleanly
+go test -race -timeout 120s ./...               # All tests pass (unit + integration)
+make build && ./pixe version                    # Prints version with real commit/date
+```
+
+**Acceptance Criteria:**
+- `internal/version/version_test.go` exists and all tests pass.
+- `TestVersion_isSet` confirms the constant is non-empty.
+- `TestVersion_semverFormat` confirms `MAJOR.MINOR.PATCH` format without `v` prefix.
+- `TestFull_format` confirms the output string structure.
+- Manifest round-trip test asserts `PixeVersion` survives save/load.
+- Ledger round-trip test asserts `PixeVersion` survives save/load.
+- `go vet ./...` reports no issues.
+- `go test -race -timeout 120s ./...` passes (all unit + integration tests).
+- `make build && ./pixe version` prints the expected format with real git metadata.

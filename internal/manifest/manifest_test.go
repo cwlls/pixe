@@ -29,6 +29,7 @@ func sampleManifest(dirB string) *domain.Manifest {
 	verified := now.Add(2 * time.Second)
 	return &domain.Manifest{
 		Version:     1,
+		PixeVersion: "0.9.0",
 		Source:      "/tmp/source",
 		Destination: dirB,
 		Algorithm:   "sha1",
@@ -51,6 +52,7 @@ func sampleLedger() *domain.Ledger {
 	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
 	return &domain.Ledger{
 		Version:     1,
+		PixeVersion: "0.9.0",
 		PixeRun:     now,
 		Algorithm:   "sha1",
 		Destination: "/tmp/dest",
@@ -96,6 +98,9 @@ func TestManifest_SaveLoad_roundtrip(t *testing.T) {
 	// Structural equality checks.
 	if got.Version != m.Version {
 		t.Errorf("Version: got %d, want %d", got.Version, m.Version)
+	}
+	if got.PixeVersion != m.PixeVersion {
+		t.Errorf("PixeVersion: got %q, want %q", got.PixeVersion, m.PixeVersion)
 	}
 	if got.Source != m.Source {
 		t.Errorf("Source: got %q, want %q", got.Source, m.Source)
@@ -196,6 +201,9 @@ func TestLedger_SaveLoad_roundtrip(t *testing.T) {
 	}
 	if got.Version != l.Version {
 		t.Errorf("Version: got %d, want %d", got.Version, l.Version)
+	}
+	if got.PixeVersion != l.PixeVersion {
+		t.Errorf("PixeVersion: got %q, want %q", got.PixeVersion, l.PixeVersion)
 	}
 	if got.Algorithm != l.Algorithm {
 		t.Errorf("Algorithm: got %q, want %q", got.Algorithm, l.Algorithm)
