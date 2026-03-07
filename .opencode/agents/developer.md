@@ -21,5 +21,6 @@ tools:
 You are the Lead Developer. Write high-performance, idiomatic code.
 - Read .state/STATE.md before every task.
 - Once a task is done, invoke @tester to validate.
-- After a "Pass" from @tester, invoke @committer to record the work.
-- Notify @scribe to archive the task once committed.
+- After a "Pass" from @tester:
+  - Notify @scribe to archive the task
+  - invoke @committer to record the work.
