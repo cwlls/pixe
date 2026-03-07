@@ -10,7 +10,7 @@
 | 6 | Path Builder (Naming & Dedup) | High | @developer | ✅ Complete | 2, 3 | Deterministic output paths, duplicate routing |
 | 7 | JPEG Filetype Module | High | @developer | ✅ Complete | 2, 3 | First concrete handler — proves the contract |
 | 8 | Copy & Verify Engine | High | @developer | ✅ Complete | 3, 4, 6 | Streamed copy, post-copy re-hash, manifest updates |
-| 9 | Sort Pipeline Orchestrator | High | @developer | ⬜ Pending | 5, 7, 8 | Single-threaded first: discover → extract → hash → copy → verify |
+| 9 | Sort Pipeline Orchestrator | High | @developer | ✅ Complete | 5, 7, 8 | Single-threaded first: discover → extract → hash → copy → verify |
 | 10 | CLI: `pixe sort` Command | High | @developer | ⬜ Pending | 9 | Cobra command, Viper flag binding, dry-run mode |
 | 11 | Worker Pool & Concurrency | Medium | @developer | ⬜ Pending | 9 | Coordinator + N workers, configurable --workers |
 | 12 | HEIC Filetype Module | Medium | @developer | ⬜ Pending | 7 | Second handler — validates contract generality |
