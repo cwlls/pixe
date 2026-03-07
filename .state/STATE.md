@@ -30,6 +30,21 @@
 | 26 | Locale-Aware Month Directory — `pathbuilder` rewrite | High | @developer | 🔲 Pending | 6 | Change month dir from `2` to `02-Feb` (locale-aware); add `MonthDir()` helper |
 | 27 | Update Tests — Month Directory Format | High | @developer | 🔲 Pending | 26 | Rewrite pathbuilder, pipeline, and integration tests for `MM-Mon` format |
 | 28 | Tests & Verification — Full Suite Green | High | @tester | 🔲 Pending | 26, 27 | `go vet`, `go test -race ./...`, `make lint` all pass |
+| 29 | Archive DB — `internal/archivedb` package & schema | High | @developer | 🔲 Pending | 2 | SQLite database layer: Open, Close, schema creation, WAL mode, busy timeout |
+| 30 | Archive DB — Run & File CRUD operations | High | @developer | 🔲 Pending | 29 | InsertRun, UpdateRun, InsertFile, UpdateFile, dedup query, batch insert |
+| 31 | Archive DB — Query methods | Medium | @developer | 🔲 Pending | 30 | Query families: by source, date range, run, status, checksum, duplicates |
+| 32 | DB Location Resolver — `internal/dblocator` package | High | @developer | 🔲 Pending | 29 | Priority chain: --db-path → dbpath marker → local default; network mount detection; slug generation |
+| 33 | Domain Types — SQLite-era updates | High | @developer | 🔲 Pending | 2, 29 | Add `RunID` to Ledger, bump ledger version to 2, add `DBPath` to AppConfig |
+| 34 | JSON Manifest Migration — `internal/migrate` package | High | @developer | 🔲 Pending | 29, 30 | Auto-detect manifest.json, create synthetic run, import entries, rename to .migrated |
+| 35 | Pipeline Refactor — Replace JSON manifest with archive DB | High | @developer | 🔲 Pending | 29, 30, 32, 33 | Rewrite pipeline.go and worker.go to use archivedb instead of manifest.Save/Load |
+| 36 | Pipeline — Cross-process dedup race handling | Medium | @developer | 🔲 Pending | 35 | Post-commit dedup re-check, retroactive duplicate routing |
+| 37 | CLI Updates — `--db-path` flag & resume rewrite | High | @developer | 🔲 Pending | 32, 35 | Add --db-path to sort/resume, update resume to use DB discovery chain |
+| 38 | Ledger Update — Add `run_id` field | Medium | @developer | 🔲 Pending | 33, 35 | Wire run UUID into ledger creation, bump version to 2 |
+| 39 | Archive DB — Unit tests | High | @tester | 🔲 Pending | 29, 30, 31 | Schema creation, CRUD, queries, WAL concurrency, busy retry |
+| 40 | DB Locator — Unit tests | High | @tester | 🔲 Pending | 32 | Local/network detection, slug generation, dbpath marker read/write |
+| 41 | Migration — Unit tests | High | @tester | 🔲 Pending | 34 | JSON→SQLite migration, idempotency, synthetic run correctness |
+| 42 | Integration Tests — SQLite pipeline end-to-end | High | @tester | 🔲 Pending | 35, 36, 37, 38 | Full sort→verify→resume cycle using DB, concurrent run simulation |
+| 43 | Tests & Verification — Full Suite Green | High | @tester | 🔲 Pending | 39, 40, 41, 42 | `go vet`, `go test -race ./...`, `make lint` all pass |
 
 ---
 
@@ -1557,3 +1572,1179 @@ make lint                                       # 0 issues
 - `go mod tidy` produces no diff.
 - No `.go` file references the old `fmt.Sprintf("%d", month)` pattern for directory names.
 - No `.go` file contains the phrase "non-zero-padded" (old spec language).
+
+---
+
+## Feature: Archive Database — JSON Manifest → SQLite (Tasks 29–43)
+
+Replaces the JSON manifest (`dirB/.pixe/manifest.json`) with a SQLite database (`pixe.db`) that serves as a cumulative registry of all files ever sorted into a destination archive. Enables indexed queries, concurrent-process safety, persistent deduplication, and run history tracking. See Architecture Section 8.
+
+**Design decisions captured from user:**
+1. **Cumulative registry** — every run enriches the DB; permanent history across all sources.
+2. **Concurrent access** — WAL mode + busy retry for simultaneous runs from different sources.
+3. **DB location** — local `dirB` → `dirB/.pixe/pixe.db`; network mount → `~/.pixe/databases/<slug>.db` with user notice; `--db-path` override always wins.
+4. **Discoverability** — `dirB/.pixe/dbpath` marker file when DB is stored outside `dirB`.
+5. **Ledger** — kept as JSON in `dirA`, enriched with `run_id` linking back to the DB.
+6. **Migration** — auto-migrate JSON → SQLite on first encounter, preserve original as `.migrated`.
+7. **Write granularity** — commit per file for crash safety.
+8. **SQLite driver** — CGo-free `modernc.org/sqlite` for single-binary distribution.
+
+---
+
+## Task 29 — Archive DB — `internal/archivedb` Package & Schema
+
+**Goal:** Create the foundational SQLite database package that manages connection lifecycle, schema creation, and database configuration (WAL mode, busy timeout, foreign keys).
+
+**Architecture Reference:** Section 8.3 (Schema Design), Section 8.5 (Concurrency & Integrity)
+
+**Depends on:** Task 2 (domain types for `FileStatus` constants)
+
+**New dependency:** `modernc.org/sqlite` — a CGo-free SQLite implementation for Go. Add via:
+```bash
+go get modernc.org/sqlite
+```
+
+**File to create: `internal/archivedb/archivedb.go`**
+
+```go
+// Package archivedb provides SQLite-backed persistence for the Pixe archive
+// database. It replaces the earlier JSON manifest with a cumulative registry
+// that tracks all files ever sorted into a destination archive across all runs.
+//
+// The database uses WAL mode for concurrent-process safety and commits each
+// file completion individually for crash recovery.
+package archivedb
+
+import (
+    "database/sql"
+    "fmt"
+    "time"
+
+    _ "modernc.org/sqlite" // CGo-free SQLite driver
+)
+
+// DB wraps a SQLite database connection for the Pixe archive.
+type DB struct {
+    conn *sql.DB
+    path string
+}
+
+// Open opens (or creates) the archive database at the given path.
+// It applies the schema if the database is new, configures WAL mode,
+// busy timeout, and enables foreign keys.
+func Open(path string) (*DB, error) { ... }
+
+// Close closes the database connection.
+func (db *DB) Close() error { ... }
+
+// Path returns the filesystem path to the database file.
+func (db *DB) Path() string { return db.path }
+```
+
+**File to create: `internal/archivedb/schema.go`**
+
+```go
+package archivedb
+
+// schemaVersion is the current schema version.
+const schemaVersion = 1
+
+// applySchema creates all tables and indexes if they do not exist,
+// and records the schema version.
+func (db *DB) applySchema() error { ... }
+```
+
+The schema DDL (executed within a single transaction):
+
+```sql
+CREATE TABLE IF NOT EXISTS schema_version (
+    version    INTEGER NOT NULL,
+    applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id            TEXT PRIMARY KEY,
+    pixe_version  TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    destination   TEXT NOT NULL,
+    algorithm     TEXT NOT NULL,
+    workers       INTEGER NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    status        TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'completed', 'interrupted'))
+);
+
+CREATE TABLE IF NOT EXISTS files (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT NOT NULL REFERENCES runs(id),
+    source_path   TEXT NOT NULL,
+    dest_path     TEXT,
+    dest_rel      TEXT,
+    checksum      TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN (
+            'pending', 'extracted', 'hashed', 'copied',
+            'verified', 'tagged', 'complete',
+            'failed', 'mismatch', 'tag_failed', 'duplicate'
+        )),
+    is_duplicate  INTEGER NOT NULL DEFAULT 0,
+    capture_date  TEXT,
+    file_size     INTEGER,
+    extracted_at  TEXT,
+    hashed_at     TEXT,
+    copied_at     TEXT,
+    verified_at   TEXT,
+    tagged_at     TEXT,
+    error         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_checksum ON files(checksum) WHERE status = 'complete';
+CREATE INDEX IF NOT EXISTS idx_files_run_id ON files(run_id);
+CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
+CREATE INDEX IF NOT EXISTS idx_files_source ON files(source_path);
+CREATE INDEX IF NOT EXISTS idx_files_capture_date ON files(capture_date);
+```
+
+After creating tables, insert the schema version row if not present:
+```sql
+INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (1, ?);
+```
+
+**Database configuration PRAGMAs** (applied on every `Open`):
+```sql
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
+PRAGMA foreign_keys=ON;
+```
+
+**Acceptance Criteria:**
+- `archivedb.Open("/tmp/test.db")` creates a new database with all tables and indexes.
+- Opening an existing database does not re-create tables (uses `IF NOT EXISTS`).
+- `PRAGMA journal_mode` returns `wal` after open.
+- `PRAGMA foreign_keys` returns `1` after open.
+- `db.Close()` cleanly closes the connection.
+- `schema_version` table contains exactly one row with `version=1`.
+- `go build ./...` succeeds with the new `modernc.org/sqlite` dependency.
+
+---
+
+## Task 30 — Archive DB — Run & File CRUD Operations
+
+**Goal:** Add methods to the `archivedb.DB` type for creating/updating runs and files — the core write path used by the pipeline.
+
+**Architecture Reference:** Section 8.3 (Schema), Section 8.5 (Transaction Granularity)
+
+**Depends on:** Task 29
+
+**File to create: `internal/archivedb/runs.go`**
+
+```go
+package archivedb
+
+import "time"
+
+// Run represents a row in the runs table.
+type Run struct {
+    ID           string
+    PixeVersion  string
+    Source       string
+    Destination  string
+    Algorithm    string
+    Workers      int
+    StartedAt    time.Time
+    FinishedAt   *time.Time
+    Status       string // "running", "completed", "interrupted"
+}
+
+// InsertRun creates a new run record with status "running".
+// The ID should be a UUID v4 generated by the caller.
+func (db *DB) InsertRun(r *Run) error { ... }
+
+// CompleteRun sets the run's status to "completed" and records finished_at.
+func (db *DB) CompleteRun(runID string, finishedAt time.Time) error { ... }
+
+// InterruptRun sets the run's status to "interrupted" and records finished_at.
+func (db *DB) InterruptRun(runID string, finishedAt time.Time) error { ... }
+
+// GetRun retrieves a run by ID. Returns (nil, nil) if not found.
+func (db *DB) GetRun(runID string) (*Run, error) { ... }
+
+// FindInterruptedRuns returns all runs with status "running" (i.e., interrupted).
+func (db *DB) FindInterruptedRuns() ([]*Run, error) { ... }
+```
+
+**File to create: `internal/archivedb/files.go`**
+
+```go
+package archivedb
+
+import "time"
+
+// FileRecord represents a row in the files table.
+type FileRecord struct {
+    ID           int64
+    RunID        string
+    SourcePath   string
+    DestPath     *string  // nil until copied
+    DestRel      *string  // nil until copied
+    Checksum     *string  // nil until hashed
+    Status       string
+    IsDuplicate  bool
+    CaptureDate  *time.Time
+    FileSize     *int64
+    ExtractedAt  *time.Time
+    HashedAt     *time.Time
+    CopiedAt     *time.Time
+    VerifiedAt   *time.Time
+    TaggedAt     *time.Time
+    Error        *string
+}
+
+// InsertFile creates a new file record with status "pending".
+// Returns the auto-generated ID.
+func (db *DB) InsertFile(f *FileRecord) (int64, error) { ... }
+
+// InsertFiles batch-inserts multiple file records within a single transaction.
+// Returns the IDs of the inserted records.
+func (db *DB) InsertFiles(files []*FileRecord) ([]int64, error) { ... }
+
+// UpdateFileStatus updates a file's status and the corresponding timestamp.
+// The timestamp field is determined by the status:
+//   - "extracted" → extracted_at
+//   - "hashed"    → hashed_at, also sets checksum
+//   - "copied"    → copied_at, also sets dest_path, dest_rel
+//   - "verified"  → verified_at
+//   - "tagged"    → tagged_at
+//   - "complete"  → (no additional timestamp)
+//   - "failed"/"mismatch"/"tag_failed" → sets error field
+func (db *DB) UpdateFileStatus(fileID int64, status string, opts ...UpdateOption) error { ... }
+
+// UpdateOption configures optional fields on a file status update.
+type UpdateOption func(*updateParams)
+
+func WithChecksum(checksum string) UpdateOption { ... }
+func WithDestination(destPath, destRel string) UpdateOption { ... }
+func WithCaptureDate(t time.Time) UpdateOption { ... }
+func WithFileSize(size int64) UpdateOption { ... }
+func WithError(msg string) UpdateOption { ... }
+func WithIsDuplicate(dup bool) UpdateOption { ... }
+
+// CheckDuplicate queries whether a file with the given checksum exists
+// with status "complete". Returns the dest_rel path if found, empty string if not.
+// This is the hot-path dedup query — served by idx_files_checksum.
+func (db *DB) CheckDuplicate(checksum string) (string, error) { ... }
+
+// GetFilesByRun returns all file records for a given run ID.
+func (db *DB) GetFilesByRun(runID string) ([]*FileRecord, error) { ... }
+
+// GetIncompleteFiles returns all files for a run that are not in a terminal state.
+// Used by resume to find files that need reprocessing.
+func (db *DB) GetIncompleteFiles(runID string) ([]*FileRecord, error) { ... }
+```
+
+**Technical Notes:**
+- `UpdateFileStatus` uses a single UPDATE statement with conditional SET clauses based on the options provided. Each call is wrapped in its own transaction (commit-per-file).
+- `InsertFiles` uses a single transaction with a prepared INSERT statement for batch efficiency during the discovery phase.
+- `CheckDuplicate` is a simple SELECT that hits the partial index `idx_files_checksum`.
+- All timestamp fields are stored as ISO 8601 UTC strings (`time.Time.UTC().Format(time.RFC3339)`).
+
+**Acceptance Criteria:**
+- `InsertRun` + `GetRun` round-trips all fields correctly.
+- `CompleteRun` sets `finished_at` and `status = "completed"`.
+- `InsertFile` returns a valid auto-increment ID.
+- `InsertFiles` batch-inserts 100 files in a single transaction.
+- `UpdateFileStatus` with `WithChecksum` sets both `status` and `checksum`.
+- `CheckDuplicate` returns the `dest_rel` for a known checksum, empty string for unknown.
+- `GetIncompleteFiles` returns only non-terminal files for a given run.
+- All operations work correctly with WAL mode enabled.
+
+---
+
+## Task 31 — Archive DB — Query Methods
+
+**Goal:** Add read-only query methods to `archivedb.DB` that expose the query patterns defined in Architecture Section 8.4. These are used by future CLI commands (`pixe query`) and by the pipeline for operational queries.
+
+**Architecture Reference:** Section 8.4 (Query Patterns)
+
+**Depends on:** Task 30
+
+**File to create: `internal/archivedb/queries.go`**
+
+```go
+package archivedb
+
+import "time"
+
+// RunSummary is a lightweight view of a run for listing purposes.
+type RunSummary struct {
+    ID          string
+    PixeVersion string
+    Source      string
+    StartedAt   time.Time
+    FinishedAt  *time.Time
+    Status      string
+    FileCount   int
+}
+
+// ListRuns returns all runs ordered by started_at descending.
+func (db *DB) ListRuns() ([]*RunSummary, error) { ... }
+
+// FilesBySource returns all files imported from a given source directory.
+func (db *DB) FilesBySource(sourceDir string) ([]*FileRecord, error) { ... }
+
+// FilesByCaptureDateRange returns completed files with capture dates in [start, end].
+func (db *DB) FilesByCaptureDateRange(start, end time.Time) ([]*FileRecord, error) { ... }
+
+// FilesByImportDateRange returns files verified within [start, end].
+func (db *DB) FilesByImportDateRange(start, end time.Time) ([]*FileRecord, error) { ... }
+
+// FilesWithErrors returns all files in error states across all runs,
+// joined with their run's source directory for context.
+type FileWithSource struct {
+    FileRecord
+    RunSource string
+}
+func (db *DB) FilesWithErrors() ([]*FileWithSource, error) { ... }
+
+// AllDuplicates returns all files marked as duplicates.
+func (db *DB) AllDuplicates() ([]*FileRecord, error) { ... }
+
+// DuplicatePairs returns each duplicate alongside the original it duplicates.
+type DuplicatePair struct {
+    DuplicateSource string
+    DuplicateDest   string
+    OriginalDest    string
+}
+func (db *DB) DuplicatePairs() ([]*DuplicatePair, error) { ... }
+
+// ArchiveInventory returns all completed, non-duplicate files (the canonical archive contents).
+type InventoryEntry struct {
+    DestRel     string
+    Checksum    string
+    CaptureDate *time.Time
+}
+func (db *DB) ArchiveInventory() ([]*InventoryEntry, error) { ... }
+```
+
+**Acceptance Criteria:**
+- `ListRuns` returns runs in reverse chronological order with file counts.
+- `FilesBySource` correctly filters by source directory path.
+- `FilesByCaptureDateRange` returns only completed files within the date range.
+- `FilesWithErrors` joins files with their run source and returns only error-state files.
+- `DuplicatePairs` correctly pairs each duplicate with its original via checksum join.
+- `ArchiveInventory` excludes duplicates and non-complete files.
+- All queries use the defined indexes (verify via `EXPLAIN QUERY PLAN` in tests).
+
+---
+
+## Task 32 — DB Location Resolver — `internal/dblocator` Package
+
+**Goal:** Implement the database location resolution logic: `--db-path` override → `dbpath` marker → local default, with network mount detection and slug generation for the fallback path.
+
+**Architecture Reference:** Section 8.2 (Database Location)
+
+**Depends on:** Task 29
+
+**File to create: `internal/dblocator/dblocator.go`**
+
+```go
+// Package dblocator resolves the filesystem path for the Pixe archive database.
+// It implements the priority chain: explicit --db-path → dbpath marker file →
+// local default (dirB/.pixe/pixe.db), with automatic fallback to
+// ~/.pixe/databases/<slug>.db when dirB is on a network filesystem.
+package dblocator
+
+// Location holds the resolved database path and metadata about the resolution.
+type Location struct {
+    // DBPath is the absolute path to the SQLite database file.
+    DBPath string
+    // IsRemote is true if dirB was detected as a network mount.
+    IsRemote bool
+    // MarkerNeeded is true if a dbpath marker should be written to dirB/.pixe/.
+    MarkerNeeded bool
+    // Notice is a user-facing message explaining the location choice.
+    // Empty if the default local path was used.
+    Notice string
+}
+
+// Resolve determines the database path for the given destination directory.
+//
+// Priority chain:
+//  1. explicitPath (from --db-path flag) — used unconditionally if non-empty.
+//  2. dirB/.pixe/dbpath marker file — if it exists, its contents are used.
+//  3. dirB/.pixe/pixe.db — if dirB is on a local filesystem.
+//  4. ~/.pixe/databases/<slug>.db — if dirB is on a network mount.
+func Resolve(dirB string, explicitPath string) (*Location, error) { ... }
+
+// WriteMarker writes the dbpath marker file at dirB/.pixe/dbpath
+// containing the absolute path to the database.
+func WriteMarker(dirB string, dbPath string) error { ... }
+
+// ReadMarker reads the dbpath marker file at dirB/.pixe/dbpath.
+// Returns ("", nil) if the marker does not exist.
+func ReadMarker(dirB string) (string, error) { ... }
+```
+
+**File to create: `internal/dblocator/filesystem.go`**
+
+```go
+package dblocator
+
+// isNetworkMount returns true if the given path resides on a network
+// filesystem (NFS, SMB/CIFS, AFP). Uses OS-level filesystem type inspection.
+func isNetworkMount(path string) (bool, error) { ... }
+```
+
+**Platform-specific implementation:**
+
+**File: `internal/dblocator/filesystem_darwin.go`**
+```go
+//go:build darwin
+
+package dblocator
+
+import "syscall"
+
+func isNetworkMount(path string) (bool, error) {
+    var stat syscall.Statfs_t
+    if err := syscall.Statfs(path, &stat); err != nil {
+        return false, err
+    }
+    // Convert Fstypename [16]int8 to string.
+    fstype := fstypeName(stat.Fstypename[:])
+    // Network filesystem types on macOS.
+    switch fstype {
+    case "nfs", "smbfs", "afpfs", "webdav":
+        return true, nil
+    }
+    return false, nil
+}
+```
+
+**File: `internal/dblocator/filesystem_linux.go`**
+```go
+//go:build linux
+
+package dblocator
+
+import "syscall"
+
+// Linux filesystem magic numbers for network mounts.
+const (
+    nfsMagic  = 0x6969
+    smbMagic  = 0x517B
+    smb2Magic = 0xFE534D42
+    cifsMagic = 0xFF534D42
+)
+
+func isNetworkMount(path string) (bool, error) {
+    var stat syscall.Statfs_t
+    if err := syscall.Statfs(path, &stat); err != nil {
+        return false, err
+    }
+    switch stat.Type {
+    case nfsMagic, smbMagic, smb2Magic, cifsMagic:
+        return true, nil
+    }
+    return false, nil
+}
+```
+
+**Slug generation:**
+
+```go
+// slug generates a human-readable identifier for a dirB path.
+// Format: <last-path-component>-<truncated-hash>.
+// Example: "/Volumes/NAS/Photos/archive" → "archive-a1b2c3d4"
+func slug(dirB string) string {
+    abs, _ := filepath.Abs(dirB)
+    base := strings.ToLower(filepath.Base(abs))
+    // Sanitize: keep only alphanumeric and hyphens.
+    base = sanitize(base)
+    if base == "" {
+        base = "pixe"
+    }
+    h := sha256.Sum256([]byte(abs))
+    return fmt.Sprintf("%s-%x", base, h[:4])
+}
+```
+
+**Marker file format:** Plain text, single line, the absolute path to the database file. No trailing newline.
+
+**Acceptance Criteria:**
+- `Resolve(dirB, "/explicit/path.db")` returns the explicit path with `MarkerNeeded=true`.
+- `Resolve(dirB, "")` on a local filesystem returns `dirB/.pixe/pixe.db` with `MarkerNeeded=false`.
+- `Resolve(dirB, "")` on a network mount returns `~/.pixe/databases/<slug>.db` with `MarkerNeeded=true` and a non-empty `Notice`.
+- `WriteMarker` + `ReadMarker` round-trips the database path.
+- `ReadMarker` returns `("", nil)` when no marker exists.
+- `slug("/Volumes/NAS/Photos/archive")` returns `"archive-<8hex>"`.
+- `slug("/")` returns `"pixe-<8hex>"` (edge case).
+- Network mount detection works on macOS (darwin build tag).
+
+---
+
+## Task 33 — Domain Types — SQLite-Era Updates
+
+**Goal:** Update the domain types and config struct to support the SQLite database: add `RunID` to the ledger, bump ledger version, and add `DBPath` to `AppConfig`.
+
+**Architecture Reference:** Section 8.8 (Ledger v2), Section 9.1 (New Flag)
+
+**Depends on:** Task 2, Task 29
+
+### Files to modify
+
+#### 1. `internal/config/config.go` — Add `DBPath` field
+
+```go
+type AppConfig struct {
+    // ... existing fields ...
+
+    // DBPath is an explicit path to the SQLite archive database.
+    // If empty, the database location is auto-resolved (see dblocator package).
+    DBPath string
+}
+```
+
+#### 2. `internal/domain/pipeline.go` — Update Ledger struct
+
+```go
+// Ledger is the source-side record written to dirA/.pixe_ledger.json.
+type Ledger struct {
+    Version     int           `json:"version"`
+    PixeVersion string        `json:"pixe_version"`
+    RunID       string        `json:"run_id"`          // ← NEW: UUID linking to archive DB
+    PixeRun     time.Time     `json:"pixe_run"`
+    Algorithm   string        `json:"algorithm"`
+    Destination string        `json:"destination"`
+    Files       []LedgerEntry `json:"files"`
+}
+```
+
+The `Version` field will be set to `2` when the ledger is created with a `RunID`. Existing code that creates ledgers with `Version: 1` will be updated in Task 38.
+
+**Acceptance Criteria:**
+- `AppConfig.DBPath` field exists and is a `string`.
+- `Ledger.RunID` field exists with JSON tag `"run_id"`.
+- `go build ./...` succeeds — the new fields are additive and don't break existing struct literals (Go named-field initialization is forward-compatible).
+- Existing tests pass unchanged.
+
+---
+
+## Task 34 — JSON Manifest Migration — `internal/migrate` Package
+
+**Goal:** Implement automatic migration from the JSON manifest to the SQLite database. When Pixe encounters `dirB/.pixe/manifest.json` but no database, it migrates all data into a new database, preserves the original file, and notifies the user.
+
+**Architecture Reference:** Section 8.7 (Migration from JSON Manifest)
+
+**Depends on:** Task 29, Task 30
+
+**File to create: `internal/migrate/migrate.go`**
+
+```go
+// Package migrate handles automatic migration from the legacy JSON manifest
+// (dirB/.pixe/manifest.json) to the SQLite archive database.
+package migrate
+
+import (
+    "github.com/cwlls/pixe-go/internal/archivedb"
+    "github.com/cwlls/pixe-go/internal/domain"
+)
+
+// Result holds the outcome of a migration attempt.
+type Result struct {
+    // Migrated is true if a migration was performed.
+    Migrated bool
+    // FileCount is the number of file entries migrated.
+    FileCount int
+    // Notice is a user-facing message describing what happened.
+    Notice string
+}
+
+// MigrateIfNeeded checks for a legacy manifest.json at dirB/.pixe/ and,
+// if found (and no .migrated version exists), migrates its contents into
+// the provided database.
+//
+// Steps:
+//  1. Check for dirB/.pixe/manifest.json — if absent, return (not migrated).
+//  2. Check for dirB/.pixe/manifest.json.migrated — if present, skip (already done).
+//  3. Read and parse the JSON manifest.
+//  4. Create a synthetic run in the DB using manifest metadata.
+//  5. Insert all file entries into the DB, mapping ManifestEntry fields to FileRecord.
+//  6. Rename manifest.json → manifest.json.migrated.
+//  7. Return the result with a user-facing notice.
+func MigrateIfNeeded(db *archivedb.DB, dirB string) (*Result, error) { ... }
+```
+
+**Field mapping from `ManifestEntry` → `FileRecord`:**
+
+| ManifestEntry field | FileRecord field | Notes |
+|---|---|---|
+| `Source` | `SourcePath` | Direct copy |
+| `Destination` | `DestPath` | Direct copy (absolute) |
+| — | `DestRel` | Computed: `strings.TrimPrefix(entry.Destination, manifest.Destination + "/")` |
+| `Checksum` | `Checksum` | Direct copy |
+| `Status` | `Status` | Direct copy (same enum values) |
+| — | `IsDuplicate` | Inferred: `strings.Contains(destRel, "duplicates/")` |
+| `ExtractedAt` | `ExtractedAt` | Direct copy |
+| `CopiedAt` | `CopiedAt` | Direct copy |
+| `VerifiedAt` | `VerifiedAt` | Direct copy |
+| `TaggedAt` | `TaggedAt` | Direct copy |
+| `Error` | `Error` | Direct copy |
+
+**Synthetic run creation:**
+
+```go
+syntheticRun := &archivedb.Run{
+    ID:          uuid.New().String(),  // or a deterministic UUID from manifest hash
+    PixeVersion: manifest.PixeVersion,
+    Source:      manifest.Source,
+    Destination: manifest.Destination,
+    Algorithm:   manifest.Algorithm,
+    Workers:     manifest.Workers,
+    StartedAt:   manifest.StartedAt,
+    FinishedAt:  &manifest.StartedAt,  // best approximation
+    Status:      "completed",          // the prior run is assumed complete
+}
+```
+
+**UUID dependency:** Add `github.com/google/uuid` for UUID v4 generation:
+```bash
+go get github.com/google/uuid
+```
+
+**Acceptance Criteria:**
+- Given a `dirB` with `manifest.json` containing 5 entries, `MigrateIfNeeded` creates a DB with 1 run and 5 files.
+- The original `manifest.json` is renamed to `manifest.json.migrated`.
+- Calling `MigrateIfNeeded` again (with `.migrated` present) returns `Migrated: false` — idempotent.
+- Calling `MigrateIfNeeded` on a `dirB` with no manifest returns `Migrated: false`.
+- The synthetic run has `status = "completed"`.
+- File entries preserve all timestamps, checksums, and statuses.
+- `IsDuplicate` is correctly inferred from the destination path.
+- The `Result.Notice` contains the file count (e.g., `"Migrated 5 files from manifest.json → pixe.db"`).
+
+---
+
+## Task 35 — Pipeline Refactor — Replace JSON Manifest with Archive DB
+
+**Goal:** Rewrite the pipeline orchestrator (`pipeline.go` and `worker.go`) to use `archivedb.DB` instead of `manifest.Save`/`manifest.Load`. This is the largest single task — it touches the core data flow.
+
+**Architecture Reference:** Section 8.5 (Transaction Granularity), Section 8.6 (Database Lifecycle)
+
+**Depends on:** Task 29, Task 30, Task 32, Task 33
+
+### High-level changes
+
+#### 1. `SortOptions` — Add DB reference
+
+```go
+type SortOptions struct {
+    Config       *config.AppConfig
+    Hasher       *hash.Hasher
+    Registry     *discovery.Registry
+    RunTimestamp string
+    Output       io.Writer
+    DB           *archivedb.DB   // ← NEW: archive database
+    RunID        string          // ← NEW: UUID for this run
+}
+```
+
+#### 2. `pipeline.Run()` — Rewrite flow
+
+**Before (JSON):**
+1. `manifest.Load(dirB)` → create or load manifest
+2. Build dedup index from manifest entries (`map[checksum]destRel`)
+3. Walk dirA, add new entries to manifest, `manifest.Save()`
+4. Process each file, mutate `ManifestEntry`, `manifest.Save()` after each
+5. Write ledger, final `manifest.Save()`
+
+**After (SQLite):**
+1. DB is already opened and passed in via `SortOptions.DB`
+2. `db.InsertRun()` with `status = "running"`
+3. Walk dirA, `db.InsertFiles()` batch-insert as `"pending"`
+4. Dedup check: `db.CheckDuplicate(checksum)` — no in-memory map needed
+5. Process each file, `db.UpdateFileStatus()` after each stage — commit per file
+6. `db.CompleteRun()` at end
+7. Write ledger with `RunID`
+
+**Key difference:** The in-memory `dedupIndex map[string]string` is replaced by `db.CheckDuplicate(checksum)`. This is a SELECT query hitting the partial index — fast and memory-bounded.
+
+#### 3. `worker.go` — Rewrite coordinator loop
+
+The coordinator currently:
+- Maintains `dedupIndex` in memory
+- Calls `saveManifest()` after each file
+
+**After:**
+- Calls `db.CheckDuplicate()` for dedup decisions
+- Calls `db.UpdateFileStatus()` after each file completes (commit per file)
+- No more `saveManifest()` calls
+
+Workers continue to operate the same way — they extract, hash, copy, verify, tag. The only change is that the coordinator writes to the DB instead of the JSON manifest.
+
+#### 4. Remove `manifest.Save`/`manifest.Load` from pipeline
+
+The `internal/manifest` package is **not deleted** — it's still needed for:
+- `manifest.Load()` — used by the migration path (Task 34)
+- `manifest.SaveLedger()` / `manifest.LoadLedger()` — ledger persistence is unchanged
+
+But `manifest.Save()` is no longer called from the pipeline.
+
+#### 5. `SortResult` — unchanged
+
+The `SortResult` struct returned by `Run()` is unchanged. The summary statistics are computed the same way.
+
+### Files to modify
+
+- `internal/pipeline/pipeline.go` — major rewrite of `Run()` and `processFile()`
+- `internal/pipeline/worker.go` — major rewrite of `RunConcurrent()` coordinator loop
+
+### Files NOT modified
+
+- `internal/manifest/manifest.go` — kept for migration and ledger
+- `internal/copy/copy.go` — unchanged
+- `internal/pathbuilder/pathbuilder.go` — unchanged
+- `internal/discovery/` — unchanged
+
+**Acceptance Criteria:**
+- `pipeline.Run()` creates a run record in the DB with `status = "running"`.
+- Each discovered file is inserted as `"pending"` via batch insert.
+- Each file completion commits a status update to the DB.
+- Dedup checks use `db.CheckDuplicate()` — no in-memory map.
+- On successful completion, the run is marked `"completed"`.
+- On context cancellation (Ctrl+C), the run is marked `"interrupted"`.
+- The ledger is still written to `dirA` via `manifest.SaveLedger()`.
+- `manifest.Save()` is no longer called anywhere in the pipeline.
+- `go build ./...` succeeds.
+- Existing pipeline tests are updated to provide a DB in `SortOptions`.
+
+---
+
+## Task 36 — Pipeline — Cross-Process Dedup Race Handling
+
+**Goal:** Handle the race condition where two simultaneous `pixe sort` processes discover the same file (identical checksum) from different sources. The second process to commit should detect the conflict and retroactively route its copy to `duplicates/`.
+
+**Architecture Reference:** Section 8.5 (Cross-Process Dedup Race Condition)
+
+**Depends on:** Task 35
+
+### Implementation
+
+After a file is copied and verified, but before marking it `"complete"`, the coordinator performs a **post-commit dedup re-check**:
+
+```go
+// In the coordinator, after copy+verify succeeds:
+existingDest, err := db.CheckDuplicate(checksum)
+if err != nil {
+    // handle error
+}
+if existingDest != "" {
+    // Another process completed this checksum while we were copying.
+    // Our copy is now a duplicate. Move it to the duplicates directory.
+    dupDest := pathbuilder.Build(captureDate, checksum, ext, true, runTimestamp)
+    if err := os.Rename(destPath, filepath.Join(dirB, dupDest)); err != nil {
+        // handle error — file is still at destPath, mark as failed
+    }
+    // Update the file record with the new duplicate destination.
+    db.UpdateFileStatus(fileID, "complete",
+        WithDestination(filepath.Join(dirB, dupDest), dupDest),
+        WithIsDuplicate(true),
+    )
+} else {
+    // We're the first — mark complete at the original destination.
+    db.UpdateFileStatus(fileID, "complete")
+}
+```
+
+**Key insight:** The dedup check and the status update must happen within the same transaction to prevent a TOCTOU race between two processes both thinking they're first. Add a method:
+
+```go
+// CompleteFileWithDedupCheck atomically checks for an existing completed file
+// with the same checksum and marks this file as complete. If a duplicate is
+// detected, it returns the existing destination path so the caller can
+// relocate the physical file.
+func (db *DB) CompleteFileWithDedupCheck(fileID int64, checksum string) (existingDest string, err error) { ... }
+```
+
+This method runs within a single transaction:
+1. `SELECT dest_rel FROM files WHERE checksum = ? AND status = 'complete' AND id != ? LIMIT 1`
+2. If found: update file with `is_duplicate = 1`, return the existing dest
+3. If not found: update file with `status = 'complete'`, return empty string
+
+**Acceptance Criteria:**
+- When two files with the same checksum are processed, the second one is correctly routed to `duplicates/`.
+- The physical file is moved (renamed) to the duplicates directory.
+- The DB record reflects `is_duplicate = 1` and the updated destination path.
+- The operation is atomic — no window where both files appear as non-duplicates.
+
+---
+
+## Task 37 — CLI Updates — `--db-path` Flag & Resume Rewrite
+
+**Goal:** Add the `--db-path` flag to `pixe sort` and `pixe resume`, and rewrite the resume command to use the database discovery chain instead of loading a JSON manifest.
+
+**Architecture Reference:** Section 9.1 (New Flag), Section 9.2 (Updated `pixe resume`)
+
+**Depends on:** Task 32, Task 35
+
+### Files to modify
+
+#### 1. `cmd/sort.go` — Add `--db-path` flag and DB lifecycle
+
+Add the flag:
+```go
+sortCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database")
+_ = viper.BindPFlag("db_path", sortCmd.Flags().Lookup("db-path"))
+```
+
+In `runSort()`, after resolving config:
+```go
+cfg.DBPath = viper.GetString("db_path")
+
+// Resolve database location.
+loc, err := dblocator.Resolve(cfg.Destination, cfg.DBPath)
+if err != nil {
+    return fmt.Errorf("resolve database location: %w", err)
+}
+if loc.Notice != "" {
+    fmt.Fprintln(os.Stderr, loc.Notice)
+}
+
+// Open the database.
+db, err := archivedb.Open(loc.DBPath)
+if err != nil {
+    return fmt.Errorf("open archive database: %w", err)
+}
+defer db.Close()
+
+// Write dbpath marker if needed.
+if loc.MarkerNeeded {
+    if err := dblocator.WriteMarker(cfg.Destination, loc.DBPath); err != nil {
+        return fmt.Errorf("write dbpath marker: %w", err)
+    }
+}
+
+// Auto-migrate from JSON manifest if needed.
+migResult, err := migrate.MigrateIfNeeded(db, cfg.Destination)
+if err != nil {
+    return fmt.Errorf("migrate manifest: %w", err)
+}
+if migResult.Migrated {
+    fmt.Fprintln(os.Stdout, migResult.Notice)
+}
+
+// Generate run ID.
+runID := uuid.New().String()
+
+opts := pipeline.SortOptions{
+    Config:       cfg,
+    Hasher:       h,
+    Registry:     reg,
+    RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
+    Output:       os.Stdout,
+    DB:           db,
+    RunID:        runID,
+}
+```
+
+#### 2. `cmd/resume.go` — Rewrite to use DB
+
+Replace the current manifest-based resume with database-based resume:
+
+```go
+func runResume(cmd *cobra.Command, args []string) error {
+    dir := viper.GetString("resume_dir")
+    dbPath := viper.GetString("db_path")
+
+    // Resolve database location.
+    loc, err := dblocator.Resolve(dir, dbPath)
+    if err != nil {
+        return fmt.Errorf("resolve database location: %w", err)
+    }
+
+    // Open the database.
+    db, err := archivedb.Open(loc.DBPath)
+    if err != nil {
+        return fmt.Errorf("open archive database: %w", err)
+    }
+    defer db.Close()
+
+    // Find interrupted runs.
+    interrupted, err := db.FindInterruptedRuns()
+    if err != nil {
+        return fmt.Errorf("find interrupted runs: %w", err)
+    }
+    if len(interrupted) == 0 {
+        fmt.Println("No interrupted runs found.")
+        return nil
+    }
+
+    // Resume the most recent interrupted run.
+    run := interrupted[0]
+    // ... validate source still exists, build pipeline opts, call pipeline.Run() ...
+}
+```
+
+Add `--db-path` flag to resume:
+```go
+resumeCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database")
+_ = viper.BindPFlag("db_path", resumeCmd.Flags().Lookup("db-path"))
+```
+
+**Acceptance Criteria:**
+- `pixe sort --db-path /tmp/custom.db --source ... --dest ...` uses the specified DB path.
+- `pixe sort` without `--db-path` auto-resolves the DB location.
+- `pixe resume --dir <dirB>` discovers the DB via the priority chain.
+- `pixe resume --dir <dirB> --db-path /tmp/custom.db` uses the explicit path.
+- The `--db-path` flag is bindable via config file (`db_path`) and env var (`PIXE_DB_PATH`).
+
+---
+
+## Task 38 — Ledger Update — Add `run_id` Field
+
+**Goal:** Wire the run UUID into ledger creation and bump the ledger version to 2.
+
+**Architecture Reference:** Section 8.8 (Ledger v2)
+
+**Depends on:** Task 33, Task 35
+
+### Files to modify
+
+#### 1. `internal/pipeline/pipeline.go` — Ledger creation
+
+```go
+// BEFORE:
+ledger := &domain.Ledger{
+    Version:     1,
+    PixeVersion: version.Version,
+    PixeRun:     startedAt,
+    Algorithm:   cfg.Algorithm,
+    Destination: cfg.Destination,
+}
+
+// AFTER:
+ledger := &domain.Ledger{
+    Version:     2,
+    PixeVersion: version.Version,
+    RunID:       opts.RunID,
+    PixeRun:     startedAt,
+    Algorithm:   cfg.Algorithm,
+    Destination: cfg.Destination,
+}
+```
+
+#### 2. `internal/pipeline/worker.go` — Same change in all ledger creation sites
+
+Update all 2-3 locations where `domain.Ledger` is constructed to include `RunID: opts.RunID` and `Version: 2`.
+
+**Acceptance Criteria:**
+- After a `pixe sort` run, `dirA/.pixe_ledger.json` contains `"version": 2` and `"run_id": "<uuid>"`.
+- The `run_id` in the ledger matches the run ID in the archive database.
+- `SELECT * FROM files WHERE run_id = '<ledger_run_id>'` returns the same files listed in the ledger.
+- Existing ledger loading (`manifest.LoadLedger`) still works with v1 ledgers (the `RunID` field is simply empty).
+
+---
+
+## Task 39 — Archive DB — Unit Tests
+
+**Goal:** Comprehensive unit tests for the `internal/archivedb` package covering schema creation, CRUD operations, query methods, WAL concurrency, and busy retry behavior.
+
+**Architecture Reference:** Section 8.3, 8.4, 8.5
+
+**Depends on:** Tasks 29, 30, 31
+
+**File to create: `internal/archivedb/archivedb_test.go`**
+
+### Test cases
+
+1. **`TestOpen_createsSchema`** — Open a new DB, verify all tables exist via `sqlite_master`.
+2. **`TestOpen_idempotent`** — Open an existing DB, verify no errors and schema is intact.
+3. **`TestOpen_WALMode`** — Verify `PRAGMA journal_mode` returns `wal`.
+4. **`TestSchemaVersion`** — Verify `schema_version` table has version 1.
+5. **`TestInsertRun_roundtrip`** — Insert a run, retrieve it, verify all fields.
+6. **`TestCompleteRun`** — Insert a run, complete it, verify `finished_at` and `status`.
+7. **`TestInterruptRun`** — Insert a run, interrupt it, verify status.
+8. **`TestFindInterruptedRuns`** — Insert 3 runs (1 running, 1 completed, 1 interrupted), verify only the running one is returned.
+9. **`TestInsertFile_roundtrip`** — Insert a file, retrieve by run, verify all fields.
+10. **`TestInsertFiles_batch`** — Batch-insert 100 files, verify count.
+11. **`TestUpdateFileStatus_progression`** — Walk a file through all pipeline stages, verify timestamps are set.
+12. **`TestCheckDuplicate_found`** — Insert a completed file, check its checksum, verify dest_rel returned.
+13. **`TestCheckDuplicate_notFound`** — Check a checksum that doesn't exist, verify empty string.
+14. **`TestCheckDuplicate_ignoresNonComplete`** — Insert a file with status "hashed" (not complete), verify CheckDuplicate returns empty.
+15. **`TestGetIncompleteFiles`** — Insert files in various states, verify only non-terminal ones returned.
+16. **`TestListRuns`** — Insert 3 runs, verify returned in reverse chronological order with file counts.
+17. **`TestFilesWithErrors`** — Insert files with error states, verify join with run source.
+18. **`TestDuplicatePairs`** — Insert an original and a duplicate with same checksum, verify pairing.
+19. **`TestConcurrentReaders`** — Open two connections to the same DB, read simultaneously, verify no errors.
+20. **`TestBusyRetry`** — Simulate write contention between two connections, verify the second writer succeeds after retry.
+
+All tests use `t.TempDir()` for database file isolation.
+
+**Acceptance Criteria:**
+- All 20 test cases pass.
+- Tests run with `-race` flag without data race warnings.
+- Tests complete in under 5 seconds.
+
+---
+
+## Task 40 — DB Locator — Unit Tests
+
+**Goal:** Unit tests for the `internal/dblocator` package covering the resolution priority chain, slug generation, and marker file operations.
+
+**Depends on:** Task 32
+
+**File to create: `internal/dblocator/dblocator_test.go`**
+
+### Test cases
+
+1. **`TestResolve_explicitPath`** — Explicit path always wins, `MarkerNeeded=true`.
+2. **`TestResolve_markerFile`** — Write a marker, resolve without explicit path, verify marker contents used.
+3. **`TestResolve_localDefault`** — No marker, local filesystem, verify `dirB/.pixe/pixe.db`.
+4. **`TestResolve_priorityOrder`** — Explicit > marker > default.
+5. **`TestWriteMarker_ReadMarker_roundtrip`** — Write and read back.
+6. **`TestReadMarker_notExists`** — Returns empty string, no error.
+7. **`TestSlug_normalPath`** — Verify format: `<base>-<8hex>`.
+8. **`TestSlug_rootPath`** — Edge case: `/` → `"pixe-<8hex>"`.
+9. **`TestSlug_deterministic`** — Same input always produces same slug.
+10. **`TestSlug_differentPaths`** — Different inputs produce different slugs.
+
+**Note:** Network mount detection (`isNetworkMount`) is difficult to unit test without actual network mounts. Test it with a mock/stub or skip on CI with a build tag.
+
+**Acceptance Criteria:**
+- All test cases pass.
+- Slug generation is deterministic and collision-resistant.
+- Marker file round-trip works correctly.
+
+---
+
+## Task 41 — Migration — Unit Tests
+
+**Goal:** Unit tests for the `internal/migrate` package covering JSON→SQLite migration, idempotency, and edge cases.
+
+**Depends on:** Task 34
+
+**File to create: `internal/migrate/migrate_test.go`**
+
+### Test cases
+
+1. **`TestMigrateIfNeeded_noManifest`** — No manifest.json → `Migrated: false`.
+2. **`TestMigrateIfNeeded_alreadyMigrated`** — `.migrated` exists → `Migrated: false`.
+3. **`TestMigrateIfNeeded_success`** — Manifest with 5 entries → DB has 1 run + 5 files, manifest renamed.
+4. **`TestMigrateIfNeeded_preservesTimestamps`** — Verify all timestamp fields survive migration.
+5. **`TestMigrateIfNeeded_preservesStatuses`** — Verify all status values map correctly.
+6. **`TestMigrateIfNeeded_infersDuplicates`** — Entry with `duplicates/` in dest path → `is_duplicate = 1`.
+7. **`TestMigrateIfNeeded_syntheticRunMetadata`** — Verify the synthetic run has correct pixe_version, source, algorithm, etc.
+8. **`TestMigrateIfNeeded_idempotent`** — Call twice, second call is a no-op.
+
+All tests create a real `manifest.json` file in `t.TempDir()` and a real SQLite database.
+
+**Acceptance Criteria:**
+- All 8 test cases pass.
+- Migration is lossless — all data from the JSON manifest is present in the DB.
+- The original `manifest.json` is preserved as `manifest.json.migrated`.
+
+---
+
+## Task 42 — Integration Tests — SQLite Pipeline End-to-End
+
+**Goal:** End-to-end integration tests that exercise the full sort → verify → resume cycle using the SQLite database, including concurrent run simulation.
+
+**Depends on:** Tasks 35, 36, 37, 38
+
+**File to modify: `internal/integration/integration_test.go`**
+
+### New test cases (add to existing integration test file)
+
+1. **`TestIntegration_SQLite_FullSort`** — Sort fixture files, verify:
+   - Database exists at `dirB/.pixe/pixe.db`.
+   - `runs` table has 1 row with `status = "completed"`.
+   - `files` table has correct count with all `status = "complete"`.
+   - Dedup check returns correct results.
+   - Ledger has `version: 2` and `run_id` matching the DB.
+
+2. **`TestIntegration_SQLite_Resume`** — Sort 5 files, simulate interrupt (mark run as "running", reset 2 files to "pending"), resume, verify all 5 complete.
+
+3. **`TestIntegration_SQLite_MultiSource`** — Sort from source A, then sort from source B into the same `dirB`. Verify:
+   - 2 runs in the `runs` table.
+   - Files from both sources in the `files` table.
+   - Dedup works across runs (if source B has a file identical to source A, it's routed to duplicates).
+
+4. **`TestIntegration_SQLite_Migration`** — Create a `dirB` with a legacy `manifest.json`, run `pixe sort` against it, verify:
+   - Auto-migration occurred.
+   - `manifest.json.migrated` exists.
+   - DB contains the migrated entries plus the new sort's entries.
+
+5. **`TestIntegration_SQLite_DryRun`** — Dry-run creates a run record but no file copies. Verify DB state.
+
+6. **`TestIntegration_SQLite_NoDBPathMarker_LocalFS`** — On local filesystem, verify no `dbpath` marker is created.
+
+### Updated existing tests
+
+All existing integration tests that reference `manifest.json` or `manifest.Load()` must be updated to use the database. The `TestIntegration_FullSort`, `TestIntegration_Resume`, etc. should be updated to verify DB state instead of (or in addition to) manifest state.
+
+**Acceptance Criteria:**
+- All new integration tests pass.
+- All updated existing integration tests pass.
+- Tests run with `-race` flag without data race warnings.
+- Multi-source test demonstrates cumulative registry behavior.
+- Migration test demonstrates seamless JSON→SQLite transition.
+
+---
+
+## Task 43 — Tests & Verification — Full Suite Green
+
+**Goal:** Verify the entire codebase compiles, passes all tests, and passes lint after the SQLite migration.
+
+**Depends on:** Tasks 39, 40, 41, 42
+
+### Verification commands
+
+```bash
+go vet ./...                                    # No warnings
+go build ./...                                  # Compiles cleanly
+go test -race -timeout 120s ./...               # All tests pass
+make lint                                       # 0 issues
+go mod tidy                                     # No diff
+```
+
+### Specific checks
+
+1. **No stale JSON manifest references in pipeline:**
+   ```bash
+   # Should return zero matches in pipeline files:
+   rg 'manifest\.Save\(' internal/pipeline/
+   rg 'manifest\.Load\(' internal/pipeline/
+   # manifest.SaveLedger is still valid — ledger is unchanged
+   ```
+
+2. **No in-memory dedup index in pipeline:**
+   ```bash
+   # The old dedupIndex map should be gone:
+   rg 'dedupIndex' internal/pipeline/
+   ```
+
+3. **Dependency audit:**
+   ```bash
+   go mod tidy
+   # New dependencies: modernc.org/sqlite, github.com/google/uuid
+   # Verify no unexpected additions
+   ```
+
+4. **Build smoke test:**
+   ```bash
+   make build
+   ./pixe sort --source /tmp/test-photos --dest /tmp/test-archive --dry-run
+   # Verify DB is created at /tmp/test-archive/.pixe/pixe.db
+   # Verify output shows normal sort behavior
+   ```
+
+### Acceptance Criteria
+
+- `go vet ./...` — zero warnings.
+- `go build ./...` — compiles cleanly.
+- `go test -race -timeout 120s ./...` — all tests pass (unit + integration).
+- `make lint` — 0 issues.
+- `go mod tidy` produces no diff.
+- No pipeline code references `manifest.Save()` or `manifest.Load()`.
+- No pipeline code uses an in-memory `dedupIndex` map.
+- The `internal/manifest` package is retained for ledger persistence and migration support only.

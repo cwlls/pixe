@@ -28,7 +28,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **HEIC Parsing** | Native Go package (to be evaluated) | Must support EXIF extraction and data-region isolation |
 | **MP4 Parsing** | Native Go package (e.g., `abema/go-mp4` or equivalent) | Atom-level access for metadata and keyframe extraction |
 | **Hashing** | `crypto/sha1` (default), `crypto/sha256`, others via `crypto` stdlib | Configurable algorithm, SHA-1 default for filename brevity |
-| **Persistence** | JSON manifest file | Lightweight, human-readable, resume-capable |
+| **Persistence** | SQLite database (CGo-free: `modernc.org/sqlite`) | Cumulative registry, concurrent-safe, queryable; see Section 8 |
 
 ---
 
@@ -94,8 +94,8 @@ This is the canonical display format used by the `pixe version` CLI command and 
 | Consumer | What it reads | Why |
 |---|---|---|
 | **`pixe version` CLI command** | `version.Full()` | Human-readable output |
-| **Manifest (`manifest.json`)** | `version.Version` | Records which Pixe version produced the archive (future-proofing for format migrations) |
-| **Ledger (`.pixe_ledger.json`)** | `version.Version` | Same rationale as manifest |
+| **Archive database (`pixe.db`)** | `version.Version` | Records which Pixe version produced each run (future-proofing for format migrations) |
+| **Ledger (`.pixe_ledger.json`)** | `version.Version` | Same rationale as database |
 
 ### 3.5 Version Bump Process
 
@@ -127,13 +127,13 @@ dirA (read-only source)          dirB (organized destination)
 │ .pixe_ledger.json│             │     2022/02-Feb/                     │
 └──────────────────┘             │       20220202_123101_447d...jpg      │
                                  │ .pixe/                               │
-                                 │   manifest.json                      │
+                                 │   pixe.db  (or dbpath marker)        │
                                  └──────────────────────────────────────┘
 ```
 
 ### 4.2 Pipeline Stages
 
-Each file passes through these stages, tracked in the manifest:
+Each file passes through these stages, tracked in the archive database:
 
 ```
 pending → extracted → hashed → copied → verified → tagged → complete
@@ -215,9 +215,10 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 > ### 5.1 Operational Safety
 > - **`dirA` is read-only.** Pixe never modifies, renames, moves, or deletes source files. The sole exception is writing a `.pixe_ledger.json` file into `dirA` to record what was processed.
 > - **Copy-then-verify.** Every file is copied to `dirB`, then the destination is independently re-read and re-hashed to confirm integrity.
-> - **Manifest-based resumability.** A manifest at `dirB/.pixe/manifest.json` tracks per-file state. Interrupted runs resume from the last known-good state.
-> - **Ledger in `dirA`.** A `.pixe_ledger.json` is written to the source directory, recording which files were successfully processed. This can be verified against later.
+> - **Database-backed resumability.** A SQLite database tracks per-file state across all runs. Interrupted runs resume from the last committed state. Each file completion is committed individually for crash safety.
+> - **Ledger in `dirA`.** A `.pixe_ledger.json` is written to the source directory, recording which files were successfully processed. Each ledger entry includes a `run_id` linking back to the archive database for full queryability.
 > - **No silent data loss.** Hash mismatches, copy failures, and unrecognized files are always reported. Pixe never exits silently on error.
+> - **Concurrent-run safety.** Multiple `pixe sort` processes may target the same `dirB` simultaneously. The SQLite database uses WAL mode and busy-retry to ensure integrity without requiring external coordination.
 
 > [!IMPORTANT]
 > ### 5.2 Native Execution
@@ -229,14 +230,15 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 > - Pixe uses a **worker pool** pattern for parallel file processing.
 > - Worker count is **configurable** via `--workers` flag (default: sensible auto-detect based on `runtime.NumCPU()`).
 > - Workers handle the full pipeline per file: extract → hash → copy → verify → tag.
-> - A **coordinator goroutine** manages the manifest, deduplication index, and progress reporting.
+> - A **coordinator goroutine** manages database writes, deduplication queries, and progress reporting.
 > - `dirA` and `dirB` may reside on **different filesystems** (local, NAS, SMB). Pixe always uses copy (never `os.Rename` across filesystems).
+> - **Cross-process concurrency:** Multiple `pixe sort` processes may target the same `dirB` from different sources. SQLite WAL mode permits concurrent reads with serialized writes. Each process operates within its own `run_id` context. Write contention is handled via `SQLITE_BUSY` retry with exponential backoff.
 
 > [!IMPORTANT]
 > ### 5.4 Scalability
-> - Must handle from tens to tens of thousands of files in a single run.
+> - Must handle from tens to hundreds of thousands of files in a single run, and cumulative archives of unbounded size.
 > - Memory usage should be bounded — files are streamed, not loaded entirely into memory (except where format parsing requires it).
-> - The deduplication index (checksum → path) is held in memory for the duration of a run.
+> - The deduplication index is persisted in the SQLite database with indexed lookups, eliminating the need to load all checksums into memory at startup. At 100K+ files, this replaces the prior approach of deserializing an entire JSON manifest to build an in-memory map.
 
 ---
 
@@ -325,11 +327,12 @@ Walks a previously sorted `dirB`, parses checksums from filenames, recomputes da
 | `--workers` | auto | Number of concurrent workers |
 
 #### `pixe resume`
-Reads the manifest in `dirB/.pixe/manifest.json` and resumes an interrupted sort operation.
+Locates the archive database for `dirB` (via `--db-path`, `dbpath` marker, or default local path) and resumes an interrupted sort operation by reprocessing files in non-terminal states.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--dir` | (required) | Destination directory containing `.pixe/manifest.json` |
+| `--dir` | (required) | Destination directory associated with the archive database |
+| `--db-path` | (auto-detected) | Explicit path to the SQLite database file |
 
 #### `pixe version`
 Prints the version, git commit, and build date in a single human-readable line, then exits. Implemented as a standard Cobra subcommand in `cmd/version.go`.
@@ -355,44 +358,204 @@ camera_owner: "Wells Family"
 
 ---
 
-## 8. Manifest & Ledger Design
+## 8. Archive Database & Ledger Design
 
-### 8.1 Manifest (`dirB/.pixe/manifest.json`)
+### 8.1 Overview
 
-The manifest is Pixe's operational journal. It is written to the **destination** directory and tracks the state of every file in the current (or most recent) run.
+Pixe uses a **SQLite database** as the cumulative registry for each destination archive. Every `pixe sort` run enriches the database with new file records, building a permanent, queryable history of the entire archive. This replaces the earlier JSON manifest approach, providing indexed queries, concurrent-process safety, and bounded startup cost regardless of archive size.
 
-```json
-{
-  "version": 1,
-  "pixe_version": "0.9.0",
-  "source": "/path/to/dirA",
-  "destination": "/path/to/dirB",
-  "algorithm": "sha1",
-  "started_at": "2026-03-06T10:30:00Z",
-  "workers": 4,
-  "files": [
-    {
-      "source": "/path/to/dirA/IMG_0001.jpg",
-      "destination": "/path/to/dirB/2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
-      "checksum": "7d97e98f8af710c7e7fe703abc8f639e0ee507c4",
-      "status": "complete",
-      "extracted_at": "2026-03-06T10:30:01Z",
-      "copied_at": "2026-03-06T10:30:02Z",
-      "verified_at": "2026-03-06T10:30:03Z",
-      "tagged_at": "2026-03-06T10:30:03Z"
-    }
-  ]
-}
+The database is the **single source of truth** for:
+- What files exist in the archive and where they came from
+- Deduplication state (checksum lookups)
+- Run history and audit trail
+- Per-file pipeline state for crash recovery and resume
+
+### 8.2 Database Location
+
+The database location is determined by a priority chain:
+
+1. **Explicit override** — `--db-path` flag or `db_path` config setting. If set, this path is used unconditionally.
+2. **Local filesystem** — If `dirB` resides on a local filesystem, the database is stored at `dirB/.pixe/pixe.db`.
+3. **Network mount fallback** — If `dirB` is detected to be on a network filesystem (NFS, SMB/CIFS, AFP), the database is stored at `~/.pixe/databases/<slug>.db` and a notice is emitted to the user explaining the location and why.
+
+**The `<slug>` format** for the fallback path is derived from the `dirB` path: the last path component (lowercased, sanitized) followed by a hyphen and a truncated hash of the full absolute path. Example: for `dirB=/Volumes/NAS/Photos/archive`, the slug might be `archive-a1b2c3d4`, yielding `~/.pixe/databases/archive-a1b2c3d4.db`.
+
+**Network mount detection** uses OS-level filesystem type inspection (e.g., `statfs` on macOS/Linux) to identify non-local mounts. SQLite relies on POSIX file locking semantics that NFS and SMB do not reliably honor, making local storage essential for database integrity.
+
+#### Discoverability Marker (`dirB/.pixe/dbpath`)
+
+When the database is stored **outside** `dirB` (due to network mount fallback or explicit `--db-path`), a plain-text marker file is written at `dirB/.pixe/dbpath` containing the absolute path to the database file. This allows commands like `pixe resume --dir <dirB>` to locate the database without the user needing to specify `--db-path`.
+
+When the database lives at the default local path (`dirB/.pixe/pixe.db`), no `dbpath` marker is written — the default location is checked first.
+
+**Lookup order for database discovery:**
+1. `--db-path` flag (if provided)
+2. `dirB/.pixe/dbpath` marker file (if exists, read and use its contents)
+3. `dirB/.pixe/pixe.db` (default local path)
+
+### 8.3 Schema Design
+
+The database uses two primary tables — `runs` and `files` — with a foreign key relationship.
+
+#### `runs` Table
+
+Records each `pixe sort` invocation. A run is created at the start and represents a single execution context.
+
+```sql
+CREATE TABLE runs (
+    id            TEXT PRIMARY KEY,   -- UUID v4, the run_id
+    pixe_version  TEXT NOT NULL,      -- e.g., "0.10.0"
+    source        TEXT NOT NULL,      -- absolute path to dirA
+    destination   TEXT NOT NULL,      -- absolute path to dirB
+    algorithm     TEXT NOT NULL,      -- e.g., "sha1", "sha256"
+    workers       INTEGER NOT NULL,   -- worker count for this run
+    started_at    TEXT NOT NULL,      -- ISO 8601 UTC timestamp
+    finished_at   TEXT,               -- NULL if still running or interrupted
+    status        TEXT NOT NULL       -- "running", "completed", "interrupted"
+        CHECK (status IN ('running', 'completed', 'interrupted'))
+);
 ```
 
-### 8.2 Ledger (`dirA/.pixe_ledger.json`)
+#### `files` Table
 
-The ledger is a **minimal record** left in the source directory confirming which files were successfully processed. It enables future verification without needing the manifest.
+Records every file processed across all runs. Each row represents one file's journey through the pipeline.
+
+```sql
+CREATE TABLE files (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT NOT NULL REFERENCES runs(id),
+    source_path   TEXT NOT NULL,      -- absolute path to file in dirA
+    dest_path     TEXT,               -- absolute path to file in dirB (NULL until copied)
+    dest_rel      TEXT,               -- relative path within dirB (NULL until copied)
+    checksum      TEXT,               -- hex-encoded hash (NULL until hashed)
+    status        TEXT NOT NULL       -- pipeline stage
+        CHECK (status IN (
+            'pending', 'extracted', 'hashed', 'copied',
+            'verified', 'tagged', 'complete',
+            'failed', 'mismatch', 'tag_failed', 'duplicate'
+        )),
+    is_duplicate  INTEGER NOT NULL DEFAULT 0,  -- 1 if routed to duplicates/
+    capture_date  TEXT,               -- ISO 8601, extracted from metadata
+    file_size     INTEGER,            -- source file size in bytes
+    extracted_at  TEXT,               -- ISO 8601 UTC
+    hashed_at     TEXT,               -- ISO 8601 UTC
+    copied_at     TEXT,               -- ISO 8601 UTC
+    verified_at   TEXT,               -- ISO 8601 UTC
+    tagged_at     TEXT,               -- ISO 8601 UTC
+    error         TEXT                -- error message if failed
+);
+```
+
+#### Indexes
+
+```sql
+CREATE INDEX idx_files_checksum ON files(checksum) WHERE status = 'complete';
+CREATE INDEX idx_files_run_id ON files(run_id);
+CREATE INDEX idx_files_status ON files(status);
+CREATE INDEX idx_files_source ON files(source_path);
+CREATE INDEX idx_files_capture_date ON files(capture_date);
+```
+
+#### Schema Versioning
+
+The database includes a `schema_version` table for forward-compatible migrations:
+
+```sql
+CREATE TABLE schema_version (
+    version    INTEGER NOT NULL,
+    applied_at TEXT NOT NULL
+);
+-- Initial row: INSERT INTO schema_version VALUES (1, '2026-03-07T...');
+```
+
+Future Pixe versions can check this table and apply incremental migrations.
+
+### 8.4 Query Patterns
+
+The schema supports the following query families, all served by indexed lookups:
+
+| Query | SQL Pattern |
+|---|---|
+| **Dedup check** | `SELECT dest_rel FROM files WHERE checksum = ? AND status = 'complete' LIMIT 1` |
+| **Files from source** | `SELECT * FROM files WHERE source_path LIKE ? AND run_id IN (SELECT id FROM runs WHERE source = ?)` |
+| **Files by capture date range** | `SELECT * FROM files WHERE capture_date BETWEEN ? AND ? AND status = 'complete'` |
+| **Files by import date range** | `SELECT * FROM files WHERE verified_at BETWEEN ? AND ?` |
+| **Run history** | `SELECT * FROM runs ORDER BY started_at DESC` |
+| **Run detail** | `SELECT * FROM files WHERE run_id = ?` |
+| **All errors/mismatches** | `SELECT f.*, r.source FROM files f JOIN runs r ON f.run_id = r.id WHERE f.status IN ('failed', 'mismatch', 'tag_failed')` |
+| **All duplicates** | `SELECT * FROM files WHERE is_duplicate = 1` |
+| **Duplicate pairs** | `SELECT d.source_path, d.dest_path, o.dest_path AS original FROM files d JOIN files o ON d.checksum = o.checksum AND o.is_duplicate = 0 AND o.status = 'complete' WHERE d.is_duplicate = 1` |
+| **Archive inventory** | `SELECT dest_rel, checksum, capture_date FROM files WHERE status = 'complete' AND is_duplicate = 0` |
+
+### 8.5 Concurrency & Integrity
+
+#### WAL Mode
+
+The database is opened in **Write-Ahead Logging (WAL) mode** (`PRAGMA journal_mode=WAL`). This allows concurrent readers while a writer is active, which is critical for multi-process access.
+
+#### Busy Retry
+
+When a write is blocked by another process, SQLite returns `SQLITE_BUSY`. Pixe configures a **busy timeout** (e.g., 5 seconds) via `PRAGMA busy_timeout=5000`, causing SQLite to retry automatically rather than failing immediately.
+
+#### Transaction Granularity
+
+Each file completion is committed in its own transaction. This provides the same crash-safety guarantee as the prior JSON approach (at most one in-flight file is lost on crash), but with dramatically lower overhead — a single row INSERT/UPDATE versus reserializing the entire manifest.
+
+#### Cross-Process Dedup Race Condition
+
+When two simultaneous runs discover the same file (identical checksum) from different sources:
+
+1. Both processes query `SELECT ... WHERE checksum = ?` — both see "not yet imported."
+2. Both copy the file to `dirB`.
+3. The first to commit its INSERT wins. The second process, when it commits, detects the conflict (the checksum now exists with `status = 'complete'`) and retroactively routes its copy to `duplicates/`.
+
+This is handled at the application level after commit, not via database constraints, since the duplicate file has already been physically written. The result is safe and correct — no data loss, duplicates are properly categorized.
+
+### 8.6 Database Lifecycle
+
+#### Initialization
+
+On first run against a `dirB` with no existing database:
+1. Determine database location (see Section 8.2).
+2. Create the database file and apply the schema.
+3. Write the `dbpath` marker if the database is stored outside `dirB`.
+4. Create a `runs` row with `status = 'running'`.
+
+#### Run Completion
+
+1. Update the `runs` row: set `finished_at` and `status = 'completed'`.
+2. Write the ledger to `dirA` (see Section 8.8).
+
+#### Interrupted Run Recovery
+
+On startup, if a `runs` row exists with `status = 'running'`:
+1. The run was interrupted (crash, Ctrl+C, power loss).
+2. All `files` rows in non-terminal states for that run are candidates for reprocessing.
+3. The `pixe resume` command queries these rows and re-enters the pipeline at the appropriate stage for each file.
+
+### 8.7 Migration from JSON Manifest
+
+When Pixe encounters an existing `dirB/.pixe/manifest.json` but no `pixe.db`, it performs an **automatic migration**:
+
+1. **Create** the SQLite database (at the appropriate location per Section 8.2).
+2. **Create a synthetic run** in the `runs` table representing the prior JSON-based import, using metadata from the JSON manifest (`pixe_version`, `source`, `destination`, `algorithm`, `started_at`).
+3. **Import all file entries** from the JSON manifest into the `files` table, preserving all timestamps, checksums, statuses, and paths. The `run_id` references the synthetic run.
+4. **Rename** the original manifest to `dirB/.pixe/manifest.json.migrated` (preserved, not deleted).
+5. **Write** the `dbpath` marker if applicable.
+6. **Emit a user-facing notice**: `"Migrated N files from manifest.json → pixe.db"`.
+7. **Proceed** with the current sort operation normally.
+
+The migration is idempotent — if `manifest.json.migrated` already exists, the migration is skipped (the DB is assumed to be authoritative).
+
+### 8.8 Ledger (`dirA/.pixe_ledger.json`)
+
+The ledger remains a **lightweight JSON receipt** left in the source directory. It confirms which files were successfully processed and links back to the archive database for full details.
 
 ```json
 {
-  "version": 1,
-  "pixe_version": "0.9.0",
+  "version": 2,
+  "pixe_version": "0.10.0",
+  "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "pixe_run": "2026-03-06T10:30:00Z",
   "algorithm": "sha1",
   "destination": "/path/to/dirB",
@@ -407,15 +570,66 @@ The ledger is a **minimal record** left in the source directory confirming which
 }
 ```
 
+**Changes from v1:**
+- `version` bumped to `2`.
+- `run_id` field added — the UUID of the run in the archive database. This allows a user to query the database for full details: `SELECT * FROM files WHERE run_id = '<run_id>'`.
+
+The ledger is still written atomically (write `.tmp`, then rename) and is the **only file** Pixe writes to `dirA`.
+
+### 8.9 Filesystem Layout
+
+```
+dirB (organized destination)
+├── 2021/
+│   └── 12-Dec/
+│       └── 20211225_062223_7d97e98f...jpg
+├── 2022/
+│   ├── 02-Feb/
+│   │   └── 20220202_123101_447d3060...jpg
+│   └── 03-Mar/
+│       └── 20220316_232122_321c7d6f...jpg
+├── duplicates/
+│   └── 20260306_103000/
+│       └── 2022/02-Feb/
+│           └── 20220202_123101_447d...jpg
+└── .pixe/
+    ├── pixe.db              ← SQLite database (if dirB is local)
+    ├── pixe.db-wal          ← WAL file (transient, managed by SQLite)
+    ├── pixe.db-shm          ← shared memory file (transient, managed by SQLite)
+    └── dbpath               ← marker file (only if DB is stored elsewhere)
+
+~/.pixe/                      ← user-level directory (created only when needed)
+└── databases/
+    └── archive-a1b2c3d4.db  ← database for a network-mounted dirB
+```
+
 ---
 
-## 9. Open Questions & Future Considerations
+## 9. CLI Additions
 
-These items are explicitly **out of scope** for the initial build but are acknowledged for future planning:
+### 9.1 New Flag
+
+| Command | Flag | Default | Description |
+|---|---|---|---|
+| `pixe sort` | `--db-path` | (auto-detected) | Explicit path to the SQLite database file. Overrides all automatic location logic. |
+
+This flag is also supported via config file (`db_path`) and environment variable (`PIXE_DB_PATH`).
+
+### 9.2 Updated `pixe resume`
+
+The `resume` command now locates the database via the same discovery chain (flag → `dbpath` marker → default local path) and queries for the interrupted run's incomplete files.
+
+---
+
+## 10. Open Questions & Future Considerations
+
+These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
 1. **Sidecar files** (`.xmp`, `.aae`) — Should they follow their parent media file?
 2. **RAW formats** (`.cr2`, `.arw`, `.dng`) — Natural candidates for new filetype modules.
-3. **Database backend** — If scale exceeds tens of thousands, a SQLite manifest may outperform JSON.
-4. **Web UI / TUI** — Progress visualization beyond CLI output.
-5. **Cloud storage targets** — `dirB` on S3, GCS, etc.
-6. **GPS/location-based organization** — Subdirectories by location in addition to date.
+3. **Web UI / TUI** — Progress visualization beyond CLI output.
+4. **Cloud storage targets** — `dirB` on S3, GCS, etc.
+5. **GPS/location-based organization** — Subdirectories by location in addition to date.
+6. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
+7. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
+8. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
