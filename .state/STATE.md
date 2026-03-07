@@ -18,7 +18,7 @@
 | 14 | Metadata Tagging Engine | Medium | @developer | ✅ Complete | 7, 8 | Copyright template, CameraOwner injection post-verify |
 | 15 | CLI: `pixe verify` Command | Medium | @developer | ✅ Complete | 3, 5, 10 | Walk dirB, parse filename checksum, report mismatches |
 | 16 | CLI: `pixe resume` Command | Medium | @developer | ✅ Complete | 4, 9, 10 | Load manifest, skip completed, re-enter pipeline |
-| 17 | Integration Tests & Safety Audit | High | @tester | ⬜ Pending | 10, 15, 16 | End-to-end with fixture files, interrupt simulation |
+| 17 | Integration Tests & Safety Audit | High | @tester | 🏗️ In Progress | 10, 15, 16 | End-to-end with fixture files, interrupt simulation |
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 description: Advanced QA and Logic Auditor using MiniMax M2.5.
 mode: subagent
-model: opencode/minimax-m2.5-free
+model: opencode/minimax-m2.5
 temperature: 0.1
 tools:
   bash: true
