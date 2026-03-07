@@ -34,78 +34,131 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 ## 3. Version Management
 
-### 3.1 Single Source of Truth
+### 3.1 Source of Truth: Git Tags
 
-Pixe's version is defined in a dedicated, importable Go source file at `internal/version/version.go`. This file is the **single source of truth** for version information across the entire project — CLI output, manifest recording, and any future consumer.
+Pixe follows the **idiomatic Go convention**: the git tag is the single source of truth for the version string. There is no version literal anywhere in Go source code. All three version fields — `Version`, `Commit`, and `BuildDate` — are injected at build time via Go linker flags (`-ldflags -X`).
 
-**Location:** `internal/version/version.go`
+The version variables live in the **`cmd` package** (not a separate `internal/version` package), co-located with the CLI commands that use them. This is the standard pattern for small-to-medium Go CLIs.
 
-```go
-// Package version provides the centralized version constant for Pixe.
-// This is the single source of truth — update the Version constant here
-// when cutting a new release.
-package version
-
-// Version is the semantic version of Pixe (without the "v" prefix).
-// Update this value when cutting a new release.
-const Version = "0.9.0"
-```
-
-- The version follows **Semantic Versioning** (`MAJOR.MINOR.PATCH`).
-- The constant is stored **without** the `v` prefix; the `v` is prepended at display time.
-- Initial version: **`0.9.0`**.
-
-### 3.2 Build-Time Metadata
-
-In addition to the hardcoded version, the build system injects **commit hash** and **build timestamp** via Go linker flags (`-ldflags -X`). These are stored as package-level variables (not constants) so they can be overwritten at link time:
+**Location:** `cmd/version.go`
 
 ```go
-// Commit is the short git SHA, injected at build time via -ldflags.
-var Commit = "unknown"
+package cmd
 
-// BuildDate is the UTC build timestamp, injected at build time via -ldflags.
-var BuildDate = "unknown"
+// Version fields — injected at build time via -ldflags -X.
+// When built without ldflags (e.g. plain `go build` or `go test`), these
+// retain their dev defaults.
+var (
+    version   = "dev"
+    commit    = "unknown"
+    buildDate = "unknown"
+)
+
+func init() {
+    // If this is a dev build (no ldflags), enrich the version string
+    // with the current commit hash for traceability.
+    if version == "dev" && commit != "unknown" {
+        version = "dev-" + commit
+    }
+}
 ```
 
-The Makefile wires these with:
+- `version` follows **Semantic Versioning** (`MAJOR.MINOR.PATCH`), without the `v` prefix; the `v` is prepended at display time.
+- All three fields are **unexported `var`s** — settable by ldflags, invisible outside `cmd`.
+- On a **dev build** (plain `go build` with no ldflags), `version` stays `"dev"` and `commit` stays `"unknown"`, so the output reads `pixe dev`.
+- On a **Makefile build** (`make build`), the Makefile injects `commit` from `git rev-parse --short HEAD` but does **not** inject `version`. The `init()` function detects this combination and produces `version = "dev-2159446"`, making local builds traceable to their exact commit.
+- On a **release build** (GoReleaser or `goreleaser build`), all three fields are injected from the git tag, commit SHA, and build timestamp.
+
+### 3.2 Build Tooling
+
+GoReleaser is the **single authority** for how binaries are built. The `.goreleaser.yaml` configuration defines the ldflags, target platforms, and archive formats. The Makefile delegates to GoReleaser rather than duplicating build logic.
+
+#### GoReleaser (`/.goreleaser.yaml`)
+
+GoReleaser derives `{{.Version}}` from the git tag (stripping the `v` prefix), `{{.Commit}}` from the git SHA, and `{{.Date}}` from the build timestamp. These are injected via:
+
+```yaml
+builds:
+  - ldflags:
+      - >-
+        -s -w
+        -X github.com/cwlls/pixe-go/cmd.version={{.Version}}
+        -X github.com/cwlls/pixe-go/cmd.commit={{.Commit}}
+        -X github.com/cwlls/pixe-go/cmd.buildDate={{.Date}}
+```
+
+This is the canonical build path for releases. `goreleaser release` creates tagged release artifacts; `goreleaser build --single-target --snapshot` creates local binaries using the same ldflags logic.
+
+#### Makefile (`/Makefile`)
+
+The Makefile uses `goreleaser build` for all binary compilation, ensuring a single source of build truth:
 
 ```makefile
-LDFLAGS := -s -w \
-    -X '$(MODULE)/internal/version.Commit=$(COMMIT)' \
-    -X '$(MODULE)/internal/version.BuildDate=$(BUILD_DATE)'
+build:  ## Build pixe for the current platform via GoReleaser
+	goreleaser build --single-target --snapshot --clean -o ./pixe
+
+build-debug:  ## Build without stripping symbols (for dlv) — bypasses GoReleaser
+	go build -gcflags "all=-N -l" -o ./pixe .
 ```
 
-> **Note:** The Makefile does **not** override `Version` via ldflags. The Go source file is authoritative. When bumping a release, update `version.go` — the Makefile reads nothing else for the version number.
+- `make build` invokes `goreleaser build --single-target --snapshot`, which builds for the current OS/arch only, uses the ldflags from `.goreleaser.yaml`, and places the binary at `./pixe`. The `--snapshot` flag allows building from untagged commits (the version field will resolve to the snapshot version, which GoReleaser derives from the latest tag + commit offset).
+- `make build-debug` is the sole exception — it bypasses GoReleaser to produce an unstripped binary for debugger attachment. In this mode, all version fields retain their defaults (`"dev"`, `"unknown"`).
+- `make install` uses `goreleaser build` and then copies the binary to `$GOPATH/bin`.
+
+> **Key benefit:** Build logic is defined in exactly one place (`.goreleaser.yaml`). The Makefile, CI, and release pipeline all use the same ldflags. No drift is possible.
 
 ### 3.3 Accessor Function
 
-A convenience function formats the full human-readable version string:
+A package-level function in `cmd/version.go` formats the full human-readable version string:
 
 ```go
-// Full returns the human-readable version string, e.g.:
-//   "pixe v0.9.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)"
-func Full() string
+// fullVersion returns the human-readable version string, e.g.:
+//   Release:  "pixe v0.10.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)"
+//   Dev:      "pixe dev-2159446 (commit: 2159446, built: unknown)"
+func fullVersion() string {
+    return fmt.Sprintf("pixe v%s (commit: %s, built: %s)", version, commit, buildDate)
+}
 ```
 
-This is the canonical display format used by the `pixe version` CLI command and available to any internal package that needs it.
+This is used by the `pixe version` CLI command and is the canonical display format.
 
 ### 3.4 Consumers
 
-| Consumer | What it reads | Why |
+| Consumer | What it reads | How |
 |---|---|---|
-| **`pixe version` CLI command** | `version.Full()` | Human-readable output |
-| **Archive database (`pixe.db`)** | `version.Version` | Records which Pixe version produced each run (future-proofing for format migrations) |
-| **Ledger (`.pixe_ledger.json`)** | `version.Version` | Same rationale as database |
+| **`pixe version` CLI command** | `fullVersion()` | Prints the formatted string to stdout |
+| **Pipeline (Manifest, Ledger)** | `cmd.Version()` | Exported getter; records which Pixe version produced each run |
+| **Archive database (`pixe.db`)** | `cmd.Version()` | Same — stamped into the `runs.pixe_version` column |
 
-### 3.5 Version Bump Process
+Because the version vars are unexported, an **exported getter** is provided for internal consumers:
+
+```go
+// Version returns the current version string for use by internal packages
+// (e.g., pipeline stamping into manifests and ledgers).
+func Version() string { return version }
+```
+
+### 3.5 Version Bump Process (Release)
 
 To release a new version:
 
-1. Update the `Version` constant in `internal/version/version.go`.
-2. Commit, tag (`git tag v0.9.0`), push.
-3. `make build` or `make install` automatically picks up the new constant and injects `Commit`/`BuildDate`.
+1. Commit all changes.
+2. Tag: `git tag v0.11.0`
+3. Push: `git push origin v0.11.0`
+4. GoReleaser extracts `0.11.0` from the tag and injects it into the binary.
 
-No other files need to change for a version bump.
+**No Go source file needs to change for a version bump.** The git tag is the sole input.
+
+### 3.6 Dev Build Version Strings
+
+| Build Method | `version` | `commit` | Example Output |
+|---|---|---|---|
+| `go build .` (bare) | `dev` | `unknown` | `pixe vdev (commit: unknown, built: unknown)` |
+| `make build` | `dev` (snapshot) | `abc1234` | `pixe vdev-abc1234 (commit: abc1234, built: unknown)` |
+| `goreleaser build --snapshot` | snapshot ver | `abc1234` | `pixe v0.10.0-next (commit: abc1234, built: 2026-03-07...)` |
+| `goreleaser release` (tagged) | `0.10.0` | `abc1234` | `pixe v0.10.0 (commit: abc1234, built: 2026-03-07...)` |
+
+> **Note on persistent artifacts:** When `version` is `"dev"` or starts with `"dev-"`, the pipeline stamps this string into manifests and ledgers. This is intentional — it makes dev-produced artifacts immediately identifiable. Production archives should always be produced from tagged release builds.
 
 ---
 
@@ -340,10 +393,10 @@ Prints the version, git commit, and build date in a single human-readable line, 
 **Output format:**
 
 ```
-pixe v0.9.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)
+pixe v0.10.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)
 ```
 
-No flags. This command calls `version.Full()` from `internal/version` and prints to stdout.
+No flags. This command calls `fullVersion()` (package-private in `cmd`) and prints to stdout. The version variables are injected at build time via ldflags (see Section 3).
 
 ### 7.2 Configuration File
 
