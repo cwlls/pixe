@@ -58,4 +58,4 @@ release:
   header: |
     ## Release {{.Tag}}
   footer: |
-    *Built with Go {{.Runtime.GoVersion}}*
+    *Built with Go 1.25*
