@@ -30,7 +30,7 @@
 | 26 | Locale-Aware Month Directory — `pathbuilder` rewrite | High | @developer |  ✅ Complete | 6 | Change month dir from `2` to `02-Feb` (locale-aware); add `MonthDir()` helper |
 | 27 | Update Tests — Month Directory Format | High | @developer |  ✅ Complete | 26 | Rewrite pathbuilder, pipeline, and integration tests for `MM-Mon` format |
 | 28 | Tests & Verification — Full Suite Green | High | @tester |  ✅ Complete | 26, 27 | `go vet`, `go test -race ./...`, `make lint` all pass |
-| 29 | Archive DB — `internal/archivedb` package & schema | High | @developer | 🔲 Pending | 2 | SQLite database layer: Open, Close, schema creation, WAL mode, busy timeout |
+| 29 | Archive DB — `internal/archivedb` package & schema | High | @developer | ✅ Complete | 2 | SQLite database layer: Open, Close, schema creation, WAL mode, busy timeout |
 | 30 | Archive DB — Run & File CRUD operations | High | @developer | 🔲 Pending | 29 | InsertRun, UpdateRun, InsertFile, UpdateFile, dedup query, batch insert |
 | 31 | Archive DB — Query methods | Medium | @developer | 🔲 Pending | 30 | Query families: by source, date range, run, status, checksum, duplicates |
 | 32 | DB Location Resolver — `internal/dblocator` package | High | @developer | 🔲 Pending | 29 | Priority chain: --db-path → dbpath marker → local default; network mount detection; slug generation |
