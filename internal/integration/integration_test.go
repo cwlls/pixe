@@ -92,6 +92,7 @@ func buildOpts(t *testing.T, dirA, dirB string, dryRun bool) pipeline.SortOption
 		Registry:     reg,
 		RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
 		Output:       &bytes.Buffer{},
+		PixeVersion:  "test",
 	}
 }
 

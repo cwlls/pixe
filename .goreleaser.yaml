@@ -20,9 +20,14 @@ builds:
     goarch:
       - amd64
       - arm64
-    # Injects the version, commit, and date into your main package
+    # Injects version, commit, and build date into the cmd package vars.
+    # All three targets are package-level vars (not consts), so -X works correctly.
     ldflags:
-      - -s -w -X github.com/cwlls/pixe-go/internal/version.Version={{.Version}} -X github.com/cwlls/pixe-go/internal/version.Commit={{.Commit}} -X github.com/cwlls/pixe-go/internal/version.BuildDate={{.Date}}
+      - >-
+        -s -w
+        -X github.com/cwlls/pixe-go/cmd.version={{.Version}}
+        -X github.com/cwlls/pixe-go/cmd.commit={{.Commit}}
+        -X github.com/cwlls/pixe-go/cmd.buildDate={{.Date}}
     # Point this to your main.go location (often "." or "./cmd/myapp")
     main: .
 

@@ -20,12 +20,12 @@
 | 16 | CLI: `pixe resume` Command | Medium | @developer | ✅ Complete | 4, 9, 10 | Load manifest, skip completed, re-enter pipeline |
 | 17 | Integration Tests & Safety Audit | High | @tester | ✅ Complete | 10, 15, 16 | End-to-end with fixture files, interrupt simulation |
 | 18 | Makefile & Build Tooling | Medium | @developer | ✅ Complete | 1 | help, build, test, lint, check, install targets; ldflags version injection |
-| 19 | Version Package — Single Source of Truth | High | @developer | ✅ Complete | — | `internal/version/version.go`: const, vars, `Full()` accessor |
-| 20 | CLI: `pixe version` Command | High | @developer | ✅ Complete | 19 | Cobra subcommand in `cmd/version.go` |
+| 19 | Version Package — Single Source of Truth | High | @developer | ⬜ Superseded | — | Superseded by Tasks 44–49 (idiomatic ldflags approach) |
+| 20 | CLI: `pixe version` Command | High | @developer | ⬜ Superseded | 19 | Superseded by Task 44 (version vars + command collapsed into `cmd`) |
 | 21 | Domain Structs — Add `PixeVersion` Field | High | @developer | ✅ Complete | 19 | Add field to `Manifest` and `Ledger` in `internal/domain/pipeline.go` |
-| 22 | Pipeline — Populate `PixeVersion` at Runtime | High | @developer | ✅ Complete | 19, 21 | Wire `version.Version` into manifest/ledger creation in pipeline + worker |
-| 23 | Makefile — Retarget ldflags to `internal/version` | Medium | @developer | ✅ Complete | 19 | Update LDFLAGS paths, remove Version override |
-| 24 | Tests & Verification | High | @tester | ✅ Complete | 19, 20, 21, 22, 23 | Unit tests for version pkg, manifest round-trip with new field, `go vet`, full test suite green |
+| 22 | Pipeline — Populate `PixeVersion` at Runtime | High | @developer | ⬜ Superseded | 19, 21 | Superseded by Task 46 (pipeline reads `cmd.Version()` instead of `version.Version`) |
+| 23 | Makefile — Retarget ldflags to `internal/version` | Medium | @developer | ⬜ Superseded | 19 | Superseded by Task 47 (Makefile delegates to GoReleaser) |
+| 24 | Tests & Verification | High | @tester | ⬜ Superseded | 19, 20, 21, 22, 23 | Superseded by Task 49 (version tests removed; verification via build smoke test) |
 | 25 | Lint Fixes — golangci-lint 0 issues | High | @developer | ✅ Complete | 1–24 | Fixed 30+ errcheck and unused lint violations across copy, discovery, heic, jpeg, mp4, verify, hash, manifest, pipeline packages; installed golangci-lint |
 | 26 | Locale-Aware Month Directory — `pathbuilder` rewrite | High | @developer |  ✅ Complete | 6 | Change month dir from `2` to `02-Feb` (locale-aware); add `MonthDir()` helper |
 | 27 | Update Tests — Month Directory Format | High | @developer |  ✅ Complete | 26 | Rewrite pathbuilder, pipeline, and integration tests for `MM-Mon` format |
@@ -45,6 +45,12 @@
 | 41 | Migration — Unit tests | High | @tester | 🔲 Pending | 34 | JSON→SQLite migration, idempotency, synthetic run correctness |
 | 42 | Integration Tests — SQLite pipeline end-to-end | High | @tester | 🔲 Pending | 35, 36, 37, 38 | Full sort→verify→resume cycle using DB, concurrent run simulation |
 | 43 | Tests & Verification — Full Suite Green | High | @tester | 🔲 Pending | 39, 40, 41, 42 | `go vet`, `go test -race ./...`, `make lint` all pass |
+| 44 | Version Vars & Command — Collapse into `cmd` | High | @developer | ✅ Complete | — | Move version vars + `fullVersion()` + `Version()` getter + `init()` into `cmd/version.go`; rewrite `pixe version` command |
+| 45 | Delete `internal/version` Package | High | @developer | ✅ Complete | 44, 46 | Remove `internal/version/version.go` and `version_test.go`; remove stale import from any file |
+| 46 | Pipeline — Switch to `cmd.Version()` | High | @developer | ✅ Complete | 44 | Replace `version.Version` with `cmd.Version()` in `pipeline.go` and `worker.go` |
+| 47 | Makefile — Delegate to GoReleaser | High | @developer | ✅ Complete | 44 | Rewrite `build`/`install` targets to use `goreleaser build --single-target --snapshot`; keep `build-debug` as raw `go build` |
+| 48 | GoReleaser — Fix ldflags Target | High | @developer | ✅ Complete | 44 | Retarget ldflags from `internal/version.*` to `cmd.version`, `cmd.commit`, `cmd.buildDate` |
+| 49 | Tests & Verification — Version Refactor | High | @tester | ✅ Complete | 44, 45, 46, 47, 48 | Delete version_test.go; update manifest test fixtures; `go vet`, `go test -race ./...`, `make build && ./pixe version` |
 
 ---
 
@@ -52,11 +58,30 @@
 
 All 18 original tasks have been completed. The pixe-go photo organization tool is fully functional with support for sorting, verifying, and resuming operations across JPEG, HEIC, and MP4 file types.
 
-## Feature: Centralized Version Management (Tasks 19–24) — Complete
+## Feature: Centralized Version Management (Tasks 19–24) — Superseded
 
-Adds a single-source-of-truth version package, a `pixe version` CLI command, and embeds the Pixe version into manifests and ledgers. See Architecture Section 3.
+~~Adds a single-source-of-truth version package, a `pixe version` CLI command, and embeds the Pixe version into manifests and ledgers.~~
 
-All 24 tasks complete. `pixe v0.9.0` ships with full version management.
+Tasks 19–24 are superseded by Tasks 44–49. The `internal/version` package is being replaced with idiomatic Go build-time injection via ldflags, with version variables collapsed into the `cmd` package. See Architecture Section 3 for the updated design.
+
+**What is preserved from Tasks 19–24:**
+- Task 21 (`PixeVersion` field on `Manifest` and `Ledger`) — remains as-is; the field still exists and is populated.
+- The `pixe version` CLI command — rewritten in-place in Task 44.
+- Manifest/ledger round-trip tests for `PixeVersion` — test fixtures updated to use `"dev"` instead of `"0.9.0"`.
+
+## Feature: Idiomatic Version Management (Tasks 44–49) — Complete
+
+Replaces the `internal/version` package with the standard Go pattern of build-time ldflags injection. The git tag becomes the sole source of truth for the version string. Version variables are collapsed into the `cmd` package. The Makefile delegates to GoReleaser for builds, eliminating ldflags drift. See Architecture Section 3.
+
+All 6 tasks complete. The `internal/version` package has been deleted and replaced with idiomatic Go build-time ldflags injection. Version variables (`version`, `commit`, `buildDate`) live in `cmd/version.go` as unexported vars with an exported `Version()` getter. The Makefile delegates all binary compilation to GoReleaser. The goreleaser ldflags bug (injecting into a `const`) is fixed. Dev builds produce `pixe vdev-<commit>` when built via the Makefile. All 13 test packages pass.
+
+**Design decisions:**
+1. **Git tag is the source of truth** — no version literal in Go source code.
+2. **Dev builds show `dev-<commit>`** — `init()` enriches the version string with the commit hash when available.
+3. **`internal/version` package is deleted** — version vars live in `cmd/version.go` (unexported) with an exported `Version()` getter.
+4. **Makefile delegates to GoReleaser** — `make build` runs `goreleaser build --single-target --snapshot`.
+5. **Version tests are removed** — no source literal to test; correctness is verified by build smoke test.
+6. **`PixeVersion` field on domain structs is unchanged** — pipeline reads `cmd.Version()` instead of `version.Version`.
 
 ---
 
@@ -2748,3 +2773,492 @@ go mod tidy                                     # No diff
 - No pipeline code references `manifest.Save()` or `manifest.Load()`.
 - No pipeline code uses an in-memory `dedupIndex` map.
 - The `internal/manifest` package is retained for ledger persistence and migration support only.
+
+---
+
+## Task 44 — Version Vars & Command — Collapse into `cmd`
+
+**Goal:** Rewrite `cmd/version.go` to contain the version variables, the `init()` dev-enrichment logic, the `fullVersion()` formatter, an exported `Version()` getter, and the `pixe version` Cobra command. This replaces the `internal/version` package as the home for all version concerns.
+
+**Architecture Reference:** Section 3.1 (Source of Truth: Git Tags), Section 3.3 (Accessor Function), Section 3.4 (Consumers)
+
+**Depends on:** Nothing (this is the foundation task)
+
+**File to rewrite: `cmd/version.go`**
+
+```go
+// Copyright 2026 Chris Wells <chris@rhza.org>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// ...
+
+package cmd
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+)
+
+// Version fields — injected at build time via -ldflags -X.
+// When built without ldflags (e.g. plain `go build` or `go test`), these
+// retain their dev defaults.
+//
+// GoReleaser injects all three; the Makefile (via goreleaser build --snapshot)
+// injects commit and buildDate but leaves version as "dev".
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
+func init() {
+	// Enrich dev builds with the commit hash for traceability.
+	// A Makefile build injects commit but not version, producing "dev-abc1234".
+	if version == "dev" && commit != "unknown" {
+		version = "dev-" + commit
+	}
+
+	rootCmd.AddCommand(versionCmd)
+}
+
+// Version returns the current version string for use by internal packages
+// (e.g., pipeline stamping into manifests and ledgers).
+func Version() string { return version }
+
+// fullVersion returns the human-readable version string.
+//
+// Examples:
+//
+//	Release:  "pixe v0.10.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)"
+//	Dev:      "pixe vdev-2159446 (commit: 2159446, built: unknown)"
+//	Bare:     "pixe vdev (commit: unknown, built: unknown)"
+func fullVersion() string {
+	return fmt.Sprintf("pixe v%s (commit: %s, built: %s)", version, commit, buildDate)
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the version of Pixe",
+	Long:  "Print the version, git commit, and build date of the Pixe binary.",
+	Args:  cobra.NoArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(fullVersion())
+	},
+}
+```
+
+**Key design points:**
+
+- `version`, `commit`, `buildDate` are **unexported** package-level `var`s — settable by ldflags (`-X github.com/cwlls/pixe-go/cmd.version=...`), invisible outside `cmd`.
+- `Version()` is the **exported getter** — the only way for internal packages (like `pipeline`) to read the version string.
+- `fullVersion()` is **unexported** — only used by the `pixe version` command within `cmd`.
+- The `init()` function handles the dev-enrichment: when `version == "dev"` and `commit != "unknown"` (i.e., a Makefile build injected the commit but not the version), it produces `"dev-abc1234"`.
+- The `init()` function also registers the `versionCmd` with `rootCmd` (moved from the old standalone `init()` block).
+
+**Acceptance Criteria:**
+- `cmd/version.go` compiles with the new content.
+- `go build ./...` succeeds (the old `internal/version` package still exists at this point — it will be removed in Task 45).
+- `Version()` returns `"dev"` when built without ldflags.
+- `fullVersion()` returns `"pixe vdev (commit: unknown, built: unknown)"` when built without ldflags.
+- The `pixe version` command prints the output of `fullVersion()`.
+
+---
+
+## Task 45 — Delete `internal/version` Package
+
+**Goal:** Remove the `internal/version` package entirely. This is safe only after Tasks 44 and 46 are complete (all consumers have been migrated to `cmd.Version()`).
+
+**Architecture Reference:** Section 3.1 (version vars now live in `cmd`)
+
+**Depends on:** Task 44 (new version vars exist in `cmd`), Task 46 (pipeline no longer imports `internal/version`)
+
+**Files to delete:**
+- `internal/version/version.go`
+- `internal/version/version_test.go`
+
+**After deletion, verify:**
+```bash
+# No Go file should import the old package:
+rg 'internal/version' --include '*.go'
+# Should return zero matches.
+```
+
+**Acceptance Criteria:**
+- `internal/version/` directory no longer exists.
+- No `.go` file imports `github.com/cwlls/pixe-go/internal/version`.
+- `go build ./...` succeeds.
+- `go vet ./...` reports no issues.
+
+---
+
+## Task 46 — Pipeline — Switch to `cmd.Version()`
+
+**Goal:** Replace all references to `version.Version` in the pipeline package with `cmd.Version()`. This is the critical wiring change that connects the pipeline to the new version source.
+
+**Architecture Reference:** Section 3.4 (Consumers table)
+
+**Depends on:** Task 44 (`cmd.Version()` getter exists)
+
+**Import cycle concern:** `cmd` imports `pipeline`, so `pipeline` **cannot** import `cmd`. The solution is to pass the version string into the pipeline via `SortOptions`, rather than having the pipeline call `cmd.Version()` directly.
+
+### Files to modify
+
+#### 1. `internal/pipeline/pipeline.go`
+
+**Add `PixeVersion` field to `SortOptions`:**
+
+```go
+// SortOptions holds the resolved runtime options for a sort run.
+type SortOptions struct {
+	Config       *config.AppConfig
+	Hasher       *hash.Hasher
+	Registry     *discovery.Registry
+	RunTimestamp string
+	Output       io.Writer
+	PixeVersion  string   // ← NEW: version string for manifest/ledger stamping
+}
+```
+
+**Remove the `internal/version` import** from `pipeline.go`.
+
+**Replace `version.Version` with `opts.PixeVersion`** in the `Run()` function:
+
+```go
+// Line ~91 — manifest creation:
+// BEFORE:
+PixeVersion: version.Version,
+// AFTER:
+PixeVersion: opts.PixeVersion,
+
+// Line ~147 — ledger creation:
+// BEFORE:
+PixeVersion: version.Version,
+// AFTER:
+PixeVersion: opts.PixeVersion,
+```
+
+#### 2. `internal/pipeline/worker.go`
+
+**Remove the `internal/version` import** from `worker.go`.
+
+**Replace `version.Version` with the version from the options/manifest** in all ledger creation sites:
+
+```go
+// Line ~122 — RunConcurrent ledger creation:
+// BEFORE:
+PixeVersion: version.Version,
+// AFTER:
+PixeVersion: m.PixeVersion,
+// (The manifest was already populated with the version in Run(), so
+//  the concurrent path can read it from there.)
+
+// Line ~380 — runSequential ledger creation:
+// BEFORE:
+PixeVersion: version.Version,
+// AFTER:
+PixeVersion: m.PixeVersion,
+```
+
+#### 3. `cmd/sort.go`
+
+**Wire `cmd.Version()` into `SortOptions`:**
+
+```go
+opts := pipeline.SortOptions{
+	Config:       cfg,
+	Hasher:       h,
+	Registry:     reg,
+	RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
+	Output:       os.Stdout,
+	PixeVersion:  Version(),   // ← NEW: pass version into pipeline
+}
+```
+
+Since `cmd/sort.go` is in the `cmd` package, it can call `Version()` directly (same package).
+
+**Acceptance Criteria:**
+- No file in `internal/pipeline/` imports `github.com/cwlls/pixe-go/internal/version`.
+- `pipeline.SortOptions` has a `PixeVersion string` field.
+- `cmd/sort.go` passes `Version()` into `SortOptions.PixeVersion`.
+- After a `pixe sort` run (dev build), `manifest.json` contains `"pixe_version": "dev"` and `ledger.json` contains `"pixe_version": "dev"`.
+- `go build ./...` succeeds.
+- All existing pipeline tests pass (they will need to set `PixeVersion` in their `SortOptions` — use `"test"` or `"dev"`).
+
+---
+
+## Task 47 — Makefile — Delegate to GoReleaser
+
+**Goal:** Rewrite the Makefile so that `build` and `install` targets delegate to `goreleaser build` instead of running `go build` with hand-crafted ldflags. This ensures the Makefile and GoReleaser use identical build logic.
+
+**Architecture Reference:** Section 3.2 (Build Tooling — Makefile)
+
+**Depends on:** Task 44 (version vars exist in `cmd` at the ldflags target paths)
+
+**File to rewrite: `Makefile`**
+
+Replace the variables and build targets. The full updated Makefile:
+
+```makefile
+# ============================================================
+# Makefile — pixe-go
+# module: github.com/cwlls/pixe-go
+# ============================================================
+
+# ---------- variables ---------------------------------------
+BINARY      := pixe
+BUILD_DIR   := .
+
+# Test flags
+TEST_FLAGS  := -race -timeout 120s
+COVER_OUT   := coverage.out
+COVER_HTML  := coverage.html
+
+# Tools
+GOLANGCI    := golangci-lint
+
+# ---------- default target ----------------------------------
+.DEFAULT_GOAL := help
+
+# ---------- phony targets -----------------------------------
+.PHONY: help build build-debug run clean test test-unit test-integration test-all \
+        test-cover test-cover-html lint vet fmt fmt-check tidy deps check install uninstall
+
+# ---------- help --------------------------------------------
+help: ## Show this help message
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} \
+	     /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
+# ---------- build -------------------------------------------
+build: ## Build pixe for the current platform via GoReleaser
+	goreleaser build --single-target --snapshot --clean -o $(BUILD_DIR)/$(BINARY)
+
+build-debug: ## Build without stripping symbols (for dlv) — bypasses GoReleaser
+	go build -gcflags "all=-N -l" -o $(BUILD_DIR)/$(BINARY) .
+
+# ---------- run ---------------------------------------------
+run: build ## Build then run pixe with ARGS (e.g. make run ARGS="sort --help")
+	./$(BINARY) $(ARGS)
+
+# ---------- clean -------------------------------------------
+clean: ## Remove build artifacts and coverage files
+	rm -f $(BUILD_DIR)/$(BINARY)
+	rm -rf dist/
+	rm -f $(COVER_OUT) $(COVER_HTML)
+
+# ---------- test --------------------------------------------
+test: test-unit ## Alias for test-unit
+
+test-unit: ## Run unit tests (excludes integration)
+	go test $(TEST_FLAGS) $(shell go list ./... | grep -v '/integration')
+
+test-integration: ## Run integration tests only (requires build)
+	go test $(TEST_FLAGS) -v ./internal/integration/...
+
+test-all: ## Run all tests including integration
+	go test $(TEST_FLAGS) ./...
+
+test-cover: ## Run unit tests with coverage report
+	go test $(TEST_FLAGS) -coverprofile=$(COVER_OUT) -covermode=atomic \
+	    $(shell go list ./... | grep -v '/integration')
+	go tool cover -func=$(COVER_OUT)
+
+test-cover-html: test-cover ## Open HTML coverage report in browser
+	go tool cover -html=$(COVER_OUT) -o $(COVER_HTML)
+	open $(COVER_HTML)
+
+# ---------- code quality ------------------------------------
+vet: ## Run go vet
+	go vet ./...
+
+fmt: ## Format all Go source files
+	gofmt -w -s .
+
+fmt-check: ## Check formatting without modifying files (CI-safe)
+	@out=$$(gofmt -l -s .); \
+	if [ -n "$$out" ]; then \
+	    echo "The following files need formatting:"; \
+	    echo "$$out"; \
+	    exit 1; \
+	fi
+
+lint: ## Run golangci-lint (install: brew install golangci-lint)
+	$(GOLANGCI) run ./...
+
+check: fmt-check vet test-unit ## Run fmt-check + vet + unit tests (fast CI gate)
+
+# ---------- dependencies ------------------------------------
+tidy: ## Run go mod tidy
+	go mod tidy
+
+deps: ## Download all module dependencies
+	go mod download
+
+# ---------- install / uninstall -----------------------------
+install: build ## Install pixe to $GOPATH/bin
+	cp $(BUILD_DIR)/$(BINARY) $(shell go env GOPATH)/bin/$(BINARY)
+
+uninstall: ## Remove pixe from $GOPATH/bin
+	rm -f $(shell go env GOPATH)/bin/$(BINARY)
+```
+
+**Key changes from the current Makefile:**
+
+| Aspect | Before | After |
+|---|---|---|
+| `MODULE` variable | Used for ldflags path | Removed — GoReleaser owns ldflags |
+| `COMMIT` variable | `git rev-parse --short HEAD` | Removed — GoReleaser computes this |
+| `BUILD_DATE` variable | `date -u +%Y-%m-%dT%H:%M:%SZ` | Removed — GoReleaser computes this |
+| `LDFLAGS` variable | Hand-crafted `-X` flags | Removed — defined in `.goreleaser.yaml` |
+| `build` target | `go build -ldflags "$(LDFLAGS)"` | `goreleaser build --single-target --snapshot --clean -o ./pixe` |
+| `build-debug` target | `go build -gcflags "all=-N -l"` | Unchanged — still raw `go build` for debugger |
+| `install` target | `go install -ldflags "$(LDFLAGS)"` | `cp` after `goreleaser build` (GoReleaser doesn't support `go install`) |
+| `clean` target | Removes binary + coverage | Also removes `dist/` (GoReleaser's output directory) |
+
+**Acceptance Criteria:**
+- `make build` invokes `goreleaser build --single-target --snapshot --clean -o ./pixe` and produces a working binary.
+- `./pixe version` after `make build` prints a version string with a real commit hash (not `"unknown"`).
+- `make build-debug` still produces an unstripped binary via raw `go build`.
+- `make install` copies the binary to `$GOPATH/bin`.
+- `make clean` removes the binary, `dist/`, and coverage files.
+- `make help` displays all targets correctly.
+- No `LDFLAGS`, `MODULE`, `COMMIT`, `BUILD_DATE`, or `VERSION` variables remain in the Makefile.
+
+---
+
+## Task 48 — GoReleaser — Fix ldflags Target
+
+**Goal:** Update `.goreleaser.yaml` to inject version variables into `cmd.version`, `cmd.commit`, and `cmd.buildDate` (the new unexported vars in the `cmd` package) instead of the old `internal/version.Version`, `internal/version.Commit`, and `internal/version.BuildDate`.
+
+**Architecture Reference:** Section 3.2 (GoReleaser configuration)
+
+**Depends on:** Task 44 (the target vars exist in `cmd`)
+
+**File to modify: `.goreleaser.yaml`**
+
+```yaml
+# BEFORE (line 25):
+    ldflags:
+      - -s -w -X github.com/cwlls/pixe-go/internal/version.Version={{.Version}} -X github.com/cwlls/pixe-go/internal/version.Commit={{.Commit}} -X github.com/cwlls/pixe-go/internal/version.BuildDate={{.Date}}
+
+# AFTER:
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/cwlls/pixe-go/cmd.version={{.Version}}
+        -X github.com/cwlls/pixe-go/cmd.commit={{.Commit}}
+        -X github.com/cwlls/pixe-go/cmd.buildDate={{.Date}}
+```
+
+**This also fixes the existing bug:** The old config tried to inject into `version.Version` which was a `const` — ldflags `-X` can only set `var`s, so the injection was silently ignored. The new targets are all `var`s.
+
+**Additional cleanup:** Reformat the ldflags as a YAML block scalar (`>-`) for readability, matching the style shown in the Architecture doc.
+
+**Acceptance Criteria:**
+- `.goreleaser.yaml` ldflags target `cmd.version`, `cmd.commit`, and `cmd.buildDate`.
+- No reference to `internal/version` remains in `.goreleaser.yaml`.
+- `goreleaser check` passes (validates the config).
+- `goreleaser build --single-target --snapshot` produces a binary where `./pixe version` shows a snapshot version string with a real commit hash and build date.
+
+---
+
+## Task 49 — Tests & Verification — Version Refactor
+
+**Goal:** Verify the entire version refactor is correct: delete stale version tests, update test fixtures that reference version strings, and run the full test suite.
+
+**Architecture Reference:** Section 3 (Version Management)
+
+**Depends on:** Tasks 44, 45, 46, 47, 48
+
+### 1. Deleted files (already done in Task 45)
+
+- `internal/version/version_test.go` — no longer exists.
+- `internal/version/version.go` — no longer exists.
+
+### 2. Update manifest test fixtures
+
+**File: `internal/manifest/manifest_test.go`**
+
+The `sampleManifest()` and `sampleLedger()` helpers currently set `PixeVersion: "0.9.0"`. Update to `"test"`:
+
+```go
+// In sampleManifest() (~line 32):
+// BEFORE:
+PixeVersion: "0.9.0",
+// AFTER:
+PixeVersion: "test",
+
+// In sampleLedger() (~line 55):
+// BEFORE:
+PixeVersion: "0.9.0",
+// AFTER:
+PixeVersion: "test",
+```
+
+The round-trip assertions (`got.PixeVersion != m.PixeVersion`) remain valid — they test serialization, not the specific version value.
+
+### 3. Update pipeline test fixtures
+
+Any pipeline test that constructs `SortOptions` must now include the `PixeVersion` field:
+
+```go
+opts := pipeline.SortOptions{
+	Config:       cfg,
+	Hasher:       h,
+	Registry:     reg,
+	RunTimestamp: "20260306_103000",
+	Output:       &buf,
+	PixeVersion:  "test",   // ← ADD
+}
+```
+
+Search for all test files that construct `SortOptions`:
+```bash
+rg 'SortOptions{' --include '*_test.go'
+```
+
+### 4. Verification commands
+
+```bash
+# No stale imports:
+rg 'internal/version' --include '*.go'
+# Should return zero matches.
+
+# No stale ldflags references:
+rg 'internal/version' Makefile .goreleaser.yaml
+# Should return zero matches.
+
+# Full build + test:
+go vet ./...
+go build ./...
+go test -race -timeout 120s ./...
+make lint
+
+# Build smoke test:
+make build
+./pixe version
+# Should print: pixe v<snapshot-version> (commit: <hash>, built: <date>)
+
+# Debug build smoke test:
+make build-debug
+./pixe version
+# Should print: pixe vdev (commit: unknown, built: unknown)
+
+# GoReleaser validation:
+goreleaser check
+```
+
+### Acceptance Criteria
+
+- `internal/version/` directory does not exist.
+- No `.go` file imports `github.com/cwlls/pixe-go/internal/version`.
+- No reference to `internal/version` in `Makefile` or `.goreleaser.yaml`.
+- `go vet ./...` — zero warnings.
+- `go build ./...` — compiles cleanly.
+- `go test -race -timeout 120s ./...` — all tests pass.
+- `make lint` — 0 issues.
+- `make build && ./pixe version` — prints version with real commit hash.
+- `make build-debug && ./pixe version` — prints `pixe vdev (commit: unknown, built: unknown)`.
+- `goreleaser check` — passes.
+- Manifest round-trip tests still assert `PixeVersion` survives serialization.
+- Pipeline tests pass with `PixeVersion: "test"` in `SortOptions`.

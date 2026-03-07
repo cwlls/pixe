@@ -58,6 +58,7 @@ func newOpts(t *testing.T, cfg *config.AppConfig, out *bytes.Buffer) SortOptions
 		Registry:     reg,
 		RunTimestamp: "20260306_103000",
 		Output:       out,
+		PixeVersion:  "test",
 	}
 }
 

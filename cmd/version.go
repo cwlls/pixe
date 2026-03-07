@@ -17,9 +17,56 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cwlls/pixe-go/internal/version"
 	"github.com/spf13/cobra"
 )
+
+// version fields are injected at build time via -ldflags -X.
+// When built without ldflags (e.g. plain `go build` or `go test`), these
+// retain their dev defaults.
+//
+// GoReleaser injects all three from the git tag, commit SHA, and build
+// timestamp. The Makefile (via goreleaser build --snapshot) injects commit
+// and buildDate but leaves version as "dev"; init() enriches that to
+// "dev-<commit>" for traceability.
+//
+// ldflags targets:
+//
+//	-X github.com/cwlls/pixe-go/cmd.version={{.Version}}
+//	-X github.com/cwlls/pixe-go/cmd.commit={{.Commit}}
+//	-X github.com/cwlls/pixe-go/cmd.buildDate={{.Date}}
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
+func init() {
+	// Enrich dev builds with the commit hash for traceability.
+	// A goreleaser --snapshot build injects commit but not version,
+	// producing e.g. "dev-2159446" so local binaries are traceable.
+	if version == "dev" && commit != "unknown" {
+		version = "dev-" + commit
+	}
+
+	rootCmd.AddCommand(versionCmd)
+}
+
+// Version returns the current version string for use by packages that cannot
+// import cmd directly (e.g. pipeline, which cmd already imports).
+// Callers in the cmd package should read the version var directly.
+func Version() string { return version }
+
+// fullVersion returns the canonical human-readable version string used by
+// the `pixe version` CLI command.
+//
+// Examples:
+//
+//	Release build:  "pixe v0.10.0 (commit: abc1234, built: 2026-03-07T12:00:00Z)"
+//	Snapshot build: "pixe vdev-2159446 (commit: 2159446, built: 2026-03-07T12:00:00Z)"
+//	Bare go build:  "pixe vdev (commit: unknown, built: unknown)"
+func fullVersion() string {
+	return fmt.Sprintf("pixe v%s (commit: %s, built: %s)", version, commit, buildDate)
+}
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
@@ -27,10 +74,6 @@ var versionCmd = &cobra.Command{
 	Long:  "Print the version, git commit, and build date of the Pixe binary.",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(version.Full())
+		fmt.Println(fullVersion())
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(versionCmd)
 }

@@ -56,6 +56,7 @@ func newOptsN(t *testing.T, cfg *config.AppConfig, workers int, out *bytes.Buffe
 		Registry:     reg,
 		RunTimestamp: "20260306_103000",
 		Output:       out,
+		PixeVersion:  "test",
 	}
 }
 

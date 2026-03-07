@@ -114,6 +114,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		Registry:     reg,
 		RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
 		Output:       os.Stdout,
+		PixeVersion:  Version(),
 	}
 
 	result, err := pipeline.Run(opts)

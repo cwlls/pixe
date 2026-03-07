@@ -2,22 +2,14 @@
 # Makefile — pixe-go
 # module: github.com/cwlls/pixe-go
 # ============================================================
+# Build logic (ldflags, target platforms, archive formats) is defined
+# exclusively in .goreleaser.yaml. The Makefile delegates all binary
+# compilation to GoReleaser so there is a single source of build truth.
+# ============================================================
 
 # ---------- variables ---------------------------------------
-MODULE      := github.com/cwlls/pixe-go
 BINARY      := pixe
-MAIN        := .
 BUILD_DIR   := .
-
-# Embed build-time metadata at link time.
-# Version is NOT injected here — it is a const in internal/version/version.go.
-# Only Commit and BuildDate are injected as vars.
-COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE  ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-
-LDFLAGS     := -s -w \
-               -X '$(MODULE)/internal/version.Commit=$(COMMIT)' \
-               -X '$(MODULE)/internal/version.BuildDate=$(BUILD_DATE)'
 
 # Test flags
 TEST_FLAGS  := -race -timeout 120s
@@ -31,8 +23,8 @@ GOLANGCI    := golangci-lint
 .DEFAULT_GOAL := help
 
 # ---------- phony targets -----------------------------------
-.PHONY: help build run clean test test-unit test-integration test-cover \
-        lint vet fmt fmt-check tidy deps check install uninstall
+.PHONY: help build build-debug run clean test test-unit test-integration test-all \
+        test-cover test-cover-html lint vet fmt fmt-check tidy deps check install uninstall
 
 # ---------- help --------------------------------------------
 help: ## Show this help message
@@ -40,19 +32,20 @@ help: ## Show this help message
 	     /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 # ---------- build -------------------------------------------
-build: ## Build the pixe binary (output: ./pixe)
-	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) $(MAIN)
+build: ## Build pixe for the current platform via GoReleaser (snapshot)
+	goreleaser build --single-target --snapshot --clean -o $(BUILD_DIR)/$(BINARY)
 
-build-debug: ## Build without stripping symbols (for dlv)
-	go build -gcflags "all=-N -l" -o $(BUILD_DIR)/$(BINARY) $(MAIN)
+build-debug: ## Build without stripping symbols (for dlv) — bypasses GoReleaser
+	go build -gcflags "all=-N -l" -o $(BUILD_DIR)/$(BINARY) .
 
 # ---------- run ---------------------------------------------
 run: build ## Build then run pixe with ARGS (e.g. make run ARGS="sort --help")
 	./$(BINARY) $(ARGS)
 
 # ---------- clean -------------------------------------------
-clean: ## Remove build artifacts and coverage files
+clean: ## Remove build artifacts, GoReleaser dist/, and coverage files
 	rm -f $(BUILD_DIR)/$(BINARY)
+	rm -rf dist/
 	rm -f $(COVER_OUT) $(COVER_HTML)
 
 # ---------- test --------------------------------------------
@@ -105,7 +98,7 @@ deps: ## Download all module dependencies
 
 # ---------- install / uninstall -----------------------------
 install: build ## Install pixe to $GOPATH/bin (or $GOBIN)
-	go install -ldflags "$(LDFLAGS)" $(MAIN)
+	cp $(BUILD_DIR)/$(BINARY) $(shell go env GOPATH)/bin/$(BINARY)
 
 uninstall: ## Remove pixe from $GOPATH/bin
 	rm -f $(shell go env GOPATH)/bin/$(BINARY)

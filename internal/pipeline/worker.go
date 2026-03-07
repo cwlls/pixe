@@ -28,7 +28,6 @@ import (
 	"github.com/cwlls/pixe-go/internal/domain"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/version"
 )
 
 // workItem is sent from the coordinator to a worker.
@@ -119,7 +118,7 @@ func RunConcurrent(ctx context.Context, opts SortOptions, discovered []discovery
 
 	ledger := &domain.Ledger{
 		Version:     1,
-		PixeVersion: version.Version,
+		PixeVersion: m.PixeVersion,
 		PixeRun:     m.StartedAt,
 		Algorithm:   opts.Hasher.Algorithm(),
 		Destination: dirB,
@@ -377,7 +376,7 @@ func runSequential(_ context.Context, opts SortOptions, discovered []discovery.D
 	var result SortResult
 	ledger := &domain.Ledger{
 		Version:     1,
-		PixeVersion: version.Version,
+		PixeVersion: m.PixeVersion,
 		PixeRun:     m.StartedAt,
 		Algorithm:   opts.Hasher.Algorithm(),
 		Destination: dirB,

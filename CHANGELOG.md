@@ -1,6 +1,6 @@
 # Changelog: Pixe
 
-*This file contains the high-level progress of the project for the user. Contents should appear with the newest changes at the top.*
+*This file contains the high-level progress of the project for the user. Contents appear with the newest changes at the top.*
 
 ---
 

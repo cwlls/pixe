@@ -29,7 +29,7 @@ func sampleManifest(dirB string) *domain.Manifest {
 	verified := now.Add(2 * time.Second)
 	return &domain.Manifest{
 		Version:     1,
-		PixeVersion: "0.9.0",
+		PixeVersion: "test",
 		Source:      "/tmp/source",
 		Destination: dirB,
 		Algorithm:   "sha1",
@@ -52,7 +52,7 @@ func sampleLedger() *domain.Ledger {
 	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
 	return &domain.Ledger{
 		Version:     1,
-		PixeVersion: "0.9.0",
+		PixeVersion: "test",
 		PixeRun:     now,
 		Algorithm:   "sha1",
 		Destination: "/tmp/dest",
