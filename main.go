@@ -1,6 +1,6 @@
 package main
 
-import "github.com/wellsiau/pixe-go/cmd"
+import "github.com/cwlls/pixe-go/cmd"
 
 func main() {
 	cmd.Execute()
