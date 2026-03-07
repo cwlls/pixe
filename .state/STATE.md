@@ -18,7 +18,14 @@
 | 14 | Metadata Tagging Engine | Medium | @developer | ✅ Complete | 7, 8 | Copyright template, CameraOwner injection post-verify |
 | 15 | CLI: `pixe verify` Command | Medium | @developer | ✅ Complete | 3, 5, 10 | Walk dirB, parse filename checksum, report mismatches |
 | 16 | CLI: `pixe resume` Command | Medium | @developer | ✅ Complete | 4, 9, 10 | Load manifest, skip completed, re-enter pipeline |
-| 17 | Integration Tests & Safety Audit | High | @tester | 🏗️ In Progress | 10, 15, 16 | End-to-end with fixture files, interrupt simulation |
+| 17 | Integration Tests & Safety Audit | High | @tester | ✅ Complete | 10, 15, 16 | End-to-end with fixture files, interrupt simulation |
+| 18 | Makefile & Build Tooling | Medium | @developer | ✅ Complete | 1 | help, build, test, lint, check, install targets; ldflags version injection |
+
+---
+
+## Project Complete
+
+All 18 tasks have been completed. The pixe-go photo organization tool is fully functional with support for sorting, verifying, and resuming operations across JPEG, HEIC, and MP4 file types.
 
 ---
 
@@ -495,3 +502,50 @@ type SortOptions struct {
 - **Test: Source untouched** — assert no files in `dirA` were modified (compare checksums of originals before and after sort). Only `.pixe_ledger.json` is new.
 - **Test: Dry-run** — assert `--dry-run` creates no files in `dirB`.
 - All tests use `t.TempDir()` for isolation.
+
+---
+
+## Task 18 — Makefile & Build Tooling
+
+**Goal:** Provide a Makefile with standard development targets for building, testing, linting, and installing the pixe binary with version metadata injection.
+
+**Acceptance Criteria:**
+- `make help` displays all available targets with descriptions.
+- `make build` compiles the pixe binary with embedded version, commit, and build date via ldflags.
+- `make test` runs unit tests (excludes integration tests).
+- `make test-integration` runs integration tests only.
+- `make lint` runs golangci-lint.
+- `make check` runs fmt-check + vet + unit tests (fast CI gate).
+- `make install` builds and installs to `$GOPATH/bin`.
+- Version injection: `cmd.Version`, `cmd.Commit`, `cmd.BuildDate` set via `-ldflags -X`.
+
+**Targets Implemented:**
+| Target | Description |
+|--------|-------------|
+| `help` | Show available targets with descriptions |
+| `build` | Build pixe binary with ldflags |
+| `build-debug` | Build without symbol stripping (for dlv) |
+| `run` | Build and run with ARGS |
+| `clean` | Remove build artifacts |
+| `test` | Alias for test-unit |
+| `test-unit` | Run unit tests (excludes integration) |
+| `test-integration` | Run integration tests only |
+| `test-all` | Run all tests including integration |
+| `test-cover` | Run unit tests with coverage report |
+| `test-cover-html` | Open HTML coverage report |
+| `vet` | Run go vet |
+| `fmt` | Format all Go source files |
+| `fmt-check` | Check formatting without modifying |
+| `lint` | Run golangci-lint |
+| `check` | fmt-check + vet + unit tests |
+| `tidy` | Run go mod tidy |
+| `deps` | Download module dependencies |
+| `install` | Build and install to $GOPATH/bin |
+| `uninstall` | Remove from $GOPATH/bin |
+
+**Design Decisions:**
+- Default goal is `help` for discoverability.
+- LDFLAGS inject version info from git tags (`git describe --tags`), commit hash, and build date.
+- Test targets exclude integration tests by default using `grep -v '/integration'`.
+- Uses `.PHONY` declarations for all targets to avoid filename conflicts.
+- Coverage output uses atomic mode for accurate parallel test coverage.
