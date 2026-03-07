@@ -32,9 +32,86 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 ---
 
-## 3. Conceptual Design
+## 3. Version Management
 
-### 3.1 High-Level Data Flow
+### 3.1 Single Source of Truth
+
+Pixe's version is defined in a dedicated, importable Go source file at `internal/version/version.go`. This file is the **single source of truth** for version information across the entire project — CLI output, manifest recording, and any future consumer.
+
+**Location:** `internal/version/version.go`
+
+```go
+// Package version provides the centralized version constant for Pixe.
+// This is the single source of truth — update the Version constant here
+// when cutting a new release.
+package version
+
+// Version is the semantic version of Pixe (without the "v" prefix).
+// Update this value when cutting a new release.
+const Version = "0.9.0"
+```
+
+- The version follows **Semantic Versioning** (`MAJOR.MINOR.PATCH`).
+- The constant is stored **without** the `v` prefix; the `v` is prepended at display time.
+- Initial version: **`0.9.0`**.
+
+### 3.2 Build-Time Metadata
+
+In addition to the hardcoded version, the build system injects **commit hash** and **build timestamp** via Go linker flags (`-ldflags -X`). These are stored as package-level variables (not constants) so they can be overwritten at link time:
+
+```go
+// Commit is the short git SHA, injected at build time via -ldflags.
+var Commit = "unknown"
+
+// BuildDate is the UTC build timestamp, injected at build time via -ldflags.
+var BuildDate = "unknown"
+```
+
+The Makefile wires these with:
+
+```makefile
+LDFLAGS := -s -w \
+    -X '$(MODULE)/internal/version.Commit=$(COMMIT)' \
+    -X '$(MODULE)/internal/version.BuildDate=$(BUILD_DATE)'
+```
+
+> **Note:** The Makefile does **not** override `Version` via ldflags. The Go source file is authoritative. When bumping a release, update `version.go` — the Makefile reads nothing else for the version number.
+
+### 3.3 Accessor Function
+
+A convenience function formats the full human-readable version string:
+
+```go
+// Full returns the human-readable version string, e.g.:
+//   "pixe v0.9.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)"
+func Full() string
+```
+
+This is the canonical display format used by the `pixe version` CLI command and available to any internal package that needs it.
+
+### 3.4 Consumers
+
+| Consumer | What it reads | Why |
+|---|---|---|
+| **`pixe version` CLI command** | `version.Full()` | Human-readable output |
+| **Manifest (`manifest.json`)** | `version.Version` | Records which Pixe version produced the archive (future-proofing for format migrations) |
+| **Ledger (`.pixe_ledger.json`)** | `version.Version` | Same rationale as manifest |
+
+### 3.5 Version Bump Process
+
+To release a new version:
+
+1. Update the `Version` constant in `internal/version/version.go`.
+2. Commit, tag (`git tag v0.9.0`), push.
+3. `make build` or `make install` automatically picks up the new constant and injects `Commit`/`BuildDate`.
+
+No other files need to change for a version bump.
+
+---
+
+## 4. Conceptual Design
+
+### 4.1 High-Level Data Flow
 
 ```
 dirA (read-only source)          dirB (organized destination)
@@ -54,7 +131,7 @@ dirA (read-only source)          dirB (organized destination)
                                  └──────────────────────────────────┘
 ```
 
-### 3.2 Pipeline Stages
+### 4.2 Pipeline Stages
 
 Each file passes through these stages, tracked in the manifest:
 
@@ -74,13 +151,13 @@ pending → extracted → hashed → copied → verified → tagged → complete
 
 Error states (`failed`, `mismatch`, `tag_failed`) halt processing for that file and flag it for user attention.
 
-### 3.3 Output Naming Convention
+### 4.3 Output Naming Convention
 
 ```
 YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 ```
 
-- **Date/Time**: Extracted from file metadata (see Section 4.3).
+- **Date/Time**: Extracted from file metadata (see Section 4.5).
 - **Checksum**: Hex-encoded hash of the media payload. Default SHA-1 (40 hex characters).
 - **Extension**: Lowercase, preserved from original.
 
@@ -93,7 +170,7 @@ YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 - Year: 4-digit.
 - Month: Non-zero-padded integer (1–12).
 
-### 3.4 Duplicate Handling
+### 4.4 Duplicate Handling
 
 When a file's checksum matches an already-processed file (same data payload):
 
@@ -105,7 +182,7 @@ When a file's checksum matches an already-processed file (same data payload):
 - The subdirectory structure mirrors the normal import layout, as if `duplicates/<run_timestamp>/` were the root of `dirB`.
 - This preserves the duplicate for user review without polluting the primary archive.
 
-### 3.5 Date Fallback Chain
+### 4.5 Date Fallback Chain
 
 Each filetype module extracts dates using format-appropriate methods. The **authoritative fallback chain** is:
 
@@ -115,7 +192,7 @@ Each filetype module extracts dates using format-appropriate methods. The **auth
 
 Filesystem timestamps (`ModTime`, `CreationTime`) are explicitly **not used** — they are unreliable across copies, cloud syncs, and OS transfers.
 
-### 3.6 Metadata Tagging (Optional)
+### 4.6 Metadata Tagging (Optional)
 
 On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destination file. These are **never written to the source**.
 
@@ -130,10 +207,10 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 
 ---
 
-## 4. Global Constraints
+## 5. Global Constraints
 
 > [!IMPORTANT]
-> ### 4.1 Operational Safety
+> ### 5.1 Operational Safety
 > - **`dirA` is read-only.** Pixe never modifies, renames, moves, or deletes source files. The sole exception is writing a `.pixe_ledger.json` file into `dirA` to record what was processed.
 > - **Copy-then-verify.** Every file is copied to `dirB`, then the destination is independently re-read and re-hashed to confirm integrity.
 > - **Manifest-based resumability.** A manifest at `dirB/.pixe/manifest.json` tracks per-file state. Interrupted runs resume from the last known-good state.
@@ -141,12 +218,12 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 > - **No silent data loss.** Hash mismatches, copy failures, and unrecognized files are always reported. Pixe never exits silently on error.
 
 > [!IMPORTANT]
-> ### 4.2 Native Execution
+> ### 5.2 Native Execution
 > - **No external binary dependencies.** All metadata parsing, hashing, and file operations use pure Go packages or C libraries accessible via cgo only as a last resort.
 > - **No `os/exec` calls** for core functionality. The binary must be self-contained.
 
 > [!IMPORTANT]
-> ### 4.3 Concurrency Model
+> ### 5.3 Concurrency Model
 > - Pixe uses a **worker pool** pattern for parallel file processing.
 > - Worker count is **configurable** via `--workers` flag (default: sensible auto-detect based on `runtime.NumCPU()`).
 > - Workers handle the full pipeline per file: extract → hash → copy → verify → tag.
@@ -154,18 +231,18 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 > - `dirA` and `dirB` may reside on **different filesystems** (local, NAS, SMB). Pixe always uses copy (never `os.Rename` across filesystems).
 
 > [!IMPORTANT]
-> ### 4.4 Scalability
+> ### 5.4 Scalability
 > - Must handle from tens to tens of thousands of files in a single run.
 > - Memory usage should be bounded — files are streamed, not loaded entirely into memory (except where format parsing requires it).
 > - The deduplication index (checksum → path) is held in memory for the duration of a run.
 
 ---
 
-## 5. Filetype Module Contract
+## 6. Filetype Module Contract
 
 New file types are added by implementing a Go interface. The core engine treats all files uniformly through this contract.
 
-### 5.1 Interface Definition (Conceptual)
+### 6.1 Interface Definition (Conceptual)
 
 ```go
 type FileTypeHandler interface {
@@ -194,13 +271,13 @@ type FileTypeHandler interface {
 }
 ```
 
-### 5.2 Detection Strategy
+### 6.2 Detection Strategy
 
 1. **Extension-based assumption**: File extension is matched against registered handlers for a fast initial classification.
 2. **Magic-byte verification**: The file header is read and compared against the handler's declared magic byte signatures.
 3. If magic bytes **do not confirm** the extension-based assumption, the file is reclassified or flagged as unrecognized.
 
-### 5.3 Initial Filetype Modules
+### 6.3 Initial Filetype Modules
 
 | Module | Extensions | Date Source | Hashable Region | Tag Support |
 |---|---|---|---|---|
@@ -210,16 +287,17 @@ type FileTypeHandler interface {
 
 ---
 
-## 6. CLI Structure
+## 7. CLI Structure
 
 Built with `spf13/cobra`. Configuration layered via `spf13/viper` (flags > config file > defaults).
 
-### 6.1 Commands
+### 7.1 Commands
 
 ```
 pixe sort     --source <dirA> --dest <dirB> [options]
 pixe verify   --dir <dirB>
 pixe resume   --dir <dirB>
+pixe version
 ```
 
 #### `pixe sort`
@@ -251,7 +329,18 @@ Reads the manifest in `dirB/.pixe/manifest.json` and resumes an interrupted sort
 |---|---|---|
 | `--dir` | (required) | Destination directory containing `.pixe/manifest.json` |
 
-### 6.2 Configuration File
+#### `pixe version`
+Prints the version, git commit, and build date in a single human-readable line, then exits. Implemented as a standard Cobra subcommand in `cmd/version.go`.
+
+**Output format:**
+
+```
+pixe v0.9.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)
+```
+
+No flags. This command calls `version.Full()` from `internal/version` and prints to stdout.
+
+### 7.2 Configuration File
 
 Viper supports a `.pixe.yaml` (or `.pixe.toml`, `.pixe.json`) configuration file for persistent defaults:
 
@@ -264,15 +353,16 @@ camera_owner: "Wells Family"
 
 ---
 
-## 7. Manifest & Ledger Design
+## 8. Manifest & Ledger Design
 
-### 7.1 Manifest (`dirB/.pixe/manifest.json`)
+### 8.1 Manifest (`dirB/.pixe/manifest.json`)
 
 The manifest is Pixe's operational journal. It is written to the **destination** directory and tracks the state of every file in the current (or most recent) run.
 
 ```json
 {
   "version": 1,
+  "pixe_version": "0.9.0",
   "source": "/path/to/dirA",
   "destination": "/path/to/dirB",
   "algorithm": "sha1",
@@ -293,13 +383,14 @@ The manifest is Pixe's operational journal. It is written to the **destination**
 }
 ```
 
-### 7.2 Ledger (`dirA/.pixe_ledger.json`)
+### 8.2 Ledger (`dirA/.pixe_ledger.json`)
 
 The ledger is a **minimal record** left in the source directory confirming which files were successfully processed. It enables future verification without needing the manifest.
 
 ```json
 {
   "version": 1,
+  "pixe_version": "0.9.0",
   "pixe_run": "2026-03-06T10:30:00Z",
   "algorithm": "sha1",
   "destination": "/path/to/dirB",
@@ -316,7 +407,7 @@ The ledger is a **minimal record** left in the source directory confirming which
 
 ---
 
-## 8. Open Questions & Future Considerations
+## 9. Open Questions & Future Considerations
 
 These items are explicitly **out of scope** for the initial build but are acknowledged for future planning:
 
