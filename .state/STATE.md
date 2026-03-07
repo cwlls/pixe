@@ -26,6 +26,7 @@
 | 22 | Pipeline — Populate `PixeVersion` at Runtime | High | @developer | ✅ Complete | 19, 21 | Wire `version.Version` into manifest/ledger creation in pipeline + worker |
 | 23 | Makefile — Retarget ldflags to `internal/version` | Medium | @developer | ✅ Complete | 19 | Update LDFLAGS paths, remove Version override |
 | 24 | Tests & Verification | High | @tester | ✅ Complete | 19, 20, 21, 22, 23 | Unit tests for version pkg, manifest round-trip with new field, `go vet`, full test suite green |
+| 25 | Lint Fixes — golangci-lint 0 issues | High | @developer | ✅ Complete | 1–24 | Fixed 30+ errcheck and unused lint violations across copy, discovery, heic, jpeg, mp4, verify, hash, manifest, pipeline packages; installed golangci-lint |
 
 ---
 
@@ -990,3 +991,25 @@ make build && ./pixe version                    # Prints version with real commi
 - `go vet ./...` reports no issues.
 - `go test -race -timeout 120s ./...` passes (all unit + integration tests).
 - `make build && ./pixe version` prints the expected format with real git metadata.
+
+---
+
+## Task 25 — Lint Fixes
+
+**Goal:** Resolve all golangci-lint violations so `make lint` exits 0.
+
+**Changes made:**
+- `internal/copy/copy.go`: wrapped `defer f/rc.Close()` with `_ =` and `out.Close()` error path
+- `internal/discovery/registry.go`: wrapped `defer f.Close()`
+- `internal/handler/heic/heic.go` + `heic_test.go`: wrapped all `defer f/rc.Close()`
+- `internal/handler/jpeg/jpeg.go` + `jpeg_test.go`: wrapped all `defer f/rc.Close()`
+- `internal/handler/mp4/mp4.go` + `mp4_test.go`: wrapped all `defer f/rc.Close()`
+- `internal/verify/verify.go`: `_, _ = fmt.Fprintf(...)` for all output writes; `_ = rc.Close()`
+- `internal/hash/hasher_test.go`: removed unused `knownDigests` var
+- `internal/manifest/manifest.go`: removed unused `manifestVersion` and `ledgerVersion` consts
+- `internal/pipeline/worker.go`: removed unused `workerContext` type; `_, _ = fmt.Fprintf(...)` for all output writes; `_ = rc.Close()`
+- `internal/pipeline/pipeline.go`: `_, _ = fmt.Fprintf(...)` for all output writes; `_ = rc.Close()`
+- `cmd/resume.go`: `_, _ = fmt.Fprintf(...)` for stdout write
+- `internal/integration/integration_test.go`: wrapped `defer f.Close()`
+
+**Result:** `make lint` → `0 issues.` | `go test ./internal/...` → all 13 packages pass.
