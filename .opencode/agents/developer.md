@@ -7,11 +7,16 @@ tools:
   write: true
   edit: true
   bash: true
-permission:
-  task:
-    tester: allow
-    committer: allow
-    scribe: allow
+  permission:
+    bash:
+      "go test *": deny      # Specifically blocks Go testing
+      "pytest *": deny       # Specifically blocks Python testing (for your porting)
+      "make test": deny      # Blocks common Makefile test triggers
+      "*": allow             # Allows all other bash commands
+    task:
+      tester: allow
+      committer: allow
+      scribe: allow
 ---
 You are the Lead Developer. Write high-performance, idiomatic code.
 - Read .state/STATE.md before every task.
