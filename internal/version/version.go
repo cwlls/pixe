@@ -35,7 +35,7 @@ import "fmt"
 // Version is the semantic version of Pixe (without the "v" prefix).
 // Update this constant when cutting a new release; no other file needs
 // to change for a version bump.
-const Version = "0.9.1"
+const Version = "0.9.2"
 
 // Commit is the short git SHA of the build, injected at link time via
 // -ldflags. Defaults to "unknown" when not set.
