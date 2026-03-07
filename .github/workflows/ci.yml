@@ -1,0 +1,33 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # golangci-lint-action has its own internal caching for lint results
+          cache: true
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          # This enables global caching for Go modules and build data
+          cache: true
+
+      - name: Run Unit Tests
+        run: go test -v -short ./...
+
+      - name: Run Integration Tests
+        run: go test -v -run Integration ./...

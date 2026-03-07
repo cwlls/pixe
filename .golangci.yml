@@ -1,0 +1,64 @@
+run:
+  # The default concurrency is the number of CPUs on the machine.
+  # On GitHub Actions, this is usually 2 or 4.
+  concurrency: 4
+
+  # timeout for analysis, e.g. 30s, 5m. Default is 1m.
+  # Increase this if your project grows very large.
+  timeout: 5m
+
+  # Exit code when at least one issue was found.
+  issues-exit-code: 1
+
+  # Include test files in the linting process.
+  tests: true
+
+linters:
+  # Disable all by default, then enable what you actually need.
+  # This prevents "linter bloat" as new versions of golangci-lint are released.
+  disable-all: true
+  enable:
+    - errcheck    # Checks for unchecked errors (Essential)
+    - gosimple    # Suggests code simplifications
+    - govet       # Reports suspicious constructs (Standard)
+    - ineffassign # Detects unused assignments
+    - staticcheck # Advanced static analysis (Industry Standard)
+    - unused      # Checks for unused constants, variables, functions and types
+    - revive      # A drop-in replacement for the old golint
+    - gofmt       # Checks if code is formatted
+    - misspell    # Finds commonly misspelled English words in comments
+
+linters-settings:
+  revive:
+    # Set the strictness of revive
+    severity: warning
+    rules:
+      - name: blank-imports
+      - name: context-as-first-argument
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+
+issues:
+  # Excluding some common false positives or "annoying" rules
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Fix only specific files if needed, or exclude third-party/generated code
+  exclude-dirs:
+    - vendor
+    - third_party
