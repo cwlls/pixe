@@ -1,7 +1,7 @@
 ---
 description: Documentation and state file maintenance.
 mode: subagent
-model: opencode/big-pickle
+model: opencode/minimax-m2.5
 temperature: 0.5
 tools:
   write: true

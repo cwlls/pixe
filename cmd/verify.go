@@ -16,9 +16,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/cwlls/pixe-go/internal/discovery"
+	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
+	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe-go/internal/verify"
 )
 
 var verifyCmd = &cobra.Command{
@@ -30,13 +36,47 @@ and reports any mismatches.
 
 Exit code 0 means all files verified successfully.
 Exit code 1 means one or more mismatches were detected.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("pixe verify: not implemented")
-		fmt.Printf("  dir:       %s\n", viper.GetString("verify_dir"))
-		fmt.Printf("  workers:   %d\n", viper.GetInt("workers"))
-		fmt.Printf("  algorithm: %s\n", viper.GetString("algorithm"))
-		return nil
-	},
+	RunE: runVerify,
+}
+
+func runVerify(cmd *cobra.Command, args []string) error {
+	dir := viper.GetString("verify_dir")
+	algorithm := viper.GetString("algorithm")
+
+	if dir == "" {
+		return fmt.Errorf("--dir is required")
+	}
+
+	// Validate directory exists.
+	if info, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("archive directory %q: %w", dir, err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("%q is not a directory", dir)
+	}
+
+	h, err := hash.NewHasher(algorithm)
+	if err != nil {
+		return fmt.Errorf("hash algorithm: %w", err)
+	}
+
+	reg := discovery.NewRegistry()
+	reg.Register(jpeghandler.New())
+	// HEIC and MP4 handlers registered here once Tasks 12 & 13 are complete.
+
+	result, err := verify.Run(verify.Options{
+		Dir:      dir,
+		Hasher:   h,
+		Registry: reg,
+		Output:   os.Stdout,
+	})
+	if err != nil {
+		return fmt.Errorf("verify failed: %w", err)
+	}
+
+	if result.Mismatches > 0 {
+		return fmt.Errorf("%d mismatch(es) detected", result.Mismatches)
+	}
+	return nil
 }
 
 func init() {
