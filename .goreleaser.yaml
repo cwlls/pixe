@@ -50,10 +50,6 @@ changelog:
       - '^test:'
 
 release:
-  # GitHub release settings
-  github:
-    owner: cwlls
-    name: pixe
   # You can add a custom header or footer to the release notes
   header: |
     ## Release {{.Tag}}
