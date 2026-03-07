@@ -226,13 +226,13 @@ func extractSOSPayload(data []byte) ([]byte, error) {
 			i += 2
 			continue
 		}
-		// EOI before SOS — malformed.
+		// EOI before SOS — malformed, but handle gracefully.
 		if marker == 0xD9 {
 			break
 		}
-		// SOS — return from here to end of file (includes EOI).
+		// SOS — scan forward through entropy data to find EOI.
 		if marker == 0xDA {
-			return data[i:], nil
+			return scanForEOI(data, i, n)
 		}
 		// RST0–RST7 — no length field.
 		if marker >= 0xD0 && marker <= 0xD7 {
@@ -240,7 +240,7 @@ func extractSOSPayload(data []byte) ([]byte, error) {
 			continue
 		}
 		// All other markers carry a 2-byte big-endian length.
-		if i+3 >= n {
+		if i+4 > n {
 			return nil, fmt.Errorf("truncated JPEG at offset %d", i)
 		}
 		segLen := int(binary.BigEndian.Uint16(data[i+2 : i+4]))
@@ -248,6 +248,34 @@ func extractSOSPayload(data []byte) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("SOS marker not found in JPEG data")
+}
+
+// scanForEOI scans forward from the SOS marker through the entropy data
+// to find the EOI marker (0xFF 0xD9). It properly handles JPEG byte stuffing
+// where 0xFF 0x00 is a stuffed byte (not a marker).
+func scanForEOI(data []byte, start, n int) ([]byte, error) {
+	for i := start; i < n-1; i++ {
+		if data[i] != 0xFF {
+			continue
+		}
+		next := data[i+1]
+		// Stuffed byte 0xFF 0x00 — skip the stuffed byte.
+		if next == 0x00 {
+			i++ // skip the 0x00, continue from next position
+			continue
+		}
+		// RST markers — skip, continue scanning.
+		if next >= 0xD0 && next <= 0xD7 {
+			i++
+			continue
+		}
+		// EOI marker found — return from SOS start to and including EOI.
+		if next == 0xD9 {
+			return data[start : i+2], nil
+		}
+		// Other 0xFF bytes in entropy data — malformed, but keep scanning.
+	}
+	return nil, fmt.Errorf("EOI marker not found after SOS")
 }
 
 // fileExt returns the file extension including the leading dot, or "".
