@@ -7,8 +7,8 @@
 | 3 | Hashing Engine | High | @developer | ✅ Complete | 2 | Configurable hash.Hash factory, streaming io.Reader consumer |
 | 4 | Manifest & Ledger Persistence | High | @developer | ✅ Complete | 2 | JSON read/write, atomic saves, per-file state tracking |
 | 5 | File Discovery & Handler Registry | High | @developer | ✅ Complete | 2 | Walk dirA, extension match, magic-byte verify, skip dotfiles |
-| 6 | Path Builder (Naming & Dedup) | High | @developer | ⬜ Pending | 2, 3 | Deterministic output paths, duplicate routing |
-| 7 | JPEG Filetype Module | High | @developer | ⬜ Pending | 2, 3 | First concrete handler — proves the contract |
+| 6 | Path Builder (Naming & Dedup) | High | @developer | ✅ Complete | 2, 3 | Deterministic output paths, duplicate routing |
+| 7 | JPEG Filetype Module | High | @developer | ✅ Complete | 2, 3 | First concrete handler — proves the contract |
 | 8 | Copy & Verify Engine | High | @developer | ⬜ Pending | 3, 4, 6 | Streamed copy, post-copy re-hash, manifest updates |
 | 9 | Sort Pipeline Orchestrator | High | @developer | ⬜ Pending | 5, 7, 8 | Single-threaded first: discover → extract → hash → copy → verify |
 | 10 | CLI: `pixe sort` Command | High | @developer | ⬜ Pending | 9 | Cobra command, Viper flag binding, dry-run mode |
