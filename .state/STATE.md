@@ -27,9 +27,9 @@
 | 23 | Makefile — Retarget ldflags to `internal/version` | Medium | @developer | ✅ Complete | 19 | Update LDFLAGS paths, remove Version override |
 | 24 | Tests & Verification | High | @tester | ✅ Complete | 19, 20, 21, 22, 23 | Unit tests for version pkg, manifest round-trip with new field, `go vet`, full test suite green |
 | 25 | Lint Fixes — golangci-lint 0 issues | High | @developer | ✅ Complete | 1–24 | Fixed 30+ errcheck and unused lint violations across copy, discovery, heic, jpeg, mp4, verify, hash, manifest, pipeline packages; installed golangci-lint |
-| 26 | Locale-Aware Month Directory — `pathbuilder` rewrite | High | @developer | 🔲 Pending | 6 | Change month dir from `2` to `02-Feb` (locale-aware); add `MonthDir()` helper |
-| 27 | Update Tests — Month Directory Format | High | @developer | 🔲 Pending | 26 | Rewrite pathbuilder, pipeline, and integration tests for `MM-Mon` format |
-| 28 | Tests & Verification — Full Suite Green | High | @tester | 🔲 Pending | 26, 27 | `go vet`, `go test -race ./...`, `make lint` all pass |
+| 26 | Locale-Aware Month Directory — `pathbuilder` rewrite | High | @developer |  ✅ Complete | 6 | Change month dir from `2` to `02-Feb` (locale-aware); add `MonthDir()` helper |
+| 27 | Update Tests — Month Directory Format | High | @developer |  ✅ Complete | 26 | Rewrite pathbuilder, pipeline, and integration tests for `MM-Mon` format |
+| 28 | Tests & Verification — Full Suite Green | High | @tester |  ✅ Complete | 26, 27 | `go vet`, `go test -race ./...`, `make lint` all pass |
 | 29 | Archive DB — `internal/archivedb` package & schema | High | @developer | 🔲 Pending | 2 | SQLite database layer: Open, Close, schema creation, WAL mode, busy timeout |
 | 30 | Archive DB — Run & File CRUD operations | High | @developer | 🔲 Pending | 29 | InsertRun, UpdateRun, InsertFile, UpdateFile, dedup query, batch insert |
 | 31 | Archive DB — Query methods | Medium | @developer | 🔲 Pending | 30 | Query families: by source, date range, run, status, checksum, duplicates |
