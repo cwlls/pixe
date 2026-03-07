@@ -103,7 +103,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		Output:       os.Stdout,
 	}
 
-	fmt.Fprintf(os.Stdout, "Resuming sort: source=%s dest=%s\n", m.Source, dir)
+	_, _ = fmt.Fprintf(os.Stdout, "Resuming sort: source=%s dest=%s\n", m.Source, dir)
 
 	result, err := pipeline.Run(opts)
 	if err != nil {

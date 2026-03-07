@@ -100,7 +100,7 @@ func (h *Handler) Detect(filePath string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("mp4: open %q: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	header := make([]byte, 12)
 	if _, err := io.ReadFull(f, header); err != nil {
@@ -122,7 +122,7 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 	if err != nil {
 		return anselsAdams, fmt.Errorf("mp4: open %q: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	boxes, err := mp4lib.ExtractBoxWithPayload(f, nil, mp4lib.BoxPath{
 		mp4lib.BoxTypeMoov(),
@@ -183,7 +183,7 @@ func extractKeyframePayload(filePath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Extract stss (sync sample table) — lists keyframe sample numbers.
 	stssBoxes, err := mp4lib.ExtractBoxWithPayload(f, nil, mp4lib.BoxPath{

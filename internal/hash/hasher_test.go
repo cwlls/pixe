@@ -20,19 +20,6 @@ import (
 	"testing"
 )
 
-// knownDigests maps algorithm → (input, expected hex digest) for a fixed input.
-// Digests were computed independently and are used to guard against regressions.
-var knownDigests = []struct {
-	algorithm string
-	input     string
-	want      string
-}{
-	// echo -n "pixe test vector" | sha1sum
-	{"sha1", "pixe test vector", "4a5f3f7b2e1c8d9a0b6e4f2c1d7a8b3e5f9c0d2a"},
-	// echo -n "pixe test vector" | sha256sum
-	{"sha256", "pixe test vector", ""},
-}
-
 func TestNewHasher_supported(t *testing.T) {
 	for _, alg := range []string{"sha1", "sha256"} {
 		h, err := NewHasher(alg)

@@ -135,7 +135,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -156,7 +156,7 @@ func TestHandler_HashableReader_noExif_stillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader on no-EXIF file: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HashableReader: %v", err)
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		data, err := io.ReadAll(rc)
 		if err != nil {
 			t.Fatalf("ReadAll: %v", err)

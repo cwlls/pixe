@@ -170,7 +170,7 @@ func Run(opts SortOptions) (SortResult, error) {
 			entry.Error = err.Error()
 			saveManifest(m, dirB, out)
 			result.Errors++
-			fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(df.Path), err)
+			_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(df.Path), err)
 			continue
 		}
 
@@ -187,12 +187,12 @@ func Run(opts SortOptions) (SortResult, error) {
 	// ------------------------------------------------------------------
 	if !cfg.DryRun {
 		if err := manifest.SaveLedger(ledger, dirA); err != nil {
-			fmt.Fprintf(out, "WARNING: could not write ledger to %s: %v\n", dirA, err)
+			_, _ = fmt.Fprintf(out, "WARNING: could not write ledger to %s: %v\n", dirA, err)
 		}
 	}
 	saveManifest(m, dirB, out)
 
-	fmt.Fprintf(out, "\nDone. processed=%d duplicates=%d skipped=%d errors=%d\n",
+	_, _ = fmt.Fprintf(out, "\nDone. processed=%d duplicates=%d skipped=%d errors=%d\n",
 		result.Processed, result.Duplicates, result.Skipped, result.Errors)
 
 	return result, nil
@@ -227,7 +227,7 @@ func processFile(
 		return fmt.Errorf("open hashable reader: %w", err)
 	}
 	checksum, err := opts.Hasher.Sum(rc)
-	rc.Close()
+	_ = rc.Close()
 	if err != nil {
 		return fmt.Errorf("hash payload: %w", err)
 	}
@@ -244,13 +244,13 @@ func processFile(
 	entry.Destination = absDest
 
 	if cfg.DryRun {
-		fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", filepath.Base(df.Path), relDest)
+		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", filepath.Base(df.Path), relDest)
 		entry.Status = domain.StatusComplete
 		return nil
 	}
 
 	// --- Copy ---
-	fmt.Fprintf(out, "  COPY     %s → %s\n", filepath.Base(df.Path), relDest)
+	_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", filepath.Base(df.Path), relDest)
 	if err := copypkg.Execute(df.Path, absDest); err != nil {
 		return fmt.Errorf("copy: %w", err)
 	}
@@ -273,7 +273,7 @@ func processFile(
 			entry.Status = domain.StatusTagFailed
 			entry.Error = err.Error()
 			// Tag failure is non-fatal: file is copied and verified; we warn and continue.
-			fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", filepath.Base(df.Path), err)
+			_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", filepath.Base(df.Path), err)
 		} else {
 			entry.Status = domain.StatusTagged
 			entry.TaggedAt = now()
@@ -335,7 +335,7 @@ func renderCopyright(tmplStr string, date time.Time) string {
 // saveManifest persists the manifest, printing a warning on failure.
 func saveManifest(m *domain.Manifest, dirB string, out io.Writer) {
 	if err := manifest.Save(m, dirB); err != nil {
-		fmt.Fprintf(out, "WARNING: could not save manifest: %v\n", err)
+		_, _ = fmt.Fprintf(out, "WARNING: could not save manifest: %v\n", err)
 	}
 }
 

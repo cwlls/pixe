@@ -58,14 +58,6 @@ type destAssignment struct {
 	isDuplicate bool
 }
 
-// workerContext carries per-worker state for the copy/verify/tag phase.
-type workerContext struct {
-	item       workItem
-	assignment destAssignment
-	checksum   string
-	date       time.Time
-}
-
 // RunConcurrent executes the sort pipeline with N concurrent workers.
 // It is called by Run when opts.Config.Workers > 1.
 //
@@ -177,7 +169,7 @@ func RunConcurrent(ctx context.Context, opts SortOptions, discovered []discovery
 				wr.entry.Error = wr.err.Error()
 				saveManifest(m, dirB, out)
 				result.Errors++
-				fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(wr.df.Path), wr.err)
+				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(wr.df.Path), wr.err)
 				completed++
 				continue
 			}
@@ -203,7 +195,7 @@ func RunConcurrent(ctx context.Context, opts SortOptions, discovered []discovery
 				fr.entry.Status = domain.StatusFailed
 				fr.entry.Error = fr.err.Error()
 				result.Errors++
-				fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(fr.df.Path), fr.err)
+				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(fr.df.Path), fr.err)
 			} else {
 				fr.entry.Status = domain.StatusComplete
 				if fr.isDuplicate {
@@ -229,7 +221,7 @@ done:
 	// Write ledger and final manifest.
 	if !opts.Config.DryRun {
 		if err := manifest.SaveLedger(ledger, dirA); err != nil {
-			fmt.Fprintf(out, "WARNING: could not write ledger: %v\n", err)
+			_, _ = fmt.Fprintf(out, "WARNING: could not write ledger: %v\n", err)
 		}
 	}
 	saveManifest(m, dirB, out)
@@ -284,7 +276,7 @@ func runWorker(ctx context.Context, id int,
 				continue
 			}
 			checksum, err := opts.Hasher.Sum(rc)
-			rc.Close()
+			_ = rc.Close()
 			if err != nil {
 				resultCh <- workResult{df: item.df, entry: item.entry, err: fmt.Errorf("hash: %w", err)}
 				doneCh <- workerFinalResult{df: item.df, entry: item.entry, err: fmt.Errorf("hash: %w", err)}
@@ -313,7 +305,7 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			if opts.Config.DryRun {
-				fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", filepath.Base(item.df.Path), assign.relDest)
+				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", filepath.Base(item.df.Path), assign.relDest)
 				item.entry.Status = domain.StatusComplete
 				doneCh <- workerFinalResult{
 					df: item.df, entry: item.entry,
@@ -324,7 +316,7 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			// --- Copy ---
-			fmt.Fprintf(out, "  COPY     %s → %s\n", filepath.Base(item.df.Path), assign.relDest)
+			_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", filepath.Base(item.df.Path), assign.relDest)
 			if err := copypkg.Execute(item.df.Path, assign.absDest); err != nil {
 				doneCh <- workerFinalResult{df: item.df, entry: item.entry, err: fmt.Errorf("copy: %w", err)}
 				continue
@@ -347,7 +339,7 @@ func runWorker(ctx context.Context, id int,
 			if !tags.IsEmpty() {
 				if err := item.df.Handler.WriteMetadataTags(assign.absDest, tags); err != nil {
 					item.entry.Status = domain.StatusTagFailed
-					fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", filepath.Base(item.df.Path), err)
+					_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", filepath.Base(item.df.Path), err)
 				} else {
 					item.entry.TaggedAt = now()
 					item.entry.Status = domain.StatusTagged
@@ -411,7 +403,7 @@ func runSequential(_ context.Context, opts SortOptions, discovered []discovery.D
 			entry.Error = err.Error()
 			saveManifest(m, dirB, out)
 			result.Errors++
-			fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(df.Path), err)
+			_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(df.Path), err)
 			continue
 		}
 		if entry.Status == domain.StatusComplete {
@@ -424,7 +416,7 @@ func runSequential(_ context.Context, opts SortOptions, discovered []discovery.D
 
 	if !opts.Config.DryRun {
 		if err := manifest.SaveLedger(ledger, dirA); err != nil {
-			fmt.Fprintf(out, "WARNING: could not write ledger: %v\n", err)
+			_, _ = fmt.Fprintf(out, "WARNING: could not write ledger: %v\n", err)
 		}
 	}
 	saveManifest(m, dirB, out)

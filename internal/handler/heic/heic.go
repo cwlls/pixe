@@ -89,7 +89,7 @@ func (h *Handler) Detect(filePath string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("heic: open %q: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	header := make([]byte, 12)
 	if _, err := io.ReadFull(f, header); err != nil {
@@ -106,7 +106,7 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 	if err != nil {
 		return anselsAdams, fmt.Errorf("heic: open %q: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// goheif.ExtractExif requires an io.ReaderAt.
 	exifBytes, err := goheif.ExtractExif(f)

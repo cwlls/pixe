@@ -110,7 +110,7 @@ func sha1File(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("sha1File open %q: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sum, err := h.Sum(f)
 	if err != nil {
 		t.Fatalf("sha1File sum %q: %v", path, err)

@@ -46,9 +46,6 @@ const (
 	manifestFile = "manifest.json"
 	// ledgerFile is the filename of the source-side ledger.
 	ledgerFile = ".pixe_ledger.json"
-
-	manifestVersion = 1
-	ledgerVersion   = 1
 )
 
 // manifestPath returns the absolute path to the manifest file.

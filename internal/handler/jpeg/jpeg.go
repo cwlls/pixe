@@ -81,7 +81,7 @@ func (h *Handler) Detect(filePath string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("jpeg: open %q: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	header := make([]byte, 3)
 	if _, err := io.ReadFull(f, header); err != nil {
@@ -99,7 +99,7 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 	if err != nil {
 		return anselsAdams, fmt.Errorf("jpeg: open %q: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	x, err := rwexif.Decode(f)
 	if err != nil {
@@ -199,7 +199,7 @@ func (h *Handler) WriteMetadataTags(filePath string, tags domain.MetadataTags) e
 	if err != nil {
 		return fmt.Errorf("jpeg: open %q for writing: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := sl.Write(f); err != nil {
 		return fmt.Errorf("jpeg: write tagged JPEG to %q: %w", filePath, err)

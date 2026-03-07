@@ -82,7 +82,7 @@ func Run(opts Options) (Result, error) {
 		// Parse the expected checksum from the filename.
 		expected, ok := parseChecksum(name)
 		if !ok {
-			fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
+			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
 			result.Unrecognised++
 			return nil
 		}
@@ -90,7 +90,7 @@ func Run(opts Options) (Result, error) {
 		// Detect the file type.
 		handler, err := opts.Registry.Detect(path)
 		if err != nil || handler == nil {
-			fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
+			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
 			result.Unrecognised++
 			return nil
 		}
@@ -98,30 +98,30 @@ func Run(opts Options) (Result, error) {
 		// Recompute the hash via the handler's HashableReader.
 		rc, err := handler.HashableReader(path)
 		if err != nil {
-			fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
 			result.Mismatches++
 			return nil
 		}
 		actual, err := opts.Hasher.Sum(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
-			fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
 			result.Mismatches++
 			return nil
 		}
 
 		if actual == expected {
-			fmt.Fprintf(opts.Output, "  OK            %s\n", path)
+			_, _ = fmt.Fprintf(opts.Output, "  OK            %s\n", path)
 			result.Verified++
 		} else {
-			fmt.Fprintf(opts.Output, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
+			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
 				path, expected, actual)
 			result.Mismatches++
 		}
 		return nil
 	})
 
-	fmt.Fprintf(opts.Output, "\nDone. verified=%d mismatches=%d unrecognised=%d\n",
+	_, _ = fmt.Fprintf(opts.Output, "\nDone. verified=%d mismatches=%d unrecognised=%d\n",
 		result.Verified, result.Mismatches, result.Unrecognised)
 
 	return result, err

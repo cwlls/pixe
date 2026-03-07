@@ -76,7 +76,7 @@ func Execute(src, dest string) error {
 	if err != nil {
 		return fmt.Errorf("copy: open source %q: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	// Create destination.
 	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
@@ -87,7 +87,7 @@ func Execute(src, dest string) error {
 	// Stream with a fixed-size buffer.
 	buf := make([]byte, copyBufSize)
 	if _, err := io.CopyBuffer(out, in, buf); err != nil {
-		out.Close()
+		_ = out.Close()
 		return fmt.Errorf("copy: stream %q → %q: %w", src, dest, err)
 	}
 
@@ -117,7 +117,7 @@ func Verify(dest, expectedChecksum string, handler domain.FileTypeHandler, hashe
 			Error: fmt.Errorf("copy: open hashable reader for %q: %w", dest, err),
 		}
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	actual, err := hasher.Sum(rc)
 	if err != nil {

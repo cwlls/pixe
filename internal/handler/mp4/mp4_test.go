@@ -152,7 +152,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	payload, err := io.ReadAll(rc)
 	if err != nil {
@@ -174,7 +174,7 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HashableReader: %v", err)
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		b, _ := io.ReadAll(rc)
 		return b
 	}
