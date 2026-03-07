@@ -4,7 +4,6 @@ on:
     tags:
       - 'v*'
 
-# THIS IS THE MISSING PIECE
 permissions:
   contents: write  # Allows the action to create a release and upload assets
   packages: write  # Optional: only if you are also pushing to GitHub Container Registry
