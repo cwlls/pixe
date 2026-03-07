@@ -12,7 +12,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 1. **Safety above all else.** Source files are never modified or moved. Every copy is verified before being considered complete. An interrupted run can always be resumed.
 2. **Native Go execution.** All functionality — metadata extraction, hashing, file operations — uses native Go packages. No shelling out to `exiftool`, `ffmpeg`, or other external binaries.
-3. **Deterministic output.** Given the same input files and configuration, Pixe always produces the same directory structure and filenames.
+3. **Deterministic output.** Given the same input files, configuration, and system locale, Pixe always produces the same directory structure and filenames. (Month directory names are locale-aware; see Section 4.3.)
 4. **Modular by design.** New file types are added by implementing a Go interface. The core engine is format-agnostic.
 
 ---
@@ -115,20 +115,20 @@ No other files need to change for a version bump.
 
 ```
 dirA (read-only source)          dirB (organized destination)
-┌──────────────────┐             ┌──────────────────────────────────┐
-│ IMG_0001.jpg     │  ────────>  │ 2021/12/                         │
-│ IMG_0002.jpg     │   discover  │   20211225_062223_7d97e98f...jpg  │
-│ IMG_1234.jpg     │   extract   │ 2022/2/                          │
-│ VID_0010.mp4     │   hash      │   20220202_123101_447d3060...jpg  │
-│                  │   copy      │ 2022/3/                          │
-│                  │   verify    │   20220316_232122_321c7d6f...jpg  │
-│                  │   tag       │ duplicates/                      │
-│                  │             │   20260306_103000/                │
-│ .pixe_ledger.json│             │     2022/2/                      │
-└──────────────────┘             │       20220202_123101_447d...jpg  │
-                                 │ .pixe/                           │
-                                 │   manifest.json                  │
-                                 └──────────────────────────────────┘
+┌──────────────────┐             ┌──────────────────────────────────────┐
+│ IMG_0001.jpg     │  ────────>  │ 2021/12-Dec/                         │
+│ IMG_0002.jpg     │   discover  │   20211225_062223_7d97e98f...jpg      │
+│ IMG_1234.jpg     │   extract   │ 2022/02-Feb/                         │
+│ VID_0010.mp4     │   hash      │   20220202_123101_447d3060...jpg      │
+│                  │   copy      │ 2022/03-Mar/                         │
+│                  │   verify    │   20220316_232122_321c7d6f...jpg      │
+│                  │   tag       │ duplicates/                          │
+│                  │             │   20260306_103000/                    │
+│ .pixe_ledger.json│             │     2022/02-Feb/                     │
+└──────────────────┘             │       20220202_123101_447d...jpg      │
+                                 │ .pixe/                               │
+                                 │   manifest.json                      │
+                                 └──────────────────────────────────────┘
 ```
 
 ### 4.2 Pipeline Stages
@@ -164,22 +164,24 @@ YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 **Directory structure:**
 
 ```
-<dirB>/<YYYY>/<M>/<filename>
+<dirB>/<YYYY>/<MM>-<Mon>/<filename>
 ```
 
 - Year: 4-digit.
-- Month: Non-zero-padded integer (1–12).
+- Month: Zero-padded two-digit number, a hyphen, and the locale-aware three-letter title-cased month abbreviation (e.g., `01-Jan`, `02-Feb`, `03-Mar`, …, `12-Dec`). The abbreviation is derived from the user's system locale, so a French locale would produce `03-Mar` → `03-Mars` (or the locale's equivalent short form). The number is always zero-padded to two digits.
+
+> **Note:** This format applies only to the month **directory name**. The filename retains its existing `YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>` format with a zero-padded numeric month.
 
 ### 4.4 Duplicate Handling
 
 When a file's checksum matches an already-processed file (same data payload):
 
 ```
-<dirB>/duplicates/<run_timestamp>/<YYYY>/<M>/<filename>
+<dirB>/duplicates/<run_timestamp>/<YYYY>/<MM>-<Mon>/<filename>
 ```
 
 - `<run_timestamp>`: ISO-ish format of the Pixe invocation time (e.g., `20260306_103000`).
-- The subdirectory structure mirrors the normal import layout, as if `duplicates/<run_timestamp>/` were the root of `dirB`.
+- The subdirectory structure mirrors the normal import layout, as if `duplicates/<run_timestamp>/` were the root of `dirB`. The month directory uses the same `<MM>-<Mon>` format as the primary archive.
 - This preserves the duplicate for user review without polluting the primary archive.
 
 ### 4.5 Date Fallback Chain
@@ -371,7 +373,7 @@ The manifest is Pixe's operational journal. It is written to the **destination**
   "files": [
     {
       "source": "/path/to/dirA/IMG_0001.jpg",
-      "destination": "/path/to/dirB/2021/12/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
+      "destination": "/path/to/dirB/2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
       "checksum": "7d97e98f8af710c7e7fe703abc8f639e0ee507c4",
       "status": "complete",
       "extracted_at": "2026-03-06T10:30:01Z",
@@ -398,7 +400,7 @@ The ledger is a **minimal record** left in the source directory confirming which
     {
       "path": "IMG_0001.jpg",
       "checksum": "7d97e98f8af710c7e7fe703abc8f639e0ee507c4",
-      "destination": "2021/12/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
+      "destination": "2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
       "verified_at": "2026-03-06T10:30:03Z"
     }
   ]

@@ -22,13 +22,23 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/text/language"
+
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/manifest"
+	"github.com/cwlls/pixe-go/internal/pathbuilder"
 )
+
+// TestMain pins the locale to English so that month directory assertions are
+// deterministic regardless of the developer's system locale.
+func TestMain(m *testing.M) {
+	pathbuilder.SetLocaleForTesting(language.English)
+	os.Exit(m.Run())
+}
 
 // --- helpers ---
 
@@ -103,12 +113,12 @@ func TestRun_outputDirectoryStructure(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Expect a file under dirB/2021/12/
+	// Expect a file under dirB/2021/12-Dec/
 	yearDir := filepath.Join(dirB, "2021")
 	if _, err := os.Stat(yearDir); err != nil {
 		t.Errorf("year directory %q not created: %v", yearDir, err)
 	}
-	monthDir := filepath.Join(dirB, "2021", "12")
+	monthDir := filepath.Join(dirB, "2021", "12-Dec")
 	if _, err := os.Stat(monthDir); err != nil {
 		t.Errorf("month directory %q not created: %v", monthDir, err)
 	}
@@ -146,14 +156,14 @@ func TestRun_noExifFallbackDate(t *testing.T) {
 		t.Errorf("Processed = %d, want 1", result.Processed)
 	}
 
-	// File should land under 1902/2/ (Ansel Adams fallback).
-	monthDir := filepath.Join(dirB, "1902", "2")
+	// File should land under 1902/02-Feb/ (Ansel Adams fallback).
+	monthDir := filepath.Join(dirB, "1902", "02-Feb")
 	entries, err := os.ReadDir(monthDir)
 	if err != nil {
 		t.Fatalf("ReadDir %q: %v", monthDir, err)
 	}
 	if len(entries) != 1 {
-		t.Errorf("expected 1 file in 1902/2/, got %d", len(entries))
+		t.Errorf("expected 1 file in 1902/02-Feb/, got %d", len(entries))
 	}
 	if !strings.HasPrefix(entries[0].Name(), "19020220_000000_") {
 		t.Errorf("filename %q should start with Ansel Adams prefix 19020220_000000_", entries[0].Name())

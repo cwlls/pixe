@@ -27,6 +27,9 @@
 | 23 | Makefile — Retarget ldflags to `internal/version` | Medium | @developer | ✅ Complete | 19 | Update LDFLAGS paths, remove Version override |
 | 24 | Tests & Verification | High | @tester | ✅ Complete | 19, 20, 21, 22, 23 | Unit tests for version pkg, manifest round-trip with new field, `go vet`, full test suite green |
 | 25 | Lint Fixes — golangci-lint 0 issues | High | @developer | ✅ Complete | 1–24 | Fixed 30+ errcheck and unused lint violations across copy, discovery, heic, jpeg, mp4, verify, hash, manifest, pipeline packages; installed golangci-lint |
+| 26 | Locale-Aware Month Directory — `pathbuilder` rewrite | High | @developer | 🔲 Pending | 6 | Change month dir from `2` to `02-Feb` (locale-aware); add `MonthDir()` helper |
+| 27 | Update Tests — Month Directory Format | High | @developer | 🔲 Pending | 26 | Rewrite pathbuilder, pipeline, and integration tests for `MM-Mon` format |
+| 28 | Tests & Verification — Full Suite Green | High | @tester | 🔲 Pending | 26, 27 | `go vet`, `go test -race ./...`, `make lint` all pass |
 
 ---
 
@@ -304,9 +307,11 @@ type SkippedFile struct {
 
 ## Task 6 — Path Builder (Naming & Dedup)
 
+> **⚠️ Superseded by Task 26.** The month directory format changed from bare integer (`2`) to locale-aware `MM-Mon` (`02-Feb`). See Task 26 for the updated spec.
+
 **Goal:** Given a date, checksum, extension, and dedup state, produce the deterministic output path.
 
-**Acceptance Criteria:**
+**Acceptance Criteria (original — see Task 26 for current):**
 - `pathbuilder.Build(date, checksum, ext, isDuplicate, runTimestamp)` returns the relative path.
 - Normal: `2021/12/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg`
 - Duplicate: `duplicates/20260306_103000/2021/12/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg`
@@ -1013,3 +1018,542 @@ make build && ./pixe version                    # Prints version with real commi
 - `internal/integration/integration_test.go`: wrapped `defer f.Close()`
 
 **Result:** `make lint` → `0 issues.` | `go test ./internal/...` → all 13 packages pass.
+
+---
+
+## Feature: Locale-Aware Month Directories (Tasks 26–28)
+
+Changes the month subdirectory format from a bare non-zero-padded integer (e.g. `2`) to a zero-padded number + hyphen + locale-aware three-letter title-cased month abbreviation (e.g. `02-Feb`). See Architecture Section 4.3.
+
+**Design decisions captured from user:**
+1. Month abbreviation is always **title-cased** (e.g. `Jan`, `Feb`, `Mar`).
+2. Separator is a **hyphen** (`03-Mar`).
+3. Duplicate paths use the **same** `MM-Mon` format.
+4. **Filename is unchanged** — `YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>` retains its zero-padded numeric month.
+5. This is a **go-forward** change — no migration of existing archives.
+6. Month abbreviation uses the **user's system locale** (not hardcoded English).
+7. Year directory is **unchanged** (plain 4-digit number).
+
+---
+
+## Task 26 — Locale-Aware Month Directory — `pathbuilder` Rewrite
+
+**Goal:** Change the `pathbuilder.Build()` function so the month directory component uses the format `MM-Mon` (zero-padded month number, hyphen, locale-aware three-letter title-cased month abbreviation) instead of the current bare integer.
+
+**Architecture Reference:** Section 4.3 (Output Naming Convention), Section 4.4 (Duplicate Handling)
+
+**Depends on:** Task 6 (existing pathbuilder)
+
+### Files to modify
+
+#### 1. `internal/pathbuilder/pathbuilder.go` — Core logic change
+
+**Package doc comment** — update the path pattern and description:
+
+```go
+// Package pathbuilder constructs deterministic output paths for sorted media
+// files using the Pixe naming convention:
+//
+//	<YYYY>/<MM>-<Mon>/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+//
+// Duplicate files are routed under a timestamped subdirectory:
+//
+//	duplicates/<runTimestamp>/<YYYY>/<MM>-<Mon>/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+//
+// The month directory is a zero-padded two-digit number, a hyphen, and the
+// locale-aware three-letter title-cased month abbreviation (e.g. "03-Mar").
+// The abbreviation is derived from the user's system locale. The file
+// extension is always lowercased.
+package pathbuilder
+```
+
+**New import:** `golang.org/x/text/language` (already an indirect dependency — promote to direct).
+
+**New helper function — `MonthDir`:**
+
+```go
+// MonthDir returns the locale-aware month directory name for the given month.
+// Format: zero-padded two-digit number + hyphen + three-letter title-cased
+// month abbreviation. Examples (English locale): "01-Jan", "02-Feb", "12-Dec".
+//
+// The abbreviation is derived from the system locale detected at init time.
+// If the locale cannot be determined, English is used as the fallback.
+func MonthDir(month time.Month) string {
+    abbr := localizedMonthAbbr(month)
+    return fmt.Sprintf("%02d-%s", int(month), abbr)
+}
+```
+
+**Locale detection strategy:**
+
+The package needs a module-level variable holding the resolved `language.Tag` for the user's system locale. Detect at package init time by reading environment variables in standard precedence order:
+
+```go
+import (
+    "os"
+    "strings"
+
+    "golang.org/x/text/language"
+)
+
+// systemLocale is the resolved locale tag, detected once at package init.
+var systemLocale language.Tag
+
+func init() {
+    systemLocale = detectSystemLocale()
+}
+
+// detectSystemLocale reads LANGUAGE, LC_ALL, LC_TIME, or LANG from the
+// environment and parses the first valid BCP 47 / POSIX locale tag.
+// Falls back to language.English if nothing is set or parseable.
+func detectSystemLocale() language.Tag {
+    for _, key := range []string{"LANGUAGE", "LC_ALL", "LC_TIME", "LANG"} {
+        val := os.Getenv(key)
+        if val == "" || val == "C" || val == "POSIX" {
+            continue
+        }
+        // POSIX locales use underscores (e.g. "fr_FR.UTF-8"); strip encoding suffix.
+        val = strings.SplitN(val, ".", 2)[0]
+        val = strings.ReplaceAll(val, "_", "-")
+        tag, err := language.Parse(val)
+        if err == nil {
+            return tag
+        }
+    }
+    return language.English
+}
+```
+
+**Localized month abbreviation:**
+
+Use Go's CLDR-based `golang.org/x/text` packages to get the abbreviated month name for the detected locale. The `golang.org/x/text/date` package is experimental, so the recommended approach is to use a lookup table seeded from CLDR data, or use the `time` package's `Month.String()` and truncate to 3 characters as a baseline, then layer locale support on top.
+
+**Practical approach — use `golang.org/x/text/language` + `golang.org/x/text/message` for locale detection, and a CLDR-derived month table:**
+
+Since `golang.org/x/text` does not expose a simple "give me abbreviated month names for locale X" API, the cleanest approach is:
+
+```go
+// localizedMonthAbbr returns the three-letter title-cased abbreviated month
+// name for the given month in the system locale.
+func localizedMonthAbbr(month time.Month) string {
+    // Use the system locale's abbreviated month names if available.
+    // The golang.org/x/text ecosystem does not provide a direct API for
+    // locale-aware month abbreviations, so we use time.Month.String()
+    // truncated to 3 characters. Go's time package always returns English
+    // month names, but this gives us the correct title-cased 3-letter form
+    // for English. For non-English locales, a lookup table can be added.
+    //
+    // For now, detect the base language and use a built-in CLDR-derived
+    // table for supported languages. Fall back to English for unsupported.
+    base, _ := systemLocale.Base()
+    if table, ok := monthAbbreviations[base.String()]; ok {
+        if int(month) >= 1 && int(month) <= 12 {
+            return table[month-1]
+        }
+    }
+    // Fallback: English via time.Month.String() truncated to 3 chars.
+    s := month.String()
+    if len(s) > 3 {
+        s = s[:3]
+    }
+    return s
+}
+
+// monthAbbreviations maps BCP 47 base language codes to their 12 abbreviated
+// month names (title-cased, 3 letters). Sourced from Unicode CLDR.
+// Add entries here to support additional locales.
+var monthAbbreviations = map[string][12]string{
+    "en": {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"},
+    "fr": {"Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"},
+    "de": {"Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"},
+    "es": {"Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"},
+    "it": {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"},
+    "pt": {"Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"},
+    "nl": {"Jan", "Feb", "Mrt", "Apr", "Mei", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"},
+    "ja": {"1月",  "2月",  "3月",  "4月",  "5月",  "6月",  "7月",  "8月",  "9月",  "10月", "11月", "12月"},
+    "zh": {"1月",  "2月",  "3月",  "4月",  "5月",  "6月",  "7月",  "8月",  "9月",  "10月", "11月", "12月"},
+    "ko": {"1월",  "2월",  "3월",  "4월",  "5월",  "6월",  "7월",  "8월",  "9월",  "10월", "11월", "12월"},
+    "ru": {"Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"},
+}
+```
+
+> **Developer note:** The table above is a starting set. The key design point is that the table is extensible — adding a new locale is a one-line addition. For locales not in the table, English is the fallback. The abbreviations must be title-cased per the user's requirement.
+
+**Update `Build()` function:**
+
+Replace the month directory formatting on line 65:
+
+```go
+// BEFORE:
+relPath := filepath.Join(fmt.Sprintf("%d", year), fmt.Sprintf("%d", month), filename)
+
+// AFTER:
+relPath := filepath.Join(fmt.Sprintf("%d", year), MonthDir(date.Month()), filename)
+```
+
+Also update the `Build()` doc comment examples:
+
+```go
+// Example outputs:
+//
+//	Build(t, sha, ".jpg", false, "") → "2021/12-Dec/20211225_062223_<sha>.jpg"
+//	Build(t, sha, ".JPG", true, "20260306_103000") → "duplicates/20260306_103000/2021/12-Dec/20211225_062223_<sha>.jpg"
+```
+
+Remove the old comment `// Non-zero-padded month per spec.` and replace with `// Locale-aware month directory per spec (Section 4.3).`
+
+**Exported `SetLocale` for testing:**
+
+To make tests deterministic regardless of the host's actual locale, expose a setter:
+
+```go
+// SetLocaleForTesting overrides the detected system locale. This is intended
+// for use in tests only — it is not safe for concurrent use.
+func SetLocaleForTesting(tag language.Tag) {
+    systemLocale = tag
+}
+```
+
+### Dependency change
+
+Promote `golang.org/x/text` from indirect to direct in `go.mod`:
+
+```bash
+go get golang.org/x/text/language
+```
+
+This should move the `// indirect` comment. No new dependency is introduced — `golang.org/x/text` is already in `go.sum`.
+
+### Acceptance Criteria
+
+- `pathbuilder.Build(date(2021,12,25,...), sha, ".jpg", false, "")` returns `"2021/12-Dec/20211225_062223_<sha>.jpg"` (on English locale).
+- `pathbuilder.Build(date(1902,2,20,...), sha, ".jpg", false, "")` returns `"1902/02-Feb/19020220_000000_<sha>.jpg"` (on English locale).
+- `pathbuilder.Build(date(2022,3,1,...), sha, ".jpg", true, "20260306_103000")` returns `"duplicates/20260306_103000/2022/03-Mar/20220301_100000_<sha>.jpg"`.
+- `pathbuilder.MonthDir(time.January)` returns `"01-Jan"` on English locale.
+- `pathbuilder.MonthDir(time.December)` returns `"12-Dec"` on English locale.
+- Month in the **filename** is still zero-padded numeric (`02`, not `Feb`).
+- Year directory is unchanged (`"2021"`, not `"2021-Twenty-One"`).
+- `RunTimestamp()` is unchanged.
+- `go build ./...` succeeds.
+- The `Build()` function signature is unchanged — no callers need modification.
+
+---
+
+## Task 27 — Update Tests — Month Directory Format
+
+**Goal:** Rewrite all tests that assert month directory paths to use the new `MM-Mon` format. No test should reference the old bare-integer month directory.
+
+**Architecture Reference:** Section 4.3
+
+**Depends on:** Task 26
+
+### Files to modify
+
+#### 1. `internal/pathbuilder/pathbuilder_test.go` — Unit tests
+
+**Rewrite `TestBuild_normalPath`:**
+
+```go
+func TestBuild_normalPath(t *testing.T) {
+    d := date(2021, 12, 25, 6, 22, 23)
+    got := Build(d, testChecksum, ".jpg", false, "")
+    want := filepath.Join("2021", "12-Dec", "20211225_062223_"+testChecksum+".jpg")
+    if got != want {
+        t.Errorf("Build normal:\n  got  %q\n  want %q", got, want)
+    }
+}
+```
+
+**Rewrite `TestBuild_duplicatePath`:**
+
+```go
+func TestBuild_duplicatePath(t *testing.T) {
+    d := date(2021, 12, 25, 6, 22, 23)
+    got := Build(d, testChecksum, ".jpg", true, "20260306_103000")
+    want := filepath.Join("duplicates", "20260306_103000", "2021", "12-Dec", "20211225_062223_"+testChecksum+".jpg")
+    if got != want {
+        t.Errorf("Build duplicate:\n  got  %q\n  want %q", got, want)
+    }
+}
+```
+
+**Rewrite `TestBuild_defaultDate_anselsAdams`:**
+
+```go
+func TestBuild_defaultDate_anselsAdams(t *testing.T) {
+    d := date(1902, 2, 20, 0, 0, 0)
+    got := Build(d, testChecksum, ".jpg", false, "")
+    want := filepath.Join("1902", "02-Feb", "19020220_000000_"+testChecksum+".jpg")
+    if got != want {
+        t.Errorf("Build Ansel Adams date:\n  got  %q\n  want %q", got, want)
+    }
+}
+```
+
+**Rename and rewrite `TestBuild_monthNotZeroPadded` → `TestBuild_monthDirectoryFormat`:**
+
+This test now validates the `MM-Mon` format for the directory and confirms the filename still uses zero-padded numeric months:
+
+```go
+func TestBuild_monthDirectoryFormat(t *testing.T) {
+    // Ensure English locale for deterministic test output.
+    SetLocaleForTesting(language.English)
+
+    cases := []struct {
+        month          int
+        wantDir        string // MM-Mon format
+        wantInFilename string // zero-padded numeric
+    }{
+        {1, "01-Jan", "01"},
+        {2, "02-Feb", "02"},
+        {9, "09-Sep", "09"},
+        {10, "10-Oct", "10"},
+        {12, "12-Dec", "12"},
+    }
+    for _, tc := range cases {
+        d := date(2022, tc.month, 5, 0, 0, 0)
+        got := Build(d, testChecksum, ".jpg", false, "")
+        parts := splitPath(got)
+        if len(parts) < 2 {
+            t.Fatalf("unexpected path structure: %q", got)
+        }
+        // Directory component should be MM-Mon.
+        if parts[1] != tc.wantDir {
+            t.Errorf("month %d: directory = %q, want %q", tc.month, parts[1], tc.wantDir)
+        }
+        // Month in filename is zero-padded numeric (part of YYYYMMDD).
+        filename := parts[len(parts)-1]
+        monthInFilename := filename[4:6]
+        if monthInFilename != tc.wantInFilename {
+            t.Errorf("month %d: filename month digits = %q, want %q", tc.month, monthInFilename, tc.wantInFilename)
+        }
+    }
+}
+```
+
+**Add new test — `TestMonthDir`:**
+
+```go
+func TestMonthDir(t *testing.T) {
+    SetLocaleForTesting(language.English)
+
+    cases := []struct {
+        month time.Month
+        want  string
+    }{
+        {time.January, "01-Jan"},
+        {time.February, "02-Feb"},
+        {time.March, "03-Mar"},
+        {time.September, "09-Sep"},
+        {time.October, "10-Oct"},
+        {time.December, "12-Dec"},
+    }
+    for _, tc := range cases {
+        got := MonthDir(tc.month)
+        if got != tc.want {
+            t.Errorf("MonthDir(%v) = %q, want %q", tc.month, got, tc.want)
+        }
+    }
+}
+```
+
+**Add new test — `TestMonthDir_nonEnglishLocale`:**
+
+```go
+func TestMonthDir_nonEnglishLocale(t *testing.T) {
+    SetLocaleForTesting(language.French)
+
+    // French abbreviated months from CLDR.
+    got := MonthDir(time.March)
+    if got != "03-Mar" {
+        t.Errorf("MonthDir(March) with French locale = %q, want %q", got, "03-Mar")
+    }
+
+    got = MonthDir(time.February)
+    if got != "02-Fév" {
+        t.Errorf("MonthDir(February) with French locale = %q, want %q", got, "02-Fév")
+    }
+
+    // Restore English for other tests.
+    SetLocaleForTesting(language.English)
+}
+```
+
+**Add new test — `TestDetectSystemLocale_fallback`:**
+
+```go
+func TestDetectSystemLocale_fallback(t *testing.T) {
+    // When no locale env vars are set, should fall back to English.
+    // Save and clear env vars.
+    keys := []string{"LANGUAGE", "LC_ALL", "LC_TIME", "LANG"}
+    saved := make(map[string]string)
+    for _, k := range keys {
+        saved[k] = os.Getenv(k)
+        os.Unsetenv(k)
+    }
+    defer func() {
+        for k, v := range saved {
+            if v != "" {
+                os.Setenv(k, v)
+            }
+        }
+    }()
+
+    tag := detectSystemLocale()
+    base, _ := tag.Base()
+    if base.String() != "en" {
+        t.Errorf("detectSystemLocale() with no env = %v, want English", tag)
+    }
+}
+```
+
+**Update `TestBuild_sameSecondDifferentChecksum`:**
+
+The month directory for March changes from `"3"` to `"03-Mar"`. The test logic (asserting p1 != p2) is still valid — no structural change needed, but verify it still passes.
+
+**Add import for `golang.org/x/text/language`** to the test file (needed for `SetLocaleForTesting` and `language.English`/`language.French`).
+
+#### 2. `internal/pipeline/pipeline_test.go` — Pipeline tests
+
+**`TestRun_outputDirectoryStructure` (line 106–131):**
+
+Change the month directory assertion:
+
+```go
+// BEFORE:
+monthDir := filepath.Join(dirB, "2021", "12")
+
+// AFTER:
+monthDir := filepath.Join(dirB, "2021", "12-Dec")
+```
+
+**`TestRun_noExifFallbackDate` (line 149–161):**
+
+Change the month directory assertion:
+
+```go
+// BEFORE:
+monthDir := filepath.Join(dirB, "1902", "2")
+
+// AFTER:
+monthDir := filepath.Join(dirB, "1902", "02-Feb")
+```
+
+Also update the error message string from `"1902/2/"` to `"1902/02-Feb/"`.
+
+#### 3. `internal/integration/integration_test.go` — Integration tests
+
+**`TestIntegration_FullSort` (line 146):**
+
+```go
+// BEFORE:
+files2021 := findFiles(t, filepath.Join(dirB, "2021", "12"), "20211225_062223_")
+
+// AFTER:
+files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+```
+
+Update the error message on line 148 from `"2021/12/"` to `"2021/12-Dec/"`.
+
+**`TestIntegration_NoDateFallback` (line 235–249):**
+
+The test currently checks for `"1902"` as a path component. It should also check for `"02-Feb"`:
+
+```go
+// BEFORE (line 241):
+if p == "1902" {
+
+// AFTER — also verify the month directory:
+// Add a second check for the month component:
+found02Feb := false
+for _, p := range parts {
+    if p == "02-Feb" {
+        found02Feb = true
+        break
+    }
+}
+if !found02Feb {
+    t.Errorf("path %q does not contain 02-Feb directory", rel)
+}
+```
+
+#### 4. Add `init()` or `TestMain` to set English locale in test files
+
+To ensure tests are deterministic regardless of the developer's system locale, add at the top of each test file that asserts specific month names:
+
+**`internal/pathbuilder/pathbuilder_test.go`:**
+```go
+func TestMain(m *testing.M) {
+    SetLocaleForTesting(language.English)
+    os.Exit(m.Run())
+}
+```
+
+**`internal/pipeline/pipeline_test.go`** and **`internal/integration/integration_test.go`:**
+```go
+import "github.com/cwlls/pixe-go/internal/pathbuilder"
+
+func TestMain(m *testing.M) {
+    pathbuilder.SetLocaleForTesting(language.English)
+    os.Exit(m.Run())
+}
+```
+
+### Acceptance Criteria
+
+- All pathbuilder unit tests pass with the new `MM-Mon` format.
+- `TestBuild_monthDirectoryFormat` validates months 1, 2, 9, 10, 12 produce `01-Jan`, `02-Feb`, `09-Sep`, `10-Oct`, `12-Dec` directories.
+- `TestMonthDir` validates the exported helper directly.
+- `TestMonthDir_nonEnglishLocale` proves French locale produces French abbreviations.
+- `TestDetectSystemLocale_fallback` proves English fallback when no env vars are set.
+- Pipeline tests (`TestRun_outputDirectoryStructure`, `TestRun_noExifFallbackDate`) pass with updated directory assertions.
+- Integration tests (`TestIntegration_FullSort`, `TestIntegration_NoDateFallback`) pass with updated directory assertions.
+- No test references the old bare-integer month directory format.
+- All tests are locale-deterministic via `SetLocaleForTesting(language.English)` in `TestMain`.
+
+---
+
+## Task 28 — Tests & Verification — Full Suite Green
+
+**Goal:** Verify the entire codebase compiles, passes all tests, and passes lint after the month directory format change.
+
+**Depends on:** Tasks 26, 27
+
+### Verification commands
+
+```bash
+go vet ./...                                    # No warnings
+go build ./...                                  # Compiles cleanly
+go test -race -timeout 120s ./...               # All tests pass (unit + integration)
+make lint                                       # 0 issues
+```
+
+### Specific checks
+
+1. **No stale references:** Grep the entire codebase for the old month format patterns:
+   ```bash
+   # Should return zero matches in .go files (excluding STATE.md):
+   rg 'Sprintf\("%d", month\)' --include '*.go'
+   rg 'non-zero-padded' --include '*.go'
+   rg '"1902", "2"' --include '*.go'
+   rg '"2021", "12"' --include '*.go'  # should only appear as "2021", "12-Dec"
+   ```
+
+2. **Dependency audit:** `go mod tidy` should not add or remove any modules (only promote `golang.org/x/text` from indirect to direct).
+
+3. **Build smoke test:**
+   ```bash
+   make build
+   ./pixe sort --source /tmp/test-photos --dest /tmp/test-archive --dry-run
+   # Verify dry-run output shows paths like 2021/12-Dec/...
+   ```
+
+### Acceptance Criteria
+
+- `go vet ./...` — zero warnings.
+- `go build ./...` — compiles cleanly.
+- `go test -race -timeout 120s ./...` — all tests pass.
+- `make lint` — 0 issues.
+- `go mod tidy` produces no diff.
+- No `.go` file references the old `fmt.Sprintf("%d", month)` pattern for directory names.
+- No `.go` file contains the phrase "non-zero-padded" (old spec language).

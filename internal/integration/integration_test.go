@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/text/language"
+
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
@@ -36,6 +38,13 @@ import (
 	"github.com/cwlls/pixe-go/internal/pipeline"
 	"github.com/cwlls/pixe-go/internal/verify"
 )
+
+// TestMain pins the locale to English so that month directory assertions are
+// deterministic regardless of the developer's system locale.
+func TestMain(m *testing.M) {
+	pathbuilder.SetLocaleForTesting(language.English)
+	os.Exit(m.Run())
+}
 
 // --- helpers ---
 
@@ -142,10 +151,10 @@ func TestIntegration_FullSort(t *testing.T) {
 		t.Errorf("Errors = %d, want 0", result.Errors)
 	}
 
-	// File with EXIF date 2021-12-25 must land under 2021/12/.
-	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12"), "20211225_062223_")
+	// File with EXIF date 2021-12-25 must land under 2021/12-Dec/.
+	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
 	if len(files2021) != 1 {
-		t.Errorf("expected 1 file in 2021/12/ with prefix 20211225_062223_, got %d", len(files2021))
+		t.Errorf("expected 1 file in 2021/12-Dec/ with prefix 20211225_062223_, got %d", len(files2021))
 	}
 
 	// File with no EXIF must land under 1902/2/ (or duplicates/.../1902/2/).
@@ -232,20 +241,25 @@ func TestIntegration_NoDateFallback(t *testing.T) {
 		t.Error("no file with Ansel Adams prefix 19020220_000000_ found in dirB")
 	}
 
-	// The path must contain "1902" and "2" directory components.
+	// The path must contain "1902" and "02-Feb" directory components.
 	for _, f := range files {
 		rel, _ := filepath.Rel(dirB, f)
 		parts := strings.Split(rel, string(filepath.Separator))
-		// parts[0] or parts[2] (under duplicates) should be "1902"
 		found1902 := false
+		found02Feb := false
 		for _, p := range parts {
 			if p == "1902" {
 				found1902 = true
-				break
+			}
+			if p == "02-Feb" {
+				found02Feb = true
 			}
 		}
 		if !found1902 {
 			t.Errorf("path %q does not contain 1902 directory", rel)
+		}
+		if !found02Feb {
+			t.Errorf("path %q does not contain 02-Feb directory", rel)
 		}
 	}
 }
