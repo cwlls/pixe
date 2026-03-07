@@ -2,7 +2,7 @@
 
 | # | Task | Priority | Agent | Status | Depends On | Notes |
 |:--|:-----|:---------|:------|:-------|:-----------|:------|
-| 1 | Project Scaffold & Go Module Init | High | @developer | ⬜ Pending | — | Go module, directory layout, Cobra/Viper bootstrap |
+| 1 | Project Scaffold & Go Module Init | High | @developer | 🏗️ In Progress | — | Go module, directory layout, Cobra/Viper bootstrap |
 | 2 | Core Domain Types & Interfaces | High | @developer | ⬜ Pending | 1 | FileTypeHandler contract, pipeline types, config structs |
 | 3 | Hashing Engine | High | @developer | ⬜ Pending | 2 | Configurable hash.Hash factory, streaming io.Reader consumer |
 | 4 | Manifest & Ledger Persistence | High | @developer | ⬜ Pending | 2 | JSON read/write, atomic saves, per-file state tracking |
