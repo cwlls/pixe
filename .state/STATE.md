@@ -2,15 +2,15 @@
 
 | # | Task | Priority | Agent | Status | Depends On | Notes |
 |:--|:-----|:---------|:------|:-------|:-----------|:------|
-| 50 | TIFF-RAW Shared Base — `internal/handler/tiffraw` | High | @developer | ⬜ Pending | 2, 7 | Shared `Base` struct: EXIF date extraction via TIFF IFD parsing, embedded JPEG preview extraction for `HashableReader`, no-op `WriteMetadataTags` |
-| 51 | DNG Filetype Module — `internal/handler/dng` | High | @developer | ⬜ Pending | 50 | Thin wrapper embedding `tiffraw.Base`; DNG-specific extensions, magic bytes (TIFF LE/BE), Detect with DNGVersion tag check |
-| 52 | NEF Filetype Module — `internal/handler/nef` | High | @developer | ⬜ Pending | 50 | Thin wrapper embedding `tiffraw.Base`; `.nef` extension, TIFF LE magic, extension-primary detection |
-| 53 | CR2 Filetype Module — `internal/handler/cr2` | High | @developer | ⬜ Pending | 50 | Thin wrapper embedding `tiffraw.Base`; `.cr2` extension, TIFF LE magic + `CR` at offset 8 |
-| 54 | PEF Filetype Module — `internal/handler/pef` | High | @developer | ⬜ Pending | 50 | Thin wrapper embedding `tiffraw.Base`; `.pef` extension, TIFF LE magic, extension-primary detection |
-| 55 | ARW Filetype Module — `internal/handler/arw` | High | @developer | ⬜ Pending | 50 | Thin wrapper embedding `tiffraw.Base`; `.arw` extension, TIFF LE magic, extension-primary detection |
-| 56 | CR3 Filetype Module — `internal/handler/cr3` | High | @developer | ⬜ Pending | 12 | Standalone ISOBMFF-based handler; EXIF via ISOBMFF box extraction (like HEIC), JPEG preview from container, no-op write |
-| 57 | RAW Handler Registration — Wire into CLI | High | @developer | ⬜ Pending | 51, 52, 53, 54, 55, 56 | Register all 6 RAW handlers + HEIC + MP4 in `cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go` |
-| 58 | RAW Handlers — Unit Tests | High | @tester | ⬜ Pending | 50, 51, 52, 53, 54, 55, 56 | Per-handler tests: Extensions, MagicBytes, Detect, ExtractDate fallback, HashableReader determinism, WriteMetadataTags no-op |
+| 50 | TIFF-RAW Shared Base — `internal/handler/tiffraw` | High | @developer | ✅ Done | 2, 7 | Shared `Base` struct: EXIF date extraction via TIFF IFD parsing, embedded JPEG preview extraction for `HashableReader`, no-op `WriteMetadataTags` |
+| 51 | DNG Filetype Module — `internal/handler/dng` | High | @developer | ✅ Done | 50 | Thin wrapper embedding `tiffraw.Base`; DNG-specific extensions, magic bytes (TIFF LE/BE), Detect with DNGVersion tag check |
+| 52 | NEF Filetype Module — `internal/handler/nef` | High | @developer | ✅ Done | 50 | Thin wrapper embedding `tiffraw.Base`; `.nef` extension, TIFF LE magic, extension-primary detection |
+| 53 | CR2 Filetype Module — `internal/handler/cr2` | High | @developer | ✅ Done | 50 | Thin wrapper embedding `tiffraw.Base`; `.cr2` extension, TIFF LE magic + `CR` at offset 8 |
+| 54 | PEF Filetype Module — `internal/handler/pef` | High | @developer | ✅ Done | 50 | Thin wrapper embedding `tiffraw.Base`; `.pef` extension, TIFF LE magic, extension-primary detection |
+| 55 | ARW Filetype Module — `internal/handler/arw` | High | @developer | ✅ Done | 50 | Thin wrapper embedding `tiffraw.Base`; `.arw` extension, TIFF LE magic, extension-primary detection |
+| 56 | CR3 Filetype Module — `internal/handler/cr3` | High | @developer | ✅ Done | 12 | Standalone ISOBMFF-based handler; EXIF via ISOBMFF box extraction (like HEIC), JPEG preview from container, no-op write |
+| 57 | RAW Handler Registration — Wire into CLI | High | @developer | ✅ Done | 51, 52, 53, 54, 55, 56 | Register all 6 RAW handlers + HEIC + MP4 in `cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go` |
+| 58 | RAW Handlers — Unit Tests | High | @tester | ✅ Done | 50, 51, 52, 53, 54, 55, 56 | Per-handler tests: Extensions, MagicBytes, Detect, ExtractDate fallback, HashableReader determinism, WriteMetadataTags no-op |
 | 59 | RAW Handlers — Integration Tests | High | @tester | ⬜ Pending | 57, 58 | End-to-end sort with RAW fixture files, verify DB records, verify output naming with `.dng`/`.nef`/`.cr2`/`.cr3`/`.pef`/`.arw` extensions |
 | 60 | Tests & Verification — Full Suite Green (RAW) | High | @tester | ⬜ Pending | 58, 59 | `go vet`, `go test -race ./...`, `make lint`, `go mod tidy` all pass with RAW handlers |
 

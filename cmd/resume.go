@@ -28,7 +28,15 @@ import (
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/dblocator"
 	"github.com/cwlls/pixe-go/internal/discovery"
+	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
+	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
+	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
+	dnghandler "github.com/cwlls/pixe-go/internal/handler/dng"
+	heichandler "github.com/cwlls/pixe-go/internal/handler/heic"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
+	mp4handler "github.com/cwlls/pixe-go/internal/handler/mp4"
+	nefhandler "github.com/cwlls/pixe-go/internal/handler/nef"
+	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 	"github.com/cwlls/pixe-go/internal/pipeline"
@@ -127,6 +135,14 @@ func runResume(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	reg := discovery.NewRegistry()
 	reg.Register(jpeghandler.New())
+	reg.Register(heichandler.New())
+	reg.Register(mp4handler.New())
+	reg.Register(dnghandler.New())
+	reg.Register(nefhandler.New())
+	reg.Register(cr2handler.New())
+	reg.Register(cr3handler.New())
+	reg.Register(pefhandler.New())
+	reg.Register(arwhandler.New())
 
 	// ------------------------------------------------------------------
 	// 7. Build config and pipeline options, then run.
