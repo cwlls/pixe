@@ -236,6 +236,71 @@ func (db *DB) UpdateFileStatus(fileID int64, status string, opts ...UpdateOption
 	return nil
 }
 
+// CompleteFileWithDedupCheck atomically checks for an existing completed file
+// with the same checksum and marks this file as complete within a single
+// transaction. This prevents the TOCTOU race where two concurrent processes
+// both believe they are the first to complete a given checksum.
+//
+// Returns:
+//   - existingDest: the dest_rel of the already-completed file if a duplicate
+//     was detected; empty string if this file is the first.
+//   - err: any database error.
+//
+// When existingDest is non-empty the caller must physically move the copied
+// file to the duplicates directory and update the DB record accordingly.
+func (db *DB) CompleteFileWithDedupCheck(fileID int64, checksum string) (existingDest string, err error) {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return "", fmt.Errorf("archivedb: complete with dedup check begin: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Check for an existing completed file with the same checksum (excluding self).
+	const selectQ = `
+		SELECT dest_rel FROM files
+		WHERE checksum = ? AND status = 'complete' AND id != ?
+		LIMIT 1`
+
+	var destRel sql.NullString
+	scanErr := tx.QueryRow(selectQ, checksum, fileID).Scan(&destRel)
+	if scanErr != nil && scanErr != sql.ErrNoRows {
+		return "", fmt.Errorf("archivedb: complete with dedup check query: %w", scanErr)
+	}
+
+	if scanErr == nil {
+		// A completed file with the same checksum exists (duplicate detected).
+		// Mark this file as complete with is_duplicate=1.
+		// The caller is responsible for relocating the physical file.
+		const updateDupQ = `UPDATE files SET status = 'complete', is_duplicate = 1 WHERE id = ?`
+		if _, err := tx.Exec(updateDupQ, fileID); err != nil {
+			return "", fmt.Errorf("archivedb: complete duplicate file: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return "", fmt.Errorf("archivedb: complete duplicate commit: %w", err)
+		}
+		// Return dest_rel if available; otherwise return a non-empty sentinel so
+		// the caller knows a duplicate was detected even when dest_rel is NULL.
+		if destRel.Valid && destRel.String != "" {
+			return destRel.String, nil
+		}
+		return "<duplicate>", nil
+	}
+
+	// No duplicate — mark as complete (non-duplicate).
+	const updateQ = `UPDATE files SET status = 'complete' WHERE id = ?`
+	if _, err := tx.Exec(updateQ, fileID); err != nil {
+		return "", fmt.Errorf("archivedb: complete file: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("archivedb: complete commit: %w", err)
+	}
+	return "", nil
+}
+
 // CheckDuplicate queries whether a file with the given checksum exists with
 // status "complete". Returns the dest_rel path if found, empty string if not.
 // This is the hot-path dedup query — served by idx_files_checksum.

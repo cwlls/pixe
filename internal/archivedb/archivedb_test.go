@@ -1212,6 +1212,204 @@ func TestArchiveInventory(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// CompleteFileWithDedupCheck tests (Task 36)
+// ---------------------------------------------------------------------------
+
+// TestCompleteFileWithDedupCheck_noRace verifies that the first file to complete
+// a given checksum is marked complete with is_duplicate=0 and returns "".
+func TestCompleteFileWithDedupCheck_noRace(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "cwdc-run-1")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "cwdc-run-1", SourcePath: "/src/first.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "hashed", WithChecksum("cwdc-checksum-1")); err != nil {
+		t.Fatalf("UpdateFileStatus hashed: %v", err)
+	}
+
+	existingDest, err := db.CompleteFileWithDedupCheck(id, "cwdc-checksum-1")
+	if err != nil {
+		t.Fatalf("CompleteFileWithDedupCheck: %v", err)
+	}
+	if existingDest != "" {
+		t.Errorf("existingDest = %q, want %q (no race expected)", existingDest, "")
+	}
+
+	files, err := db.GetFilesByRun("cwdc-run-1")
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	if files[0].Status != "complete" {
+		t.Errorf("Status = %q, want %q", files[0].Status, "complete")
+	}
+	if files[0].IsDuplicate {
+		t.Error("IsDuplicate = true, want false (first file should not be a duplicate)")
+	}
+}
+
+// TestCompleteFileWithDedupCheck_raceDetected verifies that the second file with
+// the same checksum is detected as a duplicate and the existing dest_rel is returned.
+func TestCompleteFileWithDedupCheck_raceDetected(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "cwdc-run-2")
+
+	const checksum = "cwdc-checksum-race"
+	const origDestRel = "2026/03-Mar/original.jpg"
+
+	// Insert and complete the first file (the "winner").
+	origID, err := db.InsertFile(&FileRecord{RunID: "cwdc-run-2", SourcePath: "/src/orig.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile orig: %v", err)
+	}
+	if err := db.UpdateFileStatus(origID, "hashed", WithChecksum(checksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed orig: %v", err)
+	}
+	if err := db.UpdateFileStatus(origID, "copied",
+		WithDestination("/dst/"+origDestRel, origDestRel)); err != nil {
+		t.Fatalf("UpdateFileStatus copied orig: %v", err)
+	}
+	if err := db.UpdateFileStatus(origID, "complete"); err != nil {
+		t.Fatalf("UpdateFileStatus complete orig: %v", err)
+	}
+
+	// Insert the second file (the "loser" — arrives after the first is complete).
+	dupID, err := db.InsertFile(&FileRecord{RunID: "cwdc-run-2", SourcePath: "/src/dup.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile dup: %v", err)
+	}
+	if err := db.UpdateFileStatus(dupID, "hashed", WithChecksum(checksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed dup: %v", err)
+	}
+
+	// CompleteFileWithDedupCheck should detect the race.
+	existingDest, err := db.CompleteFileWithDedupCheck(dupID, checksum)
+	if err != nil {
+		t.Fatalf("CompleteFileWithDedupCheck: %v", err)
+	}
+	if existingDest != origDestRel {
+		t.Errorf("existingDest = %q, want %q", existingDest, origDestRel)
+	}
+
+	// The duplicate file should be marked complete with is_duplicate=1.
+	files, err := db.GetFilesByRun("cwdc-run-2")
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	var dupFile *FileRecord
+	for _, f := range files {
+		if f.ID == dupID {
+			dupFile = f
+			break
+		}
+	}
+	if dupFile == nil {
+		t.Fatal("duplicate file not found in GetFilesByRun results")
+	}
+	if dupFile.Status != "complete" {
+		t.Errorf("dup Status = %q, want %q", dupFile.Status, "complete")
+	}
+	if !dupFile.IsDuplicate {
+		t.Error("dup IsDuplicate = false, want true")
+	}
+}
+
+// TestCompleteFileWithDedupCheck_doesNotMatchSelf verifies that a file does not
+// detect itself as a duplicate (the id != ? clause in the query).
+func TestCompleteFileWithDedupCheck_doesNotMatchSelf(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "cwdc-run-3")
+
+	const checksum = "cwdc-self-check"
+
+	id, err := db.InsertFile(&FileRecord{RunID: "cwdc-run-3", SourcePath: "/src/self.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed: %v", err)
+	}
+	// Manually mark as complete first (simulating a partial state).
+	if err := db.UpdateFileStatus(id, "complete"); err != nil {
+		t.Fatalf("UpdateFileStatus complete: %v", err)
+	}
+
+	// Now call CompleteFileWithDedupCheck — it should NOT match itself.
+	existingDest, err := db.CompleteFileWithDedupCheck(id, checksum)
+	if err != nil {
+		t.Fatalf("CompleteFileWithDedupCheck: %v", err)
+	}
+	if existingDest != "" {
+		t.Errorf("existingDest = %q, want %q (should not match self)", existingDest, "")
+	}
+}
+
+// TestCompleteFileWithDedupCheck_atomicity verifies that the check and update
+// happen within the same transaction (no partial state visible between them).
+func TestCompleteFileWithDedupCheck_atomicity(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "cwdc-run-4")
+
+	const checksum = "cwdc-atomic"
+
+	// Insert two files with the same checksum.
+	id1, err := db.InsertFile(&FileRecord{RunID: "cwdc-run-4", SourcePath: "/src/atomic1.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile 1: %v", err)
+	}
+	id2, err := db.InsertFile(&FileRecord{RunID: "cwdc-run-4", SourcePath: "/src/atomic2.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile 2: %v", err)
+	}
+
+	for _, id := range []int64{id1, id2} {
+		if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+			t.Fatalf("UpdateFileStatus hashed %d: %v", id, err)
+		}
+	}
+
+	// Complete the first file — should succeed with no race.
+	dest1, err := db.CompleteFileWithDedupCheck(id1, checksum)
+	if err != nil {
+		t.Fatalf("CompleteFileWithDedupCheck id1: %v", err)
+	}
+	if dest1 != "" {
+		t.Errorf("id1 existingDest = %q, want %q", dest1, "")
+	}
+
+	// Complete the second file — should detect the race.
+	dest2, err := db.CompleteFileWithDedupCheck(id2, checksum)
+	if err != nil {
+		t.Fatalf("CompleteFileWithDedupCheck id2: %v", err)
+	}
+	if dest2 == "" {
+		t.Error("id2 existingDest is empty, want non-empty (race should be detected)")
+	}
+
+	// Verify final states.
+	files, err := db.GetFilesByRun("cwdc-run-4")
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	for _, f := range files {
+		if f.Status != "complete" {
+			t.Errorf("file %d Status = %q, want %q", f.ID, f.Status, "complete")
+		}
+	}
+	// Exactly one should be a duplicate.
+	dupCount := 0
+	for _, f := range files {
+		if f.IsDuplicate {
+			dupCount++
+		}
+	}
+	if dupCount != 1 {
+		t.Errorf("duplicate count = %d, want 1", dupCount)
+	}
+}
+
 // TestArchiveInventory_orderedByDestRel verifies stable ordering.
 func TestArchiveInventory_orderedByDestRel(t *testing.T) {
 	db := openTestDB(t)

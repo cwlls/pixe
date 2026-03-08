@@ -323,10 +323,40 @@ func processFile(
 		}
 	}
 
-	// --- Complete ---
+	// --- Complete (atomic dedup re-check) ---
 	if db != nil {
-		_ = db.UpdateFileStatus(fileID, "complete",
-			archivedb.WithIsDuplicate(isDuplicate))
+		if isDuplicate {
+			// Pre-copy dedup already determined this is a duplicate.
+			// No race check needed — just mark complete.
+			_ = db.UpdateFileStatus(fileID, "complete",
+				archivedb.WithIsDuplicate(true))
+		} else {
+			// Atomically check for a cross-process race: another pixe process may
+			// have completed the same checksum while we were copying.
+			existingDest, dedupErr := db.CompleteFileWithDedupCheck(fileID, checksum)
+			if dedupErr != nil {
+				return nil, false, fmt.Errorf("complete with dedup check: %w", dedupErr)
+			}
+			if existingDest != "" {
+				// Race detected: another process completed this checksum first.
+				// Relocate our copy to the duplicates directory.
+				dupRelDest := pathbuilder.Build(captureDate, checksum, ext, true, opts.RunTimestamp)
+				dupAbsDest := filepath.Join(dirB, dupRelDest)
+				if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
+					// Rename failed — file is still at absDest; mark as failed.
+					_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(renErr.Error()))
+					return nil, false, fmt.Errorf("relocate duplicate after race: %w", renErr)
+				}
+				// Update DB record with the new duplicate destination.
+				_ = db.UpdateFileStatus(fileID, "complete",
+					archivedb.WithDestination(dupAbsDest, dupRelDest),
+					archivedb.WithIsDuplicate(true))
+				relDest = dupRelDest
+				isDuplicate = true
+			}
+			// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
+			// No further DB update needed for the non-race path.
+		}
 	}
 
 	le := &domain.LedgerEntry{

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -159,6 +160,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 	pendingCount := len(discovered)
 	completed := 0
 	var result SortResult
+	// memSeen is an in-memory dedup fallback used when no DB is available (e.g. tests).
+	// The coordinator is single-threaded, so no mutex is needed.
+	memSeen := make(map[string]string)
 
 	for completed < pendingCount {
 		select {
@@ -180,7 +184,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				continue
 			}
 
-			// Dedup check — single-writer on the DB.
+			// Dedup check — single-writer on the DB (or memSeen when DB is nil).
 			var isDuplicate bool
 			if opts.DB != nil {
 				existingDest, err := opts.DB.CheckDuplicate(wr.checksum)
@@ -191,6 +195,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					continue
 				}
 				isDuplicate = existingDest != ""
+			} else if _, seen := memSeen[wr.checksum]; seen {
+				isDuplicate = true
 			}
 
 			relDest := pathbuilder.Build(wr.date, wr.checksum, wr.ext, isDuplicate, opts.RunTimestamp)
@@ -210,18 +216,61 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				result.Errors++
 				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(fr.df.Path), fr.err)
 			} else {
+				finalRelDest := fr.relDest
+				finalIsDup := fr.isDuplicate
+
 				if opts.DB != nil {
-					_ = opts.DB.UpdateFileStatus(fr.fileID, "complete",
-						archivedb.WithIsDuplicate(fr.isDuplicate))
+					if finalIsDup {
+						// Pre-copy dedup — just mark complete.
+						_ = opts.DB.UpdateFileStatus(fr.fileID, "complete",
+							archivedb.WithIsDuplicate(true))
+					} else {
+						// Atomic post-copy dedup re-check to handle cross-process races.
+						existingDest, dedupErr := opts.DB.CompleteFileWithDedupCheck(fr.fileID, fr.checksum)
+						if dedupErr != nil {
+							result.Errors++
+							_, _ = fmt.Fprintf(out, "  ERROR  %s: dedup check: %v\n",
+								filepath.Base(fr.df.Path), dedupErr)
+							completed++
+							continue
+						}
+						if existingDest != "" {
+							// Race detected — relocate physical file to duplicates/.
+							dupRelDest := pathbuilder.Build(fr.verifiedAt, fr.checksum,
+								filepath.Ext(fr.df.Path), true, opts.RunTimestamp)
+							dupAbsDest := filepath.Join(dirB, dupRelDest)
+							absDest := filepath.Join(dirB, fr.relDest)
+							if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
+								_ = opts.DB.UpdateFileStatus(fr.fileID, "failed",
+									archivedb.WithError(renErr.Error()))
+								result.Errors++
+								_, _ = fmt.Fprintf(out, "  ERROR  %s: relocate duplicate: %v\n",
+									filepath.Base(fr.df.Path), renErr)
+								completed++
+								continue
+							}
+							_ = opts.DB.UpdateFileStatus(fr.fileID, "complete",
+								archivedb.WithDestination(dupAbsDest, dupRelDest),
+								archivedb.WithIsDuplicate(true))
+							finalRelDest = dupRelDest
+							finalIsDup = true
+						}
+						// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
+					}
+				} else if !finalIsDup {
+					// No DB — record in memSeen so subsequent files with the same checksum
+					// are routed as duplicates by the coordinator's dedup check.
+					memSeen[fr.checksum] = finalRelDest
 				}
+
 				result.Processed++
-				if fr.isDuplicate {
+				if finalIsDup {
 					result.Duplicates++
 				}
 				ledger.Files = append(ledger.Files, domain.LedgerEntry{
 					Path:        relPath(dirA, fr.df.Path),
 					Checksum:    fr.checksum,
-					Destination: fr.relDest,
+					Destination: finalRelDest,
 					VerifiedAt:  fr.verifiedAt,
 				})
 			}

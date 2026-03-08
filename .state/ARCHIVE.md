@@ -160,3 +160,32 @@
 2026-03-07 | 2d78c3c
 
 ---
+
+## Task 36 — Pipeline — Cross-Process Dedup Race Handling ✅
+
+**Completed:** 2026-03-08  
+**Priority:** Medium  
+**Agent:** @developer  
+**Depends On:** Task 35
+
+### Summary
+
+Implemented atomic post-copy dedup re-check to handle the race condition where two simultaneous `pixe sort` processes discover the same file (identical checksum) from different sources. The second process to commit now detects the conflict and retroactively routes its copy to `duplicates/`.
+
+### Files Changed
+
+- `internal/archivedb/files.go` — Added `CompleteFileWithDedupCheck(fileID int64, checksum string) (existingDest string, err error)`: runs a SELECT + UPDATE within a single SQLite transaction to atomically detect duplicates and mark files complete.
+- `internal/pipeline/pipeline.go` — Updated `processFile()` `--- Complete ---` block: uses `CompleteFileWithDedupCheck` for the non-duplicate path; on race detection, renames physical file to duplicates directory and updates DB record.
+- `internal/pipeline/worker.go` — Updated coordinator `doneCh` handler with same atomic pattern; also added `memSeen` map to the concurrent coordinator for the no-DB fallback (fixing a pre-existing flaky test).
+- `internal/archivedb/archivedb_test.go` — Added 4 new tests: `TestCompleteFileWithDedupCheck_noRace`, `TestCompleteFileWithDedupCheck_raceDetected`, `TestCompleteFileWithDedupCheck_doesNotMatchSelf`, `TestCompleteFileWithDedupCheck_atomicity`.
+
+### Acceptance Criteria Met
+
+- ✅ When two files with the same checksum are processed, the second is correctly routed to `duplicates/`.
+- ✅ The physical file is moved (renamed) to the duplicates directory.
+- ✅ The DB record reflects `is_duplicate = 1` and the updated destination path.
+- ✅ The operation is atomic — no window where both files appear as non-duplicates.
+- ✅ `go vet ./...` — zero warnings.
+- ✅ `go test -race -timeout 120s ./...` — all tests pass.
+
+---

@@ -37,7 +37,7 @@
 | 33 | Domain Types — SQLite-era updates | High | @developer | ✅ Complete | 2, 29 | Add `RunID` to Ledger, bump ledger version to 2, add `DBPath` to AppConfig |
 | 34 | JSON Manifest Migration — `internal/migrate` package | High | @developer | ✅ Complete | 29, 30 | Auto-detect manifest.json, create synthetic run, import entries, rename to .migrated |
 | 35 | Pipeline Refactor — Replace JSON manifest with archive DB | High | @developer | ✅ Complete | 29, 30, 32, 33 | Rewrite pipeline.go and worker.go to use archivedb instead of manifest.Save/Load |
-| 36 | Pipeline — Cross-process dedup race handling | Medium | @developer | 🔲 Pending | 35 | Post-commit dedup re-check, retroactive duplicate routing |
+| 36 | Pipeline — Cross-process dedup race handling | Medium | @developer | ✅ Complete | 35 | Post-commit dedup re-check, retroactive duplicate routing |
 | 37 | CLI Updates — `--db-path` flag & resume rewrite | High | @developer | ✅ Complete | 32, 35 | Add --db-path to sort/resume, update resume to use DB discovery chain |
 | 38 | Ledger Update — Add `run_id` field | Medium | @developer | ✅ Complete | 33, 35 | Wire run UUID into ledger creation, bump version to 2 |
 | 39 | Archive DB — Unit tests | High | @tester | 🔲 Pending | 29, 30, 31 | Schema creation, CRUD, queries, WAL concurrency, busy retry |
