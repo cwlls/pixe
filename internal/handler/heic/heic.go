@@ -15,9 +15,9 @@
 // Package heic implements the FileTypeHandler contract for HEIC/HEIF images.
 //
 // Package selection:
-//   - EXIF read:  github.com/jdeng/goheif — pure Go, extracts the raw EXIF
-//     blob from the ISOBMFF container; the blob is then parsed by
-//     github.com/rwcarlsen/goexif (already a project dependency).
+//   - EXIF read: github.com/dsoprea/go-heic-exif-extractor — pure Go, extracts
+//     the raw EXIF blob from the ISOBMFF container; the blob is then parsed by
+//     github.com/dsoprea/go-exif/v2.
 //   - EXIF write: Not yet supported for HEIC. WriteMetadataTags is a no-op
 //     pending a pure-Go HEIC EXIF write library. Files are still copied and
 //     verified correctly; tags are simply not injected.
@@ -41,15 +41,13 @@
 package heic
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/jdeng/goheif"
-	rwexif "github.com/rwcarlsen/goexif/exif"
+	"github.com/dsoprea/go-heic-exif-extractor"
 
 	"github.com/cwlls/pixe-go/internal/domain"
 )
@@ -102,31 +100,30 @@ func (h *Handler) Detect(filePath string) (bool, error) {
 // ExtractDate reads the capture date from HEIC EXIF metadata.
 // Fallback chain: DateTimeOriginal → CreateDate → anselsAdams.
 func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return anselsAdams, fmt.Errorf("heic: open %q: %w", filePath, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	// goheif.ExtractExif requires an io.ReaderAt.
-	exifBytes, err := goheif.ExtractExif(f)
-	if err != nil || len(exifBytes) == 0 {
-		return anselsAdams, nil
-	}
-
-	x, err := rwexif.Decode(bytes.NewReader(exifBytes))
+	heicParser := heicexif.NewHeicExifMediaParser()
+	heicContext, err := heicParser.ParseFile(filePath)
 	if err != nil {
 		return anselsAdams, nil
 	}
 
-	// 1. DateTimeOriginal.
-	if t, err := x.DateTime(); err == nil {
-		return t.UTC(), nil
+	heicExif := heicContext.(heicexif.HeicExifContext)
+	rootIfd, _, err := heicExif.Exif()
+	if err != nil {
+		return anselsAdams, nil
 	}
 
-	// 2. CreateDate (DateTime tag in IFD0).
-	if tag, err := x.Get(rwexif.DateTime); err == nil {
-		if s, err := tag.StringVal(); err == nil {
+	dateTimeTags, err := rootIfd.FindTagWithName("DateTimeOriginal")
+	if err == nil && len(dateTimeTags) > 0 {
+		if s, _ := dateTimeTags[0].Format(); s != "" {
+			if t, err := time.Parse(exifDateFormat, strings.TrimSpace(s)); err == nil {
+				return t.UTC(), nil
+			}
+		}
+	}
+
+	dateTimeTags, err = rootIfd.FindTagWithName("DateTime")
+	if err == nil && len(dateTimeTags) > 0 {
+		if s, _ := dateTimeTags[0].Format(); s != "" {
 			if t, err := time.Parse(exifDateFormat, strings.TrimSpace(s)); err == nil {
 				return t.UTC(), nil
 			}
