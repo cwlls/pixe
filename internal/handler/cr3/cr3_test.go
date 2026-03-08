@@ -161,7 +161,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -185,20 +185,20 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 		t.Fatalf("First HashableReader failed: %v", err)
 	}
 	data1, err := io.ReadAll(rc1)
-	rc1.Close()
 	if err != nil {
 		t.Fatalf("First ReadAll failed: %v", err)
 	}
+	_ = rc1.Close()
 
 	rc2, err := h.HashableReader(filePath)
 	if err != nil {
 		t.Fatalf("Second HashableReader failed: %v", err)
 	}
 	data2, err := io.ReadAll(rc2)
-	rc2.Close()
 	if err != nil {
 		t.Fatalf("Second ReadAll failed: %v", err)
 	}
+	_ = rc2.Close()
 
 	if !bytes.Equal(data1, data2) {
 		t.Fatal("HashableReader returned different data on second call")
@@ -224,16 +224,16 @@ func buildFakeCR3(t *testing.T, dir, name string) string {
 	buf := new(bytes.Buffer)
 
 	// ftyp box: size = 20
-	binary.Write(buf, binary.BigEndian, uint32(20))
+	_ = binary.Write(buf, binary.BigEndian, uint32(20))
 	buf.WriteString("ftyp")
 	buf.WriteString("crx ")
-	binary.Write(buf, binary.BigEndian, uint32(1)) // minor version
-	buf.WriteString("crx ")                        // compat
+	_ = binary.Write(buf, binary.BigEndian, uint32(1)) // minor version
+	buf.WriteString("crx ")                            // compat
 
 	// mdat box: size = 16
-	binary.Write(buf, binary.BigEndian, uint32(16))
+	_ = binary.Write(buf, binary.BigEndian, uint32(16))
 	buf.WriteString("mdat")
-	binary.Write(buf, binary.BigEndian, uint64(0)) // dummy data
+	_ = binary.Write(buf, binary.BigEndian, uint64(0)) // dummy data
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {

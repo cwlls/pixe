@@ -179,16 +179,16 @@ func buildFakeDNG(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -207,16 +207,16 @@ func buildFakeNEF(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -235,20 +235,20 @@ func buildFakeCR2(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (10)
-	binary.Write(buf, binary.LittleEndian, uint32(10))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(10))
 
 	// "CR" signature at offset 8
 	buf.WriteByte(0x43)
 	buf.WriteByte(0x52)
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -263,16 +263,16 @@ func buildFakeCR3(t *testing.T, dir, name string) string {
 	buf := new(bytes.Buffer)
 
 	// ftyp box: size = 20
-	binary.Write(buf, binary.BigEndian, uint32(20))
+	_ = binary.Write(buf, binary.BigEndian, uint32(20))
 	buf.WriteString("ftyp")
 	buf.WriteString("crx ")
-	binary.Write(buf, binary.BigEndian, uint32(1)) // minor version
-	buf.WriteString("crx ")                        // compat
+	_ = binary.Write(buf, binary.BigEndian, uint32(1)) // minor version
+	buf.WriteString("crx ")                            // compat
 
 	// mdat box: size = 16
-	binary.Write(buf, binary.BigEndian, uint32(16))
+	_ = binary.Write(buf, binary.BigEndian, uint32(16))
 	buf.WriteString("mdat")
-	binary.Write(buf, binary.BigEndian, uint64(0)) // dummy data
+	_ = binary.Write(buf, binary.BigEndian, uint64(0)) // dummy data
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -291,16 +291,16 @@ func buildFakePEF(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -319,16 +319,16 @@ func buildFakeARW(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {

@@ -47,7 +47,7 @@ func TestBase_HashableReader_fullFileFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -81,20 +81,20 @@ func TestBase_HashableReader_deterministic(t *testing.T) {
 		t.Fatalf("First HashableReader failed: %v", err)
 	}
 	data1, err := io.ReadAll(rc1)
-	rc1.Close()
 	if err != nil {
 		t.Fatalf("First ReadAll failed: %v", err)
 	}
+	_ = rc1.Close()
 
 	rc2, err := b.HashableReader(filePath)
 	if err != nil {
 		t.Fatalf("Second HashableReader failed: %v", err)
 	}
 	data2, err := io.ReadAll(rc2)
-	rc2.Close()
 	if err != nil {
 		t.Fatalf("Second ReadAll failed: %v", err)
 	}
+	_ = rc2.Close()
 
 	if !bytes.Equal(data1, data2) {
 		t.Fatal("HashableReader returned different data on second call")
@@ -130,7 +130,7 @@ func TestBase_HashableReader_withJPEGPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -168,16 +168,16 @@ func buildMinimalTIFF(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
@@ -204,23 +204,23 @@ func buildTIFFWithJPEGPreview(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 1 entry (pointing to IFD1)
-	binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
 
 	// IFD0 entry: SubIFDs tag (0x014A)
 	// tag(2) + type(2) + count(4) + value/offset(4)
-	binary.Write(buf, binary.LittleEndian, uint16(0x014A)) // SubIFDs tag
-	binary.Write(buf, binary.LittleEndian, uint16(4))      // type LONG
-	binary.Write(buf, binary.LittleEndian, uint32(1))      // count
-	binary.Write(buf, binary.LittleEndian, uint32(50))     // offset to IFD1
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0x014A)) // SubIFDs tag
+	_ = binary.Write(buf, binary.LittleEndian, uint16(4))      // type LONG
+	_ = binary.Write(buf, binary.LittleEndian, uint32(1))      // count
+	_ = binary.Write(buf, binary.LittleEndian, uint32(50))     // offset to IFD1
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	// Padding to reach offset 50 for IFD1
 	for buf.Len() < 50 {
@@ -228,23 +228,23 @@ func buildTIFFWithJPEGPreview(t *testing.T, dir, name string) string {
 	}
 
 	// IFD1: 2 entries (JPEG offset and length)
-	binary.Write(buf, binary.LittleEndian, uint16(2))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(2))
 
 	// Entry 1: JPEGInterchangeFormat (0x0201)
-	binary.Write(buf, binary.LittleEndian, uint16(0x0201)) // tag
-	binary.Write(buf, binary.LittleEndian, uint16(4))      // type LONG
-	binary.Write(buf, binary.LittleEndian, uint32(1))      // count
-	jpegOffset := uint32(buf.Len() + 12 + 4 + 4)           // after this entry and next IFD offset
-	binary.Write(buf, binary.LittleEndian, jpegOffset)
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0x0201)) // tag
+	_ = binary.Write(buf, binary.LittleEndian, uint16(4))      // type LONG
+	_ = binary.Write(buf, binary.LittleEndian, uint32(1))      // count
+	jpegOffset := uint32(buf.Len() + 12 + 4 + 4)               // after this entry and next IFD offset
+	_ = binary.Write(buf, binary.LittleEndian, jpegOffset)
 
 	// Entry 2: JPEGInterchangeFormatLength (0x0202)
-	binary.Write(buf, binary.LittleEndian, uint16(0x0202)) // tag
-	binary.Write(buf, binary.LittleEndian, uint16(4))      // type LONG
-	binary.Write(buf, binary.LittleEndian, uint32(1))      // count
-	binary.Write(buf, binary.LittleEndian, uint32(len(jpegData)))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0x0202)) // tag
+	_ = binary.Write(buf, binary.LittleEndian, uint16(4))      // type LONG
+	_ = binary.Write(buf, binary.LittleEndian, uint32(1))      // count
+	_ = binary.Write(buf, binary.LittleEndian, uint32(len(jpegData)))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	// Append JPEG data
 	buf.Write(jpegData)

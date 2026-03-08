@@ -130,7 +130,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashableReader failed: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
@@ -154,20 +154,20 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 		t.Fatalf("First HashableReader failed: %v", err)
 	}
 	data1, err := io.ReadAll(rc1)
-	rc1.Close()
 	if err != nil {
 		t.Fatalf("First ReadAll failed: %v", err)
 	}
+	_ = rc1.Close()
 
 	rc2, err := h.HashableReader(filePath)
 	if err != nil {
 		t.Fatalf("Second HashableReader failed: %v", err)
 	}
 	data2, err := io.ReadAll(rc2)
-	rc2.Close()
 	if err != nil {
 		t.Fatalf("Second ReadAll failed: %v", err)
 	}
+	_ = rc2.Close()
 
 	if !bytes.Equal(data1, data2) {
 		t.Fatal("HashableReader returned different data on second call")
@@ -193,16 +193,16 @@ func buildFakeDNG(t *testing.T, dir, name string) string {
 	buf.WriteByte(0x49)
 
 	// TIFF magic (42 in LE)
-	binary.Write(buf, binary.LittleEndian, uint16(42))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(42))
 
 	// IFD0 offset (8)
-	binary.Write(buf, binary.LittleEndian, uint32(8))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(8))
 
 	// IFD0: 0 entries
-	binary.Write(buf, binary.LittleEndian, uint16(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(0))
 
 	// Next IFD offset (0 = end)
-	binary.Write(buf, binary.LittleEndian, uint32(0))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0))
 
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {

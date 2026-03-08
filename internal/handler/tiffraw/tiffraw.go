@@ -388,13 +388,3 @@ func readUint32Array(r io.ReadSeeker, order binary.ByteOrder, typ uint16, cnt ui
 	}
 	return result
 }
-
-// fileExt returns the file extension including the leading dot, or "".
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
-}
