@@ -4,6 +4,960 @@
 
 ---
 
+## Task 1 — Project Scaffold & Go Module Init
+
+### Implementation Summary
+- Initialized module path and dependencies Go module with proper.
+- Created directory layout following Go best practices: `cmd/`, `internal/`, `pkg/`.
+- Set up Cobra for CLI command structure and Viper for configuration management.
+- Added initial dependencies: github.com/spf13/cobra, github.com/spf13/viper.
+
+### Key Features
+- **Go Module**: Properly initialized with module path and version-aware builds.
+- **Directory Structure**: cmd/, internal/, pkg/ layout for clean architecture.
+- **CLI Bootstrap**: Cobra command structure with Viper configuration binding.
+
+### Dependencies
+- github.com/spf13/cobra
+- github.com/spf13/viper
+
+### Validation
+- go build ./... compiles successfully.
+- Initial commands are stubbed and ready for implementation.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Initial commit]
+
+---
+
+## Task 2 — Core Domain Types & Interfaces
+
+### Implementation Summary
+- Defined FileTypeHandler contract interface in internal/domain/.
+- Created pipeline types (SortOptions, SortResult, FileStatus).
+- Set up configuration structs (AppConfig, HasherConfig).
+
+### Key Features
+- **FileTypeHandler Interface**: Contract for all file type handlers with ExtractDate, HashableReader, MagicBytes, Detect, WriteMetadataTags.
+- **Pipeline Types**: SortOptions, SortResult, FileStatus enum.
+- **Config Structs**: AppConfig, HasherConfig for runtime configuration.
+
+### Dependencies
+- Task 1
+
+### Validation
+- Interface contract defined and satisfied by all handlers.
+- go build ./... compiles successfully.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 3 — Hashing Engine
+
+### Implementation Summary
+- Implemented configurable hash.Hash factory supporting multiple algorithms.
+- Created streaming io.Reader consumer for memory-efficient hashing.
+- Added support for MD5, SHA1, SHA256 algorithms.
+
+### Key Features
+- **Configurable Hash Factory**: Creates hash.Hash from algorithm name.
+- **Streaming Consumer**: Reads io.Reader in chunks for memory efficiency.
+- **Algorithm Support**: MD5, SHA1, SHA256.
+
+### Dependencies
+- Task 2
+
+### Validation
+- Hash output matches standard tools (openssl, shasum).
+- Memory usage bounded regardless of file size.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 4 — Manifest & Ledger Persistence
+
+### Implementation Summary
+- Implemented JSON read/write for manifest and ledger files.
+- Added atomic saves using rename-after-write pattern.
+- Created per-file state tracking with ManifestEntry.
+
+### Key Features
+- **JSON Persistence**: manifest.json and ledger files in JSON format.
+- **Atomic Saves**: Write to temp file, then rename for atomicity.
+- **Per-File State**: Track status, checksum, timestamps per file.
+
+### Dependencies
+- Task 2
+
+### Validation
+- Manifest survives crash mid-write (atomic rename).
+- Ledger correctly tracks all files.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 5 — File Discovery & Handler Registry
+
+### Implementation Summary
+- Implemented directory walker for dirA (source photos).
+- Created extension matching for file type detection.
+- Added magic-byte verification for robust detection.
+- Configured skip of dotfiles (hidden files).
+
+### Key Features
+- **Directory Walker**: Recursively walks source directory.
+- **Extension Match**: Fast-path extension-based detection.
+- **Magic Bytes**: Verifies file header matches expected type.
+- **Dotfile Skip**: Ignores files starting with '.'.
+
+### Dependencies
+- Task 2
+
+### Validation
+- All test fixtures discovered correctly.
+- Dotfiles correctly skipped.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 6 — Path Builder (Naming & Dedup)
+
+### Implementation Summary
+- Implemented deterministic output path generation.
+- Created duplicate routing to duplicates/ directory.
+- Added conflict resolution for same-timestamp files.
+
+### Key Features
+- **Deterministic Paths**: YYYY/MM/YYYYMMDD_HHMMSS_<checksum>.<ext>.
+- **Duplicate Routing**: Files with same checksum go to duplicates/.
+- **Conflict Resolution**: Numeric suffix for timestamp collisions.
+
+### Dependencies
+- Task 2, Task 3
+
+### Validation
+- Same input always produces same output path.
+- Duplicates correctly routed.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 7 — JPEG Filetype Module
+
+### Implementation Summary
+- Implemented first concrete FileTypeHandler for JPEG.
+- Proved the handler contract works end-to-end.
+- Added EXIF date extraction, embedded thumbnail hashing.
+
+### Key Features
+- **ExtractDate**: Reads DateTimeOriginal from EXIF, falls back to DateTime.
+- **HashableReader**: Returns embedded thumbnail or full file.
+- **MagicBytes**: JPEG SOI marker (0xFF 0xD8).
+- **WriteMetadataTags**: Writes EXIF tags to file.
+
+### Dependencies
+- Task 2, Task 3
+
+### Validation
+- JPEG files correctly identified and processed.
+- Dates extracted correctly from EXIF.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 8 — Copy & Verify Engine
+
+### Implementation Summary
+- Implemented streamed copy using io.Copy.
+- Added post-copy re-hash for verification.
+- Updated manifest after each file completes.
+
+### Key Features
+- **Streamed Copy**: Memory-efficient file duplication.
+- **Post-Copy Verify**: Re-hashes destination to confirm integrity.
+- **Manifest Updates**: Atomic save after each file.
+
+### Dependencies
+- Task 3, Task 4, Task 6
+
+### Validation
+- Copy verification passes for all file sizes.
+- Manifest accurately reflects file state.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 9 — Sort Pipeline Orchestrator
+
+### Implementation Summary
+- Implemented single-threaded pipeline: discover → extract → hash → copy → verify.
+- Orchestrates all components into a cohesive sort operation.
+- Returns SortResult with statistics.
+
+### Key Features
+- **Sequential Pipeline**: Discover, extract, hash, copy, verify in order.
+- **Result Tracking**: Returns counts of processed, skipped, errors.
+- **Error Handling**: Continues on per-file errors, reports at end.
+
+### Dependencies
+- Task 5, Task 7, Task 8
+
+### Validation
+- Full pipeline passes end-to-end.
+- All file states correctly tracked.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 10 — CLI: `pixe sort` Command
+
+### Implementation Summary
+- Implemented Cobra command for pixe sort.
+- Bound Viper flags for all configuration options.
+- Added dry-run mode support.
+
+### Key Features
+- **Cobra Command**: pixe sort with proper help text.
+- **Flag Binding**: --source, --dest, --algorithm, --dry-run, etc.
+- **Dry Run**: Reports what would happen without copying.
+
+### Dependencies
+- Task 9
+
+### Validation
+- CLI parses flags correctly.
+- Dry-run shows intended actions.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 11 — Worker Pool & Concurrency
+
+### Implementation Summary
+- Implemented coordinator + N workers pattern.
+- Made worker count configurable via --workers flag.
+- Added concurrent file processing.
+
+### Key Features
+- **Worker Pool**: Configurable number of concurrent workers.
+- **Coordinator**: Distributes work, collects results.
+- **Configurable**: --workers flag controls parallelism.
+
+### Dependencies
+- Task 9
+
+### Validation
+- Multiple workers process files in parallel.
+- Race-free with go test -race.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 12 — HEIC Filetype Module
+
+### Implementation Summary
+- Implemented HEIC handler as second concrete handler.
+- Validated FileTypeHandler contract generality.
+- Uses ISOBMFF container parsing for date extraction.
+
+### Key Features
+- **ExtractDate**: Parses HEIC container for EXIF.
+- **HashableReader**: Extracts embedded JPEG preview.
+- **MagicBytes**: 'ftyp' box at offset 4.
+- **WriteMetadataTags**: No-op for HEIC.
+
+### Dependencies
+- Task 7
+
+### Validation
+- HEIC files correctly processed.
+- Contract generality proven.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 13 — MP4 Filetype Module
+
+### Implementation Summary
+- Implemented MP4 handler for video files.
+- Added video keyframe hashing for efficient deduplication.
+- Third handler validates contract.
+
+### Key Features
+- **ExtractDate**: Parses QuickTime/MP4 container for creation date.
+- **HashableReader**: Extracts keyframe for hashing.
+- **MagicBytes**: 'ftyp' box at offset 4 (different brand).
+- **WriteMetadataTags**: No-op for video.
+
+### Dependencies
+- Task 7
+
+### Validation
+- MP4 files correctly identified and processed.
+- Video hashing works correctly.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 14 — Metadata Tagging Engine
+
+### Implementation Summary
+- Implemented copyright template system.
+- Added CameraOwner injection after verify.
+- Created tagging interface for handlers.
+
+### Key Features
+- **Copyright Template**: Configurable copyright string.
+- **Camera Owner**: Injects camera owner from config.
+- **Handler Support**: WriteMetadataTags called post-verify.
+
+### Dependencies
+- Task 7, Task 8
+
+### Validation
+- Tags written to supported formats.
+- Unsupported formats gracefully no-op.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 15 — CLI: `pixe verify` Command
+
+### Implementation Summary
+- Implemented verify command to check archive integrity.
+- Parses filename checksum and compares with actual file hash.
+- Reports mismatches to user.
+
+### Key Features
+- **Walk dirB**: Discovers all files in archive.
+- **Parse Checksum**: Extracts checksum from filename.
+- **Report**: Lists files with mismatches or missing.
+
+### Dependencies
+- Task 3, Task 5, Task 10
+
+### Validation
+- Correctly identifies corrupted files.
+- Correctly identifies missing files.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 16 — CLI: `pixe resume` Command
+
+### Implementation Summary
+- Implemented resume to continue interrupted sorts.
+- Loads manifest, skips completed files.
+- Re-enters pipeline at correct stage.
+
+### Key Features
+- **Manifest Load**: Reads existing manifest state.
+- **Skip Completed**: Files already complete are skipped.
+- **Resume Pipeline**: Continues from pending files.
+
+### Dependencies
+- Task 4, Task 9, Task 10
+
+### Validation
+- Interrupted sort resumes correctly.
+- Completed files not re-processed.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 17 — Integration Tests & Safety Audit
+
+### Implementation Summary
+- Implemented end-to-end tests with fixture files.
+- Added interrupt simulation testing.
+- Validated safety of all operations.
+
+### Key Features
+- **Fixture Tests**: Real files processed end-to-end.
+- **Interrupt Simulation**: Ctrl+C handling tested.
+- **Safety Audit**: Verified no data loss scenarios.
+
+### Dependencies
+- Task 10, Task 15, Task 16
+
+### Validation
+- All integration tests pass.
+- go test -race passes without data races.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 18 — Makefile & Build Tooling
+
+### Implementation Summary
+- Created Makefile with help, build, test, lint, check, install targets.
+- Added ldflags version injection for build info.
+
+### Key Features
+- **help**: Displays available targets.
+- **build**: Compiles pixe binary.
+- **test**: Runs tests with race detector.
+- **lint**: Runs golangci-lint.
+- **install**: Installs to $GOPATH/bin.
+- **Version Injection**: ldflags -X for version vars.
+
+### Dependencies
+- Task 1
+
+### Validation
+- All Makefile targets work.
+- Version correctly injected at build time.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 21 — Domain Structs — Add `PixeVersion` Field
+
+### Implementation Summary
+- Added PixeVersion field to Manifest and Ledger domain structs.
+- Populated at runtime from version package.
+
+### Key Features
+- **Manifest Field**: Records pixe version that created the manifest.
+- **Ledger Field**: Records pixe version in ledger file.
+- **Runtime Population**: Filled when creating new manifest/ledger.
+
+### Dependencies
+- Task 19
+
+### Validation
+- Version field present in JSON output.
+- go build ./... compiles successfully.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 25 — Lint Fixes — golangci-lint 0 Issues
+
+### Implementation Summary
+- Fixed 30+ errcheck and unused lint violations across multiple packages.
+- Installed golangci-lint for ongoing linting.
+
+### Key Files Modified
+- internal/copy/copy.go
+- internal/discovery/discovery.go
+- internal/handler/heic/heic.go
+- internal/handler/jpeg/jpeg.go
+- internal/handler/mp4/mp4.go
+- internal/verify/verify.go
+- internal/hash/hash.go
+- internal/manifest/manifest.go
+- internal/pipeline/pipeline.go
+
+### Key Features
+- **Errcheck Fixes**: Added error handling for ignored returns.
+- **Unused Fixes**: Removed unused variables and imports.
+- **golangci-lint**: Installed and configured.
+
+### Dependencies
+- Tasks 1–24
+
+### Validation
+- make lint reports 0 issues.
+- go build ./... compiles cleanly.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 26 — Locale-Aware Month Directory — `pathbuilder` Rewrite
+
+### Implementation Summary
+- Changed month directory format from numeric (2) to locale-aware (02-Feb).
+- Added MonthDir() helper function for consistent formatting.
+- Updated all path building to use new format.
+
+### Key Features
+- **Month Format**: Changed from "2" to "02-Feb".
+- **MonthDir() Helper**: Consistent month directory name generation.
+- **Locale-Aware**: Uses English month abbreviations.
+
+### Dependencies
+- Task 6
+
+### Validation
+- Month directories created in correct format.
+- Existing tests updated for new format.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 27 — Update Tests — Month Directory Format
+
+### Implementation Summary
+- Rewrote pathbuilder tests for MM-Mon format.
+- Updated pipeline tests to expect new format.
+- Updated integration tests accordingly.
+
+### Key Features
+- **Pathbuilder Tests**: Expect "02-Feb" not "2".
+- **Pipeline Tests**: Verify output in new format.
+- **Integration Tests**: End-to-end with new format.
+
+### Dependencies
+- Task 26
+
+### Validation
+- go test ./... passes.
+- All test expectations match new format.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 28 — Tests & Verification — Full Suite Green
+
+### Implementation Summary
+- Verified go vet, go test -race, and make lint all pass.
+- Full test suite green after lint fixes and month format updates.
+
+### Verification Results
+```
+go vet ./...                    ✅ PASS
+go test -race ./...             ✅ PASS
+make lint                       ✅ PASS (0 issues)
+```
+
+### Dependencies
+- Task 26, Task 27
+
+### Validation
+- All packages pass tests.
+- No race conditions detected.
+- Lint passes with 0 issues.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 30 — Archive DB — Run & File CRUD Operations
+
+### Implementation Summary
+- Implemented InsertRun, UpdateRun for run management.
+- Implemented InsertFile, UpdateFile for file record management.
+- Added dedup query for duplicate detection.
+- Implemented batch insert for efficient bulk operations.
+
+### Key Features
+- **Run CRUD**: Create, update, complete, interrupt runs.
+- **File CRUD**: Insert, update status, track timestamps.
+- **Dedup Query**: Check if checksum already exists.
+- **Batch Insert**: Efficiently insert multiple files.
+
+### Dependencies
+- Task 29
+
+### Validation
+- All CRUD operations work correctly.
+- Dedup query returns correct results.
+- Batch insert maintains data integrity.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 32 — DB Location Resolver — `internal/dblocator` Package
+
+### Implementation Summary
+- Implemented database location resolution: --db-path → dbpath marker → local default.
+- Added network mount detection for automatic fallback.
+- Implemented slug generation for fallback path naming.
+
+### Key Features
+- **Priority Chain**: Explicit path > marker file > default location.
+- **Network Detection**: Detects NFS, SMB, AFP mounts.
+- **Slug Generation**: Creates human-readable identifiers.
+- **Marker File**: Stores custom DB path for future runs.
+
+### Dependencies
+- Task 29
+
+### Validation
+- Resolution follows correct priority.
+- Network detection works on darwin.
+- Slug generation is deterministic.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 33 — Domain Types — SQLite-Era Updates
+
+### Implementation Summary
+- Added RunID field to Ledger struct.
+- Bumped ledger version to 2.
+- Added DBPath field to AppConfig.
+
+### Key Changes
+- **Ledger.RunID**: UUID linking to archive DB (JSON tag "run_id").
+- **Ledger.Version**: Bumped from 1 to 2.
+- **AppConfig.DBPath**: Explicit DB path option.
+
+### Dependencies
+- Task 2, Task 29
+
+### Validation
+- JSON serialization correct.
+- go build ./... succeeds.
+- Existing tests pass unchanged.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 34 — JSON Manifest Migration — `internal/migrate` Package
+
+### Implementation Summary
+- Implemented automatic migration from JSON manifest to SQLite.
+- Creates synthetic run from manifest metadata.
+- Imports all file entries into database.
+- Renames manifest.json to .migrated after success.
+
+### Key Features
+- **Auto-Detection**: Checks for manifest.json in dirB/.pixe/.
+- **Synthetic Run**: Creates run record from manifest metadata.
+- **Field Mapping**: Maps ManifestEntry to FileRecord.
+- **Idempotent**: Skips if .migrated file exists.
+
+### Dependencies
+- Task 29, Task 30
+
+### Validation
+- Migration preserves all data.
+- Idempotent operation verified.
+- Notice message shows file count.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 35 — Pipeline Refactor — Replace JSON Manifest with Archive DB
+
+### Implementation Summary
+- Rewrote pipeline.go and worker.go to use archivedb.DB.
+- Replaced manifest.Save/Load with database operations.
+- Implemented DB-based status tracking instead of JSON.
+- Created run record with status tracking.
+
+### Key Changes
+- **SortOptions.DB**: New DB field for database reference.
+- **SortOptions.RunID**: New RunID field for run linking.
+- **db.InsertRun()**: Creates run with status="running".
+- **db.InsertFiles()**: Batch insert as "pending".
+- **db.UpdateFileStatus()**: Updates after each stage.
+- **db.CompleteRun()**: Marks run complete at end.
+
+### Dependencies
+- Task 29, Task 30, Task 32, Task 33
+
+### Validation
+- Pipeline creates run in DB.
+- File status tracked correctly.
+- Ledger written with RunID.
+- go build ./... succeeds.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 44 — Version Vars & Command — Collapse into `cmd`
+
+### Implementation Summary
+- Moved version variables and functions into cmd/version.go.
+- Eliminated internal/version package.
+- Rewrote pixe version command to use new location.
+
+### Key Changes
+- **cmd/version.go**: Contains version, commit, buildDate variables.
+- **fullVersion()**: Returns formatted version string.
+- **Version()**: Getter for version variable.
+- **init()**: Sets values from ldflags.
+
+### Dependencies
+- None
+
+### Validation
+- go build ./... compiles.
+- ./pixe version shows correct output.
+- Version vars set at build time.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 45 — Delete `internal/version` Package
+
+### Implementation Summary
+- Removed internal/version/version.go.
+- Removed internal/version/version_test.go.
+- Updated any stale imports.
+
+### Key Changes
+- **Deleted**: internal/version/version.go
+- **Deleted**: internal/version/version_test.go
+- **Updated**: Removed imports from any dependent files.
+
+### Dependencies
+- Task 44, Task 46
+
+### Validation
+- go build ./... succeeds.
+- No references to internal/version remain.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 46 — Pipeline — Switch to `cmd.Version()`
+
+### Implementation Summary
+- Replaced version.Version with cmd.Version() in pipeline.go.
+- Replaced version.Version with cmd.Version() in worker.go.
+- Pipeline now reads version from cmd package.
+
+### Dependencies
+- Task 44
+
+### Validation
+- Manifest shows correct version.
+- Ledger shows correct version.
+- go build ./... succeeds.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 47 — Makefile — Delegate to GoReleaser
+
+### Implementation Summary
+- Rewrote build and install targets to use goreleaser.
+- Added --single-target --snapshot flags for development builds.
+- Kept build-debug as raw go build for debugging.
+
+### Key Changes
+- **build target**: Uses goreleaser build --single-target --snapshot.
+- **install target**: Uses goreleaser build --single-target.
+- **build-debug target**: Raw go build for debugging.
+
+### Dependencies
+- Task 44
+
+### Validation
+- make build produces correct binary.
+- Version info embedded correctly.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 48 — GoReleaser — Fix ldflags Target
+
+### Implementation Summary
+- Retargeted ldflags from internal/version.* to cmd.* variables.
+- Updated .goreleaser.yaml for new variable paths.
+
+### Key Changes
+- **cmd.version**: Set via -X flag.
+- **cmd.commit**: Set via -X flag.
+- **cmd.buildDate**: Set via -X flag.
+
+### Dependencies
+- Task 44
+
+### Validation
+- Binary shows correct version.
+- goreleaser build succeeds.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
+## Task 49 — Tests & Verification — Version Refactor
+
+### Implementation Summary
+- Deleted version_test.go from internal/version.
+- Updated manifest test fixtures for new format.
+- Verified all tests and build work.
+
+### Verification Results
+```
+go vet ./...                    ✅ PASS
+go test -race ./...             ✅ PASS
+make build                      ✅ PASS
+./pixe version                  ✅ Shows version
+```
+
+### Dependencies
+- Task 44, Task 45, Task 46, Task 47, Task 48
+
+### Validation
+- All tests pass.
+- Version command works.
+- Build succeeds.
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [Commit]
+
+---
+
 ## Task 29 — Archive DB — `internal/archivedb` Package & Schema
 
 ### Implementation Summary
