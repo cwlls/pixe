@@ -141,7 +141,7 @@ func Run(opts SortOptions) (SortResult, error) {
 	// 4. Process files (sequential or concurrent).
 	// ------------------------------------------------------------------
 	ledger := &domain.Ledger{
-		Version:     1,
+		Version:     2,
 		PixeVersion: opts.PixeVersion,
 		RunID:       opts.RunID,
 		PixeRun:     startedAt,

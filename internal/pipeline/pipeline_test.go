@@ -262,6 +262,38 @@ func TestRun_ledgerWritten(t *testing.T) {
 	}
 }
 
+func TestRun_ledgerVersion2WithRunID(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, "with_exif_date.jpg")
+
+	const wantRunID = "test-run-id-12345"
+	var out bytes.Buffer
+	cfg := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1"}
+	opts := newOpts(t, cfg, &out)
+	opts.RunID = wantRunID
+
+	_, err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	l, err := manifest.LoadLedger(dirA)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if l == nil {
+		t.Fatal("ledger not written to dirA")
+	}
+	if l.Version != 2 {
+		t.Errorf("ledger.Version = %d, want 2", l.Version)
+	}
+	if l.RunID != wantRunID {
+		t.Errorf("ledger.RunID = %q, want %q", l.RunID, wantRunID)
+	}
+}
+
 func TestRun_sourceUntouched(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()

@@ -125,3 +125,38 @@
 2026-03-07 | 1dea7b94418a5afa359d2f952bbfcde5a7d133fa
 
 ---
+
+## Task 38 — Ledger Update — Add `run_id` Field
+
+### Implementation Summary
+- Updated `internal/pipeline/pipeline.go` to wire run UUID into ledger creation (line 143).
+- Bumped ledger `Version` from `1` to `2` in the single ledger construction site.
+- `RunID: opts.RunID` was already present from Task 35; now paired with `Version: 2`.
+- Added comprehensive test `TestRun_ledgerVersion2WithRunID` to verify version and run ID in the ledger.
+
+### Key Features
+- **Ledger Version 2**: All new runs now create ledgers with `version: 2` and a UUID in the `run_id` field.
+- **Run ID Linkage**: The `run_id` in the ledger matches the run ID in the archive database, enabling cross-referencing.
+- **Backward Compatibility**: Existing v1 ledgers (without `run_id`) still load correctly via `manifest.LoadLedger()`.
+
+### Test Results
+- `go vet ./...` — PASS (zero warnings)
+- `go build ./...` — PASS (clean compilation)
+- `go test -race ./...` — all 15 packages PASS
+- Smoke test: `dirA/.pixe_ledger.json` shows `"version": 2` and a real UUID in `"run_id"`
+- Backward compatibility: v1 ledgers (no `run_id`) still load correctly
+
+### Validation
+- Validated by @tester (Pass)
+- All acceptance criteria met:
+  - After a `pixe sort` run, `dirA/.pixe_ledger.json` contains `"version": 2` and `"run_id": "<uuid>"`
+  - The `run_id` in the ledger matches the run ID in the archive database
+  - Existing ledger loading still works with v1 ledgers (the `RunID` field is simply empty)
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | 2d78c3c
+
+---

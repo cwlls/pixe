@@ -39,7 +39,7 @@
 | 35 | Pipeline Refactor — Replace JSON manifest with archive DB | High | @developer | ✅ Complete | 29, 30, 32, 33 | Rewrite pipeline.go and worker.go to use archivedb instead of manifest.Save/Load |
 | 36 | Pipeline — Cross-process dedup race handling | Medium | @developer | 🔲 Pending | 35 | Post-commit dedup re-check, retroactive duplicate routing |
 | 37 | CLI Updates — `--db-path` flag & resume rewrite | High | @developer | ✅ Complete | 32, 35 | Add --db-path to sort/resume, update resume to use DB discovery chain |
-| 38 | Ledger Update — Add `run_id` field | Medium | @developer | 🔲 Pending | 33, 35 | Wire run UUID into ledger creation, bump version to 2 |
+| 38 | Ledger Update — Add `run_id` field | Medium | @developer | ✅ Complete | 33, 35 | Wire run UUID into ledger creation, bump version to 2 |
 | 39 | Archive DB — Unit tests | High | @tester | 🔲 Pending | 29, 30, 31 | Schema creation, CRUD, queries, WAL concurrency, busy retry |
 | 40 | DB Locator — Unit tests | High | @tester | 🔲 Pending | 32 | Local/network detection, slug generation, dbpath marker read/write |
 | 41 | Migration — Unit tests | High | @tester | 🔲 Pending | 34 | JSON→SQLite migration, idempotency, synthetic run correctness |
@@ -494,51 +494,6 @@ This method runs within a single transaction:
 - The physical file is moved (renamed) to the duplicates directory.
 - The DB record reflects `is_duplicate = 1` and the updated destination path.
 - The operation is atomic — no window where both files appear as non-duplicates.
-
----
-
-## Task 38 — Ledger Update — Add `run_id` Field
-
-**Goal:** Wire the run UUID into ledger creation and bump the ledger version to 2.
-
-**Architecture Reference:** Section 8.8 (Ledger v2)
-
-**Depends on:** Task 33, Task 35
-
-### Files to modify
-
-#### 1. `internal/pipeline/pipeline.go` — Ledger creation
-
-```go
-// BEFORE:
-ledger := &domain.Ledger{
-    Version:     1,
-    PixeVersion: version.Version,
-    PixeRun:     startedAt,
-    Algorithm:   cfg.Algorithm,
-    Destination: cfg.Destination,
-}
-
-// AFTER:
-ledger := &domain.Ledger{
-    Version:     2,
-    PixeVersion: version.Version,
-    RunID:       opts.RunID,
-    PixeRun:     startedAt,
-    Algorithm:   cfg.Algorithm,
-    Destination: cfg.Destination,
-}
-```
-
-#### 2. `internal/pipeline/worker.go` — Same change in all ledger creation sites
-
-Update all 2-3 locations where `domain.Ledger` is constructed to include `RunID: opts.RunID` and `Version: 2`.
-
-**Acceptance Criteria:**
-- After a `pixe sort` run, `dirA/.pixe_ledger.json` contains `"version": 2` and `"run_id": "<uuid>"`.
-- The `run_id` in the ledger matches the run ID in the archive database.
-- `SELECT * FROM files WHERE run_id = '<ledger_run_id>'` returns the same files listed in the ledger.
-- Existing ledger loading (`manifest.LoadLedger`) still works with v1 ledgers (the `RunID` field is simply empty).
 
 ---
 
