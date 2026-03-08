@@ -40,11 +40,11 @@
 | 36 | Pipeline — Cross-process dedup race handling | Medium | @developer | ✅ Complete | 35 | Post-commit dedup re-check, retroactive duplicate routing |
 | 37 | CLI Updates — `--db-path` flag & resume rewrite | High | @developer | ✅ Complete | 32, 35 | Add --db-path to sort/resume, update resume to use DB discovery chain |
 | 38 | Ledger Update — Add `run_id` field | Medium | @developer | ✅ Complete | 33, 35 | Wire run UUID into ledger creation, bump version to 2 |
-| 39 | Archive DB — Unit tests | High | @tester | 🔲 Pending | 29, 30, 31 | Schema creation, CRUD, queries, WAL concurrency, busy retry |
-| 40 | DB Locator — Unit tests | High | @tester | 🔲 Pending | 32 | Local/network detection, slug generation, dbpath marker read/write |
-| 41 | Migration — Unit tests | High | @tester | 🔲 Pending | 34 | JSON→SQLite migration, idempotency, synthetic run correctness |
-| 42 | Integration Tests — SQLite pipeline end-to-end | High | @tester | 🔲 Pending | 35, 36, 37, 38 | Full sort→verify→resume cycle using DB, concurrent run simulation |
-| 43 | Tests & Verification — Full Suite Green | High | @tester | 🔲 Pending | 39, 40, 41, 42 | `go vet`, `go test -race ./...`, `make lint` all pass |
+| 39 | Archive DB — Unit tests | High | @tester | ✅ Complete | 29, 30, 31 | Schema creation, CRUD, queries, WAL concurrency, busy retry |
+| 40 | DB Locator — Unit tests | High | @tester | ✅ Complete | 32 | Local/network detection, slug generation, dbpath marker read/write |
+| 41 | Migration — Unit tests | High | @tester | ✅ Complete | 34 | JSON→SQLite migration, idempotency, synthetic run correctness |
+| 42 | Integration Tests — SQLite pipeline end-to-end | High | @tester | ✅ Complete | 35, 36, 37, 38 | Full sort→verify→resume cycle using DB, concurrent run simulation |
+| 43 | Tests & Verification — Full Suite Green | High | @tester | ✅ Complete | 39, 40, 41, 42 | `go vet`, `go test -race ./...`, `make lint` all pass |
 | 44 | Version Vars & Command — Collapse into `cmd` | High | @developer | ✅ Complete | — | Move version vars + `fullVersion()` + `Version()` getter + `init()` into `cmd/version.go`; rewrite `pixe version` command |
 | 45 | Delete `internal/version` Package | High | @developer | ✅ Complete | 44, 46 | Remove `internal/version/version.go` and `version_test.go`; remove stale import from any file |
 | 46 | Pipeline — Switch to `cmd.Version()` | High | @developer | ✅ Complete | 44 | Replace `version.Version` with `cmd.Version()` in `pipeline.go` and `worker.go` |

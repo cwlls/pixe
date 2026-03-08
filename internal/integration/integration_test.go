@@ -26,12 +26,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/text/language"
 
+	"github.com/cwlls/pixe-go/internal/archivedb"
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
+	"github.com/cwlls/pixe-go/internal/domain"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 	"github.com/cwlls/pixe-go/internal/pipeline"
 	"github.com/cwlls/pixe-go/internal/verify"
@@ -385,5 +389,307 @@ func TestIntegration_DryRun(t *testing.T) {
 	ledgerPath := filepath.Join(dirA, ".pixe_ledger.json")
 	if _, err := os.Stat(ledgerPath); err == nil {
 		t.Error("dry-run should not write .pixe_ledger.json to dirA")
+	}
+}
+
+// --- SQLite Integration Tests (Task 42) ---
+
+// buildOptsWithDB constructs SortOptions wired to a real archivedb.DB.
+func buildOptsWithDB(t *testing.T, dirA, dirB string, dryRun bool) (pipeline.SortOptions, *archivedb.DB) {
+	t.Helper()
+	dbPath := filepath.Join(dirB, ".pixe", "pixe.db")
+	db, err := archivedb.Open(dbPath)
+	if err != nil {
+		t.Fatalf("archivedb.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	runID := uuid.New().String()
+	opts := buildOpts(t, dirA, dirB, dryRun)
+	opts.DB = db
+	opts.RunID = runID
+	return opts, db
+}
+
+// loadLedger loads the ledger from dirA/.pixe_ledger.json.
+func loadLedger(t *testing.T, dirA string) *domain.Ledger {
+	t.Helper()
+	l, err := manifest.LoadLedger(dirA)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if l == nil {
+		t.Fatal("ledger not written to dirA")
+	}
+	return l
+}
+
+// TestIntegration_SQLite_FullSort verifies a complete sort with DB persistence.
+func TestIntegration_SQLite_FullSort(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
+
+	opts, db := buildOptsWithDB(t, dirA, dirB, false)
+	result, err := pipeline.Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Processed != 2 {
+		t.Errorf("Processed = %d, want 2", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Verify DB file exists.
+	dbPath := filepath.Join(dirB, ".pixe", "pixe.db")
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Errorf("DB file not created at %q: %v", dbPath, err)
+	}
+
+	// Verify run record exists with status "completed".
+	runs, err := db.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("ListRuns returned %d runs, want 1", len(runs))
+	}
+	if runs[0].Status != "completed" {
+		t.Errorf("run status = %q, want %q", runs[0].Status, "completed")
+	}
+	if runs[0].FileCount != 2 {
+		t.Errorf("run FileCount = %d, want 2", runs[0].FileCount)
+	}
+
+	// Verify files in DB have status "complete".
+	files, err := db.GetFilesByRun(opts.RunID)
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("GetFilesByRun returned %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if f.Status != "complete" {
+			t.Errorf("file status = %q, want %q", f.Status, "complete")
+		}
+	}
+
+	// Verify ledger has version 2 and run_id.
+	ledger := loadLedger(t, dirA)
+	if ledger.Version != 2 {
+		t.Errorf("ledger Version = %d, want 2", ledger.Version)
+	}
+	if ledger.RunID != opts.RunID {
+		t.Errorf("ledger RunID = %q, want %q", ledger.RunID, opts.RunID)
+	}
+}
+
+// TestIntegration_SQLite_DuplicateRouting verifies duplicate detection with DB.
+func TestIntegration_SQLite_DuplicateRouting(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001_copy.jpg") // identical content
+
+	opts, db := buildOptsWithDB(t, dirA, dirB, false)
+	result, err := pipeline.Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", result.Duplicates)
+	}
+
+	// Verify DB has 1 duplicate.
+	dups, err := db.AllDuplicates()
+	if err != nil {
+		t.Fatalf("AllDuplicates: %v", err)
+	}
+	if len(dups) != 1 {
+		t.Errorf("AllDuplicates returned %d files, want 1", len(dups))
+	}
+	if !dups[0].IsDuplicate {
+		t.Error("duplicate file IsDuplicate = false, want true")
+	}
+
+	// Verify CheckDuplicate returns the original destination.
+	if dups[0].Checksum == nil {
+		t.Fatal("duplicate file Checksum is nil")
+	}
+	destRel, err := db.CheckDuplicate(*dups[0].Checksum)
+	if err != nil {
+		t.Fatalf("CheckDuplicate: %v", err)
+	}
+	if destRel == "" {
+		t.Error("CheckDuplicate returned empty string, want non-empty")
+	}
+}
+
+// TestIntegration_SQLite_MultiSource verifies multiple runs into the same DB.
+func TestIntegration_SQLite_MultiSource(t *testing.T) {
+	dirA1 := t.TempDir()
+	dirA2 := t.TempDir()
+	dirB := t.TempDir()
+
+	// First run: 1 file from dirA1.
+	copyFixture(t, dirA1, fixtureExif1, "IMG_0001.jpg")
+	opts1, db := buildOptsWithDB(t, dirA1, dirB, false)
+	result1, err := pipeline.Run(opts1)
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if result1.Processed != 1 {
+		t.Errorf("first run Processed = %d, want 1", result1.Processed)
+	}
+
+	// Second run: 1 file from dirA2 into the same dirB.
+	copyFixture(t, dirA2, fixtureExif2, "IMG_0002.jpg")
+	opts2, _ := buildOptsWithDB(t, dirA2, dirB, false)
+	result2, err := pipeline.Run(opts2)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if result2.Processed != 1 {
+		t.Errorf("second run Processed = %d, want 1", result2.Processed)
+	}
+
+	// Verify DB has 2 runs.
+	runs, err := db.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("ListRuns returned %d runs, want 2", len(runs))
+	}
+
+	// Verify total file count across both runs.
+	totalFiles := 0
+	for _, run := range runs {
+		totalFiles += run.FileCount
+	}
+	if totalFiles != 2 {
+		t.Errorf("total file count = %d, want 2", totalFiles)
+	}
+}
+
+// TestIntegration_SQLite_Resume verifies resuming an interrupted run.
+func TestIntegration_SQLite_Resume(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
+
+	opts, db := buildOptsWithDB(t, dirA, dirB, false)
+	result, err := pipeline.Run(opts)
+	if err != nil {
+		t.Fatalf("initial Run: %v", err)
+	}
+	if result.Processed != 2 {
+		t.Errorf("initial run Processed = %d, want 2", result.Processed)
+	}
+
+	// Simulate an interrupted run: insert a new run with status "running"
+	// and mark one file as "pending".
+	interruptedRunID := uuid.New().String()
+	interruptedRun := &archivedb.Run{
+		ID:          interruptedRunID,
+		PixeVersion: "test",
+		Source:      dirA,
+		Destination: dirB,
+		Algorithm:   "sha1",
+		Workers:     1,
+		StartedAt:   time.Now().UTC(),
+		Status:      "running",
+	}
+	if err := db.InsertRun(interruptedRun); err != nil {
+		t.Fatalf("InsertRun interrupted: %v", err)
+	}
+
+	// Insert a file for the interrupted run.
+	fileRec := &archivedb.FileRecord{
+		RunID:      interruptedRunID,
+		SourcePath: "/src/test.jpg",
+		Status:     "pending",
+	}
+	if _, err := db.InsertFile(fileRec); err != nil {
+		t.Fatalf("InsertFile interrupted: %v", err)
+	}
+
+	// Find interrupted runs.
+	interrupted, err := db.FindInterruptedRuns()
+	if err != nil {
+		t.Fatalf("FindInterruptedRuns: %v", err)
+	}
+	if len(interrupted) != 1 {
+		t.Errorf("FindInterruptedRuns returned %d runs, want 1", len(interrupted))
+	}
+	if interrupted[0].ID != interruptedRunID {
+		t.Errorf("interrupted run ID = %q, want %q", interrupted[0].ID, interruptedRunID)
+	}
+}
+
+// TestIntegration_SQLite_DryRun verifies dry-run with DB persistence.
+func TestIntegration_SQLite_DryRun(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
+
+	opts, db := buildOptsWithDB(t, dirA, dirB, true)
+	result, err := pipeline.Run(opts)
+	if err != nil {
+		t.Fatalf("dry-run Run: %v", err)
+	}
+	if result.Errors != 0 {
+		t.Errorf("dry-run Errors = %d, want 0", result.Errors)
+	}
+
+	// Verify no media files in dirB (only .pixe/ directory).
+	_ = filepath.WalkDir(dirB, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		rel, _ := filepath.Rel(dirB, path)
+		// Allow files under .pixe/
+		if strings.HasPrefix(rel, ".pixe"+string(filepath.Separator)) {
+			return nil
+		}
+		t.Errorf("dry-run created unexpected file in dirB: %q", rel)
+		return nil
+	})
+
+	// Verify DB run record exists with status "completed".
+	runs, err := db.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("ListRuns returned %d runs, want 1", len(runs))
+	}
+	if runs[0].Status != "completed" {
+		t.Errorf("dry-run run status = %q, want %q", runs[0].Status, "completed")
+	}
+
+	// Verify files in DB have status "complete" (dry-run still records to DB).
+	files, err := db.GetFilesByRun(opts.RunID)
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("GetFilesByRun returned %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if f.Status != "complete" {
+			t.Errorf("file status = %q, want %q", f.Status, "complete")
+		}
 	}
 }

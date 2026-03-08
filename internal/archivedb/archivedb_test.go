@@ -15,8 +15,10 @@
 package archivedb
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1449,5 +1451,168 @@ func TestArchiveInventory_orderedByDestRel(t *testing.T) {
 		if e.DestRel != expected[i] {
 			t.Errorf("inventory[%d].DestRel = %q, want %q", i, e.DestRel, expected[i])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency tests (Task 39)
+// ---------------------------------------------------------------------------
+
+// TestConcurrentReaders verifies that two separate *sql.DB connections can
+// read from the same WAL-mode database simultaneously without errors.
+func TestConcurrentReaders(t *testing.T) {
+	// Create a database file in a temp directory.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "concurrent.db")
+
+	// Open the first connection and create the schema.
+	db1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open db1: %v", err)
+	}
+	defer func() { _ = db1.Close() }()
+
+	// Insert a test run and file.
+	r := makeTestRun("concurrent-run")
+	if err := db1.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	id, err := db1.InsertFile(&FileRecord{RunID: "concurrent-run", SourcePath: "/src/test.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	if err := db1.UpdateFileStatus(id, "complete", WithChecksum("test-checksum")); err != nil {
+		t.Fatalf("UpdateFileStatus: %v", err)
+	}
+
+	// Open a second raw *sql.DB connection to the same file.
+	db2, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open db2: %v", err)
+	}
+	defer func() { _ = db2.Close() }()
+
+	// Set WAL mode and busy timeout on the second connection.
+	if _, err := db2.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		t.Fatalf("PRAGMA journal_mode on db2: %v", err)
+	}
+	if _, err := db2.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		t.Fatalf("PRAGMA busy_timeout on db2: %v", err)
+	}
+
+	// Use a WaitGroup to run concurrent reads.
+	var wg sync.WaitGroup
+	const numReaders = 5
+	errChan := make(chan error, numReaders)
+
+	for i := 0; i < numReaders; i++ {
+		wg.Add(1)
+		go func(readerID int) {
+			defer wg.Done()
+			// Each reader queries the runs table.
+			var count int
+			err := db2.QueryRow("SELECT COUNT(*) FROM runs").Scan(&count)
+			if err != nil {
+				errChan <- fmt.Errorf("reader %d: %v", readerID, err)
+				return
+			}
+			if count != 1 {
+				errChan <- fmt.Errorf("reader %d: expected 1 run, got %d", readerID, count)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for any errors from the readers.
+	for err := range errChan {
+		t.Errorf("concurrent read error: %v", err)
+	}
+}
+
+// TestBusyRetry verifies that write contention is handled gracefully with
+// PRAGMA busy_timeout. Two connections attempt writes; the second waits for
+// the first to commit before succeeding.
+func TestBusyRetry(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "busy.db")
+
+	// Open the first connection and create the schema.
+	db1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open db1: %v", err)
+	}
+	defer func() { _ = db1.Close() }()
+
+	// Open a second raw *sql.DB connection.
+	db2, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open db2: %v", err)
+	}
+	defer func() { _ = db2.Close() }()
+
+	// Set WAL mode and busy timeout on the second connection.
+	if _, err := db2.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		t.Fatalf("PRAGMA journal_mode on db2: %v", err)
+	}
+	if _, err := db2.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		t.Fatalf("PRAGMA busy_timeout on db2: %v", err)
+	}
+
+	// Insert a test run on db1.
+	r := makeTestRun("busy-run")
+	if err := db1.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun on db1: %v", err)
+	}
+
+	// Start an exclusive transaction on db1 (holds a write lock).
+	tx1, err := db1.conn.Begin()
+	if err != nil {
+		t.Fatalf("Begin on db1: %v", err)
+	}
+
+	// Insert a file within the transaction (but don't commit yet).
+	_, err = tx1.Exec(
+		`INSERT INTO files (run_id, source_path, status) VALUES (?, ?, ?)`,
+		"busy-run", "/src/locked.jpg", "pending",
+	)
+	if err != nil {
+		t.Fatalf("INSERT on tx1: %v", err)
+	}
+
+	// Now attempt a write on db2 (should block and retry due to busy_timeout).
+	var writeSucceeded bool
+	var writeErr error
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		// Try to insert a file on db2 while db1 holds the lock.
+		_, writeErr = db2.Exec(
+			`INSERT INTO files (run_id, source_path, status) VALUES (?, ?, ?)`,
+			"busy-run", "/src/waiting.jpg", "pending",
+		)
+		writeSucceeded = (writeErr == nil)
+	}()
+
+	// Give the goroutine a moment to start and block.
+	time.Sleep(100 * time.Millisecond)
+
+	// Commit the transaction on db1, releasing the lock.
+	if err := tx1.Commit(); err != nil {
+		t.Fatalf("Commit on tx1: %v", err)
+	}
+
+	// Wait for the write on db2 to complete.
+	<-done
+
+	// The write on db2 should have succeeded (after retrying).
+	if writeErr != nil {
+		t.Errorf("write on db2 failed: %v", writeErr)
+	}
+	if !writeSucceeded {
+		t.Error("write on db2 did not succeed")
 	}
 }
