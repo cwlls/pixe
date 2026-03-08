@@ -27,6 +27,8 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **Image EXIF** | Native Go packages (e.g., `rwcarlsen/goexif` or equivalent) | No external binary dependency |
 | **HEIC Parsing** | Native Go package (to be evaluated) | Must support EXIF extraction and data-region isolation |
 | **MP4 Parsing** | Native Go package (e.g., `abema/go-mp4` or equivalent) | Atom-level access for metadata and keyframe extraction |
+| **TIFF/RAW Parsing** | Native Go TIFF parser (e.g., `golang.org/x/image/tiff` or equivalent) | IFD traversal for EXIF extraction and embedded JPEG preview location in TIFF-based RAW formats (DNG, NEF, CR2, PEF, ARW) |
+| **CR3 Parsing** | ISOBMFF parser (reuses HEIC/MP4 approach) | Canon RAW X container; box-based EXIF and JPEG preview extraction |
 | **Hashing** | `crypto/sha1` (default), `crypto/sha256`, others via `crypto` stdlib | Configurable algorithm, SHA-1 default for filename brevity |
 | **Persistence** | SQLite database (CGo-free: `modernc.org/sqlite`) | Cumulative registry, concurrent-safe, queryable; see Section 8 |
 
@@ -334,13 +336,157 @@ type FileTypeHandler interface {
 2. **Magic-byte verification**: The file header is read and compared against the handler's declared magic byte signatures.
 3. If magic bytes **do not confirm** the extension-based assumption, the file is reclassified or flagged as unrecognized.
 
-### 6.3 Initial Filetype Modules
+### 6.3 Filetype Modules
 
 | Module | Extensions | Date Source | Hashable Region | Tag Support |
 |---|---|---|---|---|
 | **JPEG** | `.jpg`, `.jpeg` | EXIF `DateTimeOriginal` / `CreateDate` | Full image data (pixel payload) | EXIF Copyright, CameraOwner |
 | **HEIC** | `.heic`, `.heif` | EXIF `DateTimeOriginal` / `CreateDate` | Image data payload | EXIF Copyright, CameraOwner |
 | **MP4** | `.mp4`, `.mov` | QuickTime `CreationDate` / `mvhd` atom | Collected keyframe data | Metadata atom Copyright, CameraOwner |
+| **DNG** | `.dng` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
+| **NEF** | `.nef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
+| **CR2** | `.cr2` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
+| **CR3** | `.cr3` | ISOBMFF container metadata (same approach as HEIC/MP4) | Embedded full-resolution JPEG preview | No (stub) |
+| **PEF** | `.pef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
+| **ARW** | `.arw` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
+
+### 6.4 RAW Handler Architecture
+
+RAW image support follows a **shared base + thin wrapper** pattern. Six RAW formats are supported: DNG, NEF (Nikon), CR2 (Canon), CR3 (Canon), PEF (Pentax), and ARW (Sony). CRW (legacy Canon pre-2004) is explicitly out of scope due to its obsolete format and lack of pure-Go library support.
+
+#### 6.4.1 Why a Shared Base
+
+Five of the six supported RAW formats — DNG, NEF, CR2, PEF, and ARW — are TIFF-based containers with standard EXIF IFDs. They share identical logic for date extraction, hashable region identification, and metadata write behavior. Duplicating this logic across five separate packages would be wasteful and error-prone. Instead, a shared `tiffraw` base package provides the common implementation, and each format supplies only its unique identity: extensions, magic bytes, and detection logic.
+
+CR3 is the exception. It uses an ISOBMFF container (like HEIC and MP4) rather than TIFF. It gets its own standalone handler following the ISOBMFF extraction approach already established by the HEIC handler.
+
+#### 6.4.2 Package Layout
+
+```
+internal/handler/
+├── tiffraw/              ← shared base for TIFF-based RAW formats
+│   └── tiffraw.go        ← Base struct with common ExtractDate, HashableReader, WriteMetadataTags
+├── dng/
+│   ├── dng.go            ← thin wrapper: Extensions, MagicBytes, Detect → delegates to tiffraw.Base
+│   └── dng_test.go
+├── nef/
+│   ├── nef.go
+│   └── nef_test.go
+├── cr2/
+│   ├── cr2.go
+│   └── cr2_test.go
+├── cr3/
+│   ├── cr3.go            ← standalone ISOBMFF-based handler (not using tiffraw)
+│   └── cr3_test.go
+├── pef/
+│   ├── pef.go
+│   └── pef_test.go
+└── arw/
+    ├── arw.go
+    └── arw_test.go
+```
+
+#### 6.4.3 Shared Base: `tiffraw.Base`
+
+The `tiffraw` package provides a `Base` struct that implements the three format-agnostic methods of the `FileTypeHandler` interface:
+
+```go
+package tiffraw
+
+// Base provides shared logic for TIFF-based RAW formats.
+// Per-format handlers embed this struct and supply their own
+// Extensions(), MagicBytes(), and Detect() methods.
+type Base struct{}
+
+func (b *Base) ExtractDate(filePath string) (time.Time, error)          { /* EXIF parsing */ }
+func (b *Base) HashableReader(filePath string) (io.ReadCloser, error)   { /* JPEG preview extraction */ }
+func (b *Base) WriteMetadataTags(filePath string, tags MetadataTags) error { /* no-op stub */ }
+```
+
+Each per-format handler (e.g., `dng.Handler`) embeds `tiffraw.Base` and adds only:
+- `Extensions()` — returns the format-specific extension(s)
+- `MagicBytes()` — returns the format-specific magic byte signature(s)
+- `Detect()` — extension check + magic byte verification
+
+This is standard Go composition via embedding — no inheritance, no interface gymnastics.
+
+#### 6.4.4 Date Extraction (TIFF-based RAW)
+
+All TIFF-based RAW formats store standard EXIF metadata in IFD0 and sub-IFDs. Date extraction follows the same fallback chain used by JPEG:
+
+1. **EXIF `DateTimeOriginal`** (tag 0x9003) — preferred
+2. **EXIF `DateTime`** (tag 0x0132, IFD0) — fallback
+3. **Ansel Adams date** (`1902-02-20`) — sentinel for undated files
+
+The TIFF container is parsed to locate the EXIF IFDs, then standard EXIF tag reading applies. A pure-Go TIFF parser (e.g., `golang.org/x/image/tiff` or equivalent) provides the IFD traversal.
+
+#### 6.4.5 Date Extraction (CR3)
+
+CR3 files use the ISOBMFF container format, the same box-based structure used by HEIC and MP4. Date extraction follows the ISOBMFF approach already established by the HEIC handler:
+
+1. Parse the ISOBMFF container to locate the EXIF blob (typically within a `moov` → `meta` → `xml ` or `Exif` box path, depending on the Canon implementation).
+2. Extract the raw EXIF bytes from the container.
+3. Parse with the standard EXIF library and apply the same fallback chain: `DateTimeOriginal` → `DateTime` → Ansel Adams date.
+
+#### 6.4.6 Hashable Region: Embedded JPEG Preview
+
+All supported RAW formats embed a full-resolution JPEG preview image within the file. The `HashableReader()` method extracts this embedded JPEG and returns it as the hashable region.
+
+**Why the embedded JPEG preview?**
+
+- RAW files from cameras are never edited in place — the raw sensor data is immutable.
+- Hashing the full file would work (as with HEIC) but would be slower for large RAW files (50-100+ MB).
+- The embedded JPEG preview is a stable, well-defined region that is generated from the sensor data at capture time. It provides a meaningful content fingerprint without needing to parse the proprietary raw sensor data.
+- If the embedded JPEG cannot be located or extracted, the handler falls back to hashing the full file (same safety-first approach as other handlers).
+
+**Extraction approach for TIFF-based formats:**
+
+The full-resolution JPEG preview is typically stored in a secondary IFD (often IFD1 or a sub-IFD) with `NewSubfileType = 0` (full-resolution image) and `Compression = 6` (JPEG). The handler navigates the IFD chain, locates the JPEG strip/tile offsets and byte counts, and returns a reader over that region.
+
+**Extraction approach for CR3:**
+
+The embedded JPEG is located within the ISOBMFF container, typically in a `moov` → `trak` → `mdat` path or a dedicated preview box. The handler navigates the box structure to extract the JPEG data.
+
+#### 6.4.7 Metadata Write: No-Op Stub
+
+All RAW handlers implement `WriteMetadataTags()` as a **no-op stub**, identical to the HEIC and MP4 approach. RAW files are archival originals — writing metadata into proprietary RAW containers risks corruption and offers little value since the destination copy is already organized and named by Pixe.
+
+```go
+func (h *Handler) WriteMetadataTags(filePath string, tags domain.MetadataTags) error {
+    // RAW metadata write not supported in pure Go.
+    return nil
+}
+```
+
+#### 6.4.8 Magic Byte Signatures
+
+Each RAW format has a distinct file header that enables reliable magic-byte detection:
+
+| Format | Magic Bytes | Offset | Notes |
+|---|---|---|---|
+| **DNG** | `49 49 2A 00` or `4D 4D 00 2A` | 0 | TIFF little-endian or big-endian header (same as TIFF; DNG is distinguished by the presence of a DNGVersion tag in IFD0 — detection must check beyond magic bytes) |
+| **NEF** | `49 49 2A 00` | 0 | TIFF LE header; Nikon-specific maker note IFDs distinguish from generic TIFF. Extension `.nef` is the primary discriminator. |
+| **CR2** | `49 49 2A 00` + `43 52` at offset 8 | 0 | TIFF LE header with `CR` signature bytes at offset 8–9 |
+| **CR3** | `66 74 79 70` ("ftyp") | 4 | ISOBMFF container; `ftyp` brand is `crx ` (Canon RAW X) |
+| **PEF** | `49 49 2A 00` | 0 | TIFF LE header; Pentax-specific. Extension `.pef` is the primary discriminator. |
+| **ARW** | `49 49 2A 00` | 0 | TIFF LE header; Sony-specific. Extension `.arw` is the primary discriminator. |
+
+> **Important:** Several TIFF-based RAW formats share the same TIFF magic bytes (`49 49 2A 00`). For these formats, the **extension-based fast path** in the registry is the primary discriminator, with magic bytes serving only to confirm the file is a valid TIFF container. CR2 is the notable exception — it has additional signature bytes at offset 8 that uniquely identify it. The registry's two-phase detection (extension first, then magic byte verification) handles this gracefully.
+
+#### 6.4.9 Handler Registration
+
+All RAW handlers are registered in the same three locations as existing handlers (`cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go`):
+
+```go
+reg.Register(dnghandler.New())
+reg.Register(nefhandler.New())
+reg.Register(cr2handler.New())
+reg.Register(cr3handler.New())
+reg.Register(pefhandler.New())
+reg.Register(arwhandler.New())
+```
+
+Registration order matters for the TIFF-based formats that share magic bytes. Since the extension-based fast path resolves first, registration order only affects the fallback path (files with mismatched extensions). JPEG must remain registered before the TIFF-based RAW handlers to avoid false matches on TIFF magic bytes.
 
 ---
 
@@ -679,10 +825,11 @@ The `resume` command now locates the database via the same discovery chain (flag
 These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
 1. **Sidecar files** (`.xmp`, `.aae`) — Should they follow their parent media file?
-2. **RAW formats** (`.cr2`, `.arw`, `.dng`) — Natural candidates for new filetype modules.
-3. **Web UI / TUI** — Progress visualization beyond CLI output.
-4. **Cloud storage targets** — `dirB` on S3, GCS, etc.
-5. **GPS/location-based organization** — Subdirectories by location in addition to date.
-6. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
-7. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
-8. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
+2. **CRW format** (legacy Canon pre-2004) — Excluded from current RAW support due to its obsolete proprietary format and lack of pure-Go library support. Could be revisited if demand arises.
+3. **RAW metadata write support** — Currently all RAW handlers use no-op stubs. Future work could add EXIF write support for formats where pure-Go libraries mature.
+4. **Web UI / TUI** — Progress visualization beyond CLI output.
+5. **Cloud storage targets** — `dirB` on S3, GCS, etc.
+6. **GPS/location-based organization** — Subdirectories by location in addition to date.
+7. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
+8. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
+9. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
