@@ -25,7 +25,11 @@ func isNetworkMount(path string) (bool, error) {
 		return true, nil
 	}
 
-	drivetype := windows.GetDriveType(windows.StringToPtr(path[:2] + "\\"))
+	drivePtr, err := windows.UTF16PtrFromString(path[:2] + "\\")
+	if err != nil {
+		return false, err
+	}
+	drivetype := windows.GetDriveType(drivePtr)
 	if drivetype == windows.DRIVE_REMOTE {
 		return true, nil
 	}
