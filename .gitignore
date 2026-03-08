@@ -23,3 +23,6 @@ go.work
 
 # OS
 .DS_Store
+
+# Go dist files
+dist/
