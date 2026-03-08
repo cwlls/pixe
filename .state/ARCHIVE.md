@@ -36,3 +36,39 @@
 2026-03-07 14:30:00 | abc1234567890abcdef1234567890abcdef123456
 
 ---
+
+## Task 31 — Archive DB — Query Methods
+
+### Implementation Summary
+- Created `internal/archivedb/queries.go` with 8 read-only query methods for archive database access.
+- Implemented query families: by source, date range, run, status, checksum, and duplicates.
+- Added 4 new types: `RunSummary`, `FileWithSource`, `DuplicatePair`, `InventoryEntry`.
+- Comprehensive test coverage with 14 test cases covering all query methods and edge cases.
+- Validated by @tester (Pass).
+
+### Key Features
+- **ListRuns**: Returns all runs in reverse chronological order with file counts.
+- **FilesBySource**: Filters files by run source directory.
+- **FilesByCaptureDateRange**: Returns completed files within a capture date range.
+- **FilesByImportDateRange**: Returns files verified within a date range.
+- **FilesWithErrors**: Returns error-state files joined with run source.
+- **AllDuplicates**: Returns all files marked as duplicates.
+- **DuplicatePairs**: Pairs each duplicate with its original via checksum join.
+- **ArchiveInventory**: Returns canonical archive contents (complete, non-duplicate files).
+
+### Test Results
+- `go vet ./...` — PASS
+- `go build ./...` — PASS
+- `go test -race ./internal/archivedb/...` — 39/39 PASS
+- `go test -race ./...` — all 15 packages PASS
+
+### Dependencies
+- Task 30 (Archive DB — Run & File CRUD operations)
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | fe495f323ceca8ba963845916107fb20e68f287b
+
+---

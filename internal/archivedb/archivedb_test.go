@@ -699,3 +699,557 @@ func TestUpdateFileStatus_withIsDuplicate(t *testing.T) {
 		t.Error("IsDuplicate = false, want true")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Query method tests (Task 31)
+// ---------------------------------------------------------------------------
+
+// completeFile is a helper that walks a file through all pipeline stages to "complete".
+func completeFile(t *testing.T, db *DB, fileID int64, checksum, destRel string, captureDate time.Time) {
+	t.Helper()
+	destPath := "/dst/" + destRel
+	steps := []struct {
+		status string
+		opts   []UpdateOption
+	}{
+		{"extracted", []UpdateOption{WithCaptureDate(captureDate), WithFileSize(1024)}},
+		{"hashed", []UpdateOption{WithChecksum(checksum)}},
+		{"copied", []UpdateOption{WithDestination(destPath, destRel)}},
+		{"verified", nil},
+		{"tagged", nil},
+		{"complete", nil},
+	}
+	for _, s := range steps {
+		if err := db.UpdateFileStatus(fileID, s.status, s.opts...); err != nil {
+			t.Fatalf("UpdateFileStatus(%q): %v", s.status, err)
+		}
+	}
+}
+
+// TestListRuns verifies runs are returned in reverse chronological order with file counts.
+func TestListRuns(t *testing.T) {
+	db := openTestDB(t)
+
+	// Insert 3 runs with distinct timestamps.
+	runs := []*Run{
+		{
+			ID: "lr-run-1", PixeVersion: "1.0.0", Source: "/src/a",
+			Destination: "/dst", Algorithm: "sha256", Workers: 2,
+			StartedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID: "lr-run-2", PixeVersion: "1.0.0", Source: "/src/b",
+			Destination: "/dst", Algorithm: "sha256", Workers: 2,
+			StartedAt: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID: "lr-run-3", PixeVersion: "1.0.0", Source: "/src/c",
+			Destination: "/dst", Algorithm: "sha256", Workers: 2,
+			StartedAt: time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, r := range runs {
+		if err := db.InsertRun(r); err != nil {
+			t.Fatalf("InsertRun %s: %v", r.ID, err)
+		}
+	}
+
+	// Add 2 files to run-2 and 1 file to run-3.
+	for i, src := range []string{"/src/b/photo1.jpg", "/src/b/photo2.jpg"} {
+		id, err := db.InsertFile(&FileRecord{RunID: "lr-run-2", SourcePath: src})
+		if err != nil {
+			t.Fatalf("InsertFile %d: %v", i, err)
+		}
+		_ = id
+	}
+	id3, err := db.InsertFile(&FileRecord{RunID: "lr-run-3", SourcePath: "/src/c/photo.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile run-3: %v", err)
+	}
+	_ = id3
+
+	summaries, err := db.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(summaries) != 3 {
+		t.Fatalf("ListRuns returned %d summaries, want 3", len(summaries))
+	}
+
+	// Verify reverse chronological order.
+	if summaries[0].ID != "lr-run-3" {
+		t.Errorf("summaries[0].ID = %q, want %q", summaries[0].ID, "lr-run-3")
+	}
+	if summaries[1].ID != "lr-run-2" {
+		t.Errorf("summaries[1].ID = %q, want %q", summaries[1].ID, "lr-run-2")
+	}
+	if summaries[2].ID != "lr-run-1" {
+		t.Errorf("summaries[2].ID = %q, want %q", summaries[2].ID, "lr-run-1")
+	}
+
+	// Verify file counts.
+	if summaries[0].FileCount != 1 {
+		t.Errorf("run-3 FileCount = %d, want 1", summaries[0].FileCount)
+	}
+	if summaries[1].FileCount != 2 {
+		t.Errorf("run-2 FileCount = %d, want 2", summaries[1].FileCount)
+	}
+	if summaries[2].FileCount != 0 {
+		t.Errorf("run-1 FileCount = %d, want 0", summaries[2].FileCount)
+	}
+}
+
+// TestListRuns_empty verifies ListRuns returns nil (not an error) when no runs exist.
+func TestListRuns_empty(t *testing.T) {
+	db := openTestDB(t)
+	summaries, err := db.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Errorf("ListRuns returned %d summaries, want 0", len(summaries))
+	}
+}
+
+// TestFilesBySource verifies filtering by source directory.
+func TestFilesBySource(t *testing.T) {
+	db := openTestDB(t)
+
+	// Two runs from different sources.
+	r1 := &Run{
+		ID: "fbs-run-1", PixeVersion: "1.0.0", Source: "/src/alpha",
+		Destination: "/dst", Algorithm: "sha256", Workers: 1,
+		StartedAt: time.Now().UTC(),
+	}
+	r2 := &Run{
+		ID: "fbs-run-2", PixeVersion: "1.0.0", Source: "/src/beta",
+		Destination: "/dst", Algorithm: "sha256", Workers: 1,
+		StartedAt: time.Now().UTC(),
+	}
+	if err := db.InsertRun(r1); err != nil {
+		t.Fatalf("InsertRun r1: %v", err)
+	}
+	if err := db.InsertRun(r2); err != nil {
+		t.Fatalf("InsertRun r2: %v", err)
+	}
+
+	// 2 files from alpha, 1 from beta.
+	for _, src := range []string{"/src/alpha/a.jpg", "/src/alpha/b.jpg"} {
+		if _, err := db.InsertFile(&FileRecord{RunID: "fbs-run-1", SourcePath: src}); err != nil {
+			t.Fatalf("InsertFile alpha: %v", err)
+		}
+	}
+	if _, err := db.InsertFile(&FileRecord{RunID: "fbs-run-2", SourcePath: "/src/beta/c.jpg"}); err != nil {
+		t.Fatalf("InsertFile beta: %v", err)
+	}
+
+	files, err := db.FilesBySource("/src/alpha")
+	if err != nil {
+		t.Fatalf("FilesBySource: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("FilesBySource returned %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if f.RunID != "fbs-run-1" {
+			t.Errorf("file RunID = %q, want %q", f.RunID, "fbs-run-1")
+		}
+	}
+
+	// Beta should return 1.
+	betaFiles, err := db.FilesBySource("/src/beta")
+	if err != nil {
+		t.Fatalf("FilesBySource beta: %v", err)
+	}
+	if len(betaFiles) != 1 {
+		t.Errorf("FilesBySource beta returned %d files, want 1", len(betaFiles))
+	}
+}
+
+// TestFilesBySource_noMatch verifies an empty slice is returned for unknown sources.
+func TestFilesBySource_noMatch(t *testing.T) {
+	db := openTestDB(t)
+	files, err := db.FilesBySource("/nonexistent/source")
+	if err != nil {
+		t.Fatalf("FilesBySource: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("FilesBySource returned %d files, want 0", len(files))
+	}
+}
+
+// TestFilesByCaptureDateRange verifies date-range filtering on completed files.
+func TestFilesByCaptureDateRange(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "cdr-run")
+
+	// Insert 3 files with different capture dates.
+	type fixture struct {
+		src         string
+		checksum    string
+		destRel     string
+		captureDate time.Time
+	}
+	fixtures := []fixture{
+		{"/src/jan.jpg", "cksum-jan", "2026/01-Jan/jan.jpg", time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)},
+		{"/src/feb.jpg", "cksum-feb", "2026/02-Feb/feb.jpg", time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)},
+		{"/src/mar.jpg", "cksum-mar", "2026/03-Mar/mar.jpg", time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)},
+	}
+	for _, fx := range fixtures {
+		id, err := db.InsertFile(&FileRecord{RunID: "cdr-run", SourcePath: fx.src})
+		if err != nil {
+			t.Fatalf("InsertFile %s: %v", fx.src, err)
+		}
+		completeFile(t, db, id, fx.checksum, fx.destRel, fx.captureDate)
+	}
+
+	// Query Jan–Feb range.
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 2, 28, 23, 59, 59, 0, time.UTC)
+	files, err := db.FilesByCaptureDateRange(start, end)
+	if err != nil {
+		t.Fatalf("FilesByCaptureDateRange: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("FilesByCaptureDateRange returned %d files, want 2", len(files))
+	}
+}
+
+// TestFilesByCaptureDateRange_excludesNonComplete verifies only complete files are returned.
+func TestFilesByCaptureDateRange_excludesNonComplete(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "cdr-nc-run")
+
+	captureDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	id, err := db.InsertFile(&FileRecord{RunID: "cdr-nc-run", SourcePath: "/src/nc.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	// Only advance to "hashed" — not complete.
+	if err := db.UpdateFileStatus(id, "extracted", WithCaptureDate(captureDate)); err != nil {
+		t.Fatalf("UpdateFileStatus extracted: %v", err)
+	}
+
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)
+	files, err := db.FilesByCaptureDateRange(start, end)
+	if err != nil {
+		t.Fatalf("FilesByCaptureDateRange: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("FilesByCaptureDateRange returned %d files, want 0 (non-complete excluded)", len(files))
+	}
+}
+
+// TestFilesByImportDateRange verifies filtering by verified_at timestamp.
+func TestFilesByImportDateRange(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "idr-run")
+
+	captureDate := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	// Insert and complete 2 files (verified_at will be set to now).
+	for i, src := range []string{"/src/p1.jpg", "/src/p2.jpg"} {
+		id, err := db.InsertFile(&FileRecord{RunID: "idr-run", SourcePath: src})
+		if err != nil {
+			t.Fatalf("InsertFile %d: %v", i, err)
+		}
+		checksum := fmt.Sprintf("cksum-idr-%d", i)
+		destRel := fmt.Sprintf("2025/06-Jun/photo%d.jpg", i)
+		completeFile(t, db, id, checksum, destRel, captureDate)
+	}
+
+	// Query a wide range that covers "now".
+	start := time.Now().UTC().Add(-time.Minute)
+	end := time.Now().UTC().Add(time.Minute)
+	files, err := db.FilesByImportDateRange(start, end)
+	if err != nil {
+		t.Fatalf("FilesByImportDateRange: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("FilesByImportDateRange returned %d files, want 2", len(files))
+	}
+
+	// Query a range in the past — should return nothing.
+	pastStart := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	pastEnd := time.Date(2020, 12, 31, 23, 59, 59, 0, time.UTC)
+	pastFiles, err := db.FilesByImportDateRange(pastStart, pastEnd)
+	if err != nil {
+		t.Fatalf("FilesByImportDateRange past: %v", err)
+	}
+	if len(pastFiles) != 0 {
+		t.Errorf("FilesByImportDateRange past returned %d files, want 0", len(pastFiles))
+	}
+}
+
+// TestFilesWithErrors verifies error-state files are returned with run source context.
+func TestFilesWithErrors(t *testing.T) {
+	db := openTestDB(t)
+
+	r := &Run{
+		ID: "err-run", PixeVersion: "1.0.0", Source: "/src/errors",
+		Destination: "/dst", Algorithm: "sha256", Workers: 1,
+		StartedAt: time.Now().UTC(),
+	}
+	if err := db.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+
+	// Insert files in various states.
+	type fileFixture struct {
+		src    string
+		status string
+		errMsg string
+	}
+	fixtures := []fileFixture{
+		{"/src/errors/ok.jpg", "complete", ""},
+		{"/src/errors/fail.jpg", "failed", "copy failed"},
+		{"/src/errors/mismatch.jpg", "mismatch", "checksum mismatch"},
+		{"/src/errors/tagfail.jpg", "tag_failed", "exiftool error"},
+	}
+
+	for _, fx := range fixtures {
+		id, err := db.InsertFile(&FileRecord{RunID: "err-run", SourcePath: fx.src})
+		if err != nil {
+			t.Fatalf("InsertFile %s: %v", fx.src, err)
+		}
+		var opts []UpdateOption
+		if fx.errMsg != "" {
+			opts = append(opts, WithError(fx.errMsg))
+		}
+		if err := db.UpdateFileStatus(id, fx.status, opts...); err != nil {
+			t.Fatalf("UpdateFileStatus %s: %v", fx.status, err)
+		}
+	}
+
+	errFiles, err := db.FilesWithErrors()
+	if err != nil {
+		t.Fatalf("FilesWithErrors: %v", err)
+	}
+	if len(errFiles) != 3 {
+		t.Fatalf("FilesWithErrors returned %d files, want 3", len(errFiles))
+	}
+
+	// All should have RunSource set.
+	for _, ef := range errFiles {
+		if ef.RunSource != "/src/errors" {
+			t.Errorf("RunSource = %q, want %q", ef.RunSource, "/src/errors")
+		}
+		if ef.Error == nil {
+			t.Errorf("Error is nil for file %s", ef.SourcePath)
+		}
+	}
+}
+
+// TestFilesWithErrors_empty verifies no error when there are no error-state files.
+func TestFilesWithErrors_empty(t *testing.T) {
+	db := openTestDB(t)
+	errFiles, err := db.FilesWithErrors()
+	if err != nil {
+		t.Fatalf("FilesWithErrors: %v", err)
+	}
+	if len(errFiles) != 0 {
+		t.Errorf("FilesWithErrors returned %d files, want 0", len(errFiles))
+	}
+}
+
+// TestAllDuplicates verifies that only is_duplicate=1 files are returned.
+func TestAllDuplicates(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "dup-run")
+
+	// Insert 3 files: 1 original, 2 duplicates.
+	origID, err := db.InsertFile(&FileRecord{RunID: "dup-run", SourcePath: "/src/orig.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile orig: %v", err)
+	}
+	completeFile(t, db, origID, "cksum-orig", "2026/01-Jan/orig.jpg", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	for i, src := range []string{"/src/dup1.jpg", "/src/dup2.jpg"} {
+		id, err := db.InsertFile(&FileRecord{RunID: "dup-run", SourcePath: src})
+		if err != nil {
+			t.Fatalf("InsertFile dup%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "complete",
+			WithChecksum("cksum-orig"),
+			WithDestination("/dst/duplicates/dup.jpg", "duplicates/dup.jpg"),
+			WithIsDuplicate(true),
+		); err != nil {
+			t.Fatalf("UpdateFileStatus dup%d: %v", i, err)
+		}
+	}
+
+	dups, err := db.AllDuplicates()
+	if err != nil {
+		t.Fatalf("AllDuplicates: %v", err)
+	}
+	if len(dups) != 2 {
+		t.Errorf("AllDuplicates returned %d files, want 2", len(dups))
+	}
+	for _, d := range dups {
+		if !d.IsDuplicate {
+			t.Errorf("file %s: IsDuplicate = false, want true", d.SourcePath)
+		}
+	}
+}
+
+// TestDuplicatePairs verifies each duplicate is paired with its original via checksum.
+func TestDuplicatePairs(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "dp-run")
+
+	const checksum = "cksum-pair"
+	const origDestRel = "2026/01-Jan/original.jpg"
+	const dupDestRel = "duplicates/original.jpg"
+
+	// Insert original.
+	origID, err := db.InsertFile(&FileRecord{RunID: "dp-run", SourcePath: "/src/original.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile orig: %v", err)
+	}
+	completeFile(t, db, origID, checksum, origDestRel, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	// Insert duplicate.
+	dupID, err := db.InsertFile(&FileRecord{RunID: "dp-run", SourcePath: "/src/duplicate.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile dup: %v", err)
+	}
+	if err := db.UpdateFileStatus(dupID, "complete",
+		WithChecksum(checksum),
+		WithDestination("/dst/"+dupDestRel, dupDestRel),
+		WithIsDuplicate(true),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus dup: %v", err)
+	}
+
+	pairs, err := db.DuplicatePairs()
+	if err != nil {
+		t.Fatalf("DuplicatePairs: %v", err)
+	}
+	if len(pairs) != 1 {
+		t.Fatalf("DuplicatePairs returned %d pairs, want 1", len(pairs))
+	}
+
+	p := pairs[0]
+	if p.DuplicateSource != "/src/duplicate.jpg" {
+		t.Errorf("DuplicateSource = %q, want %q", p.DuplicateSource, "/src/duplicate.jpg")
+	}
+	if p.DuplicateDest != dupDestRel {
+		t.Errorf("DuplicateDest = %q, want %q", p.DuplicateDest, dupDestRel)
+	}
+	if p.OriginalDest != origDestRel {
+		t.Errorf("OriginalDest = %q, want %q", p.OriginalDest, origDestRel)
+	}
+}
+
+// TestDuplicatePairs_empty verifies no error when there are no duplicates.
+func TestDuplicatePairs_empty(t *testing.T) {
+	db := openTestDB(t)
+	pairs, err := db.DuplicatePairs()
+	if err != nil {
+		t.Fatalf("DuplicatePairs: %v", err)
+	}
+	if len(pairs) != 0 {
+		t.Errorf("DuplicatePairs returned %d pairs, want 0", len(pairs))
+	}
+}
+
+// TestArchiveInventory verifies only complete, non-duplicate files are returned.
+func TestArchiveInventory(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "inv-run")
+
+	captureDate := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	// Insert 3 complete non-duplicates.
+	for i, src := range []string{"/src/a.jpg", "/src/b.jpg", "/src/c.jpg"} {
+		id, err := db.InsertFile(&FileRecord{RunID: "inv-run", SourcePath: src})
+		if err != nil {
+			t.Fatalf("InsertFile %d: %v", i, err)
+		}
+		checksum := fmt.Sprintf("cksum-inv-%d", i)
+		destRel := fmt.Sprintf("2026/03-Mar/photo%d.jpg", i)
+		completeFile(t, db, id, checksum, destRel, captureDate)
+	}
+
+	// Insert 1 duplicate.
+	dupID, err := db.InsertFile(&FileRecord{RunID: "inv-run", SourcePath: "/src/dup.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile dup: %v", err)
+	}
+	if err := db.UpdateFileStatus(dupID, "complete",
+		WithChecksum("cksum-inv-0"),
+		WithDestination("/dst/duplicates/dup.jpg", "duplicates/dup.jpg"),
+		WithIsDuplicate(true),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus dup: %v", err)
+	}
+
+	// Insert 1 failed file.
+	failID, err := db.InsertFile(&FileRecord{RunID: "inv-run", SourcePath: "/src/fail.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile fail: %v", err)
+	}
+	if err := db.UpdateFileStatus(failID, "failed", WithError("copy error")); err != nil {
+		t.Fatalf("UpdateFileStatus fail: %v", err)
+	}
+
+	inventory, err := db.ArchiveInventory()
+	if err != nil {
+		t.Fatalf("ArchiveInventory: %v", err)
+	}
+	// Only the 3 non-duplicate complete files.
+	if len(inventory) != 3 {
+		t.Errorf("ArchiveInventory returned %d entries, want 3", len(inventory))
+	}
+	for _, e := range inventory {
+		if e.DestRel == "" {
+			t.Error("InventoryEntry.DestRel is empty")
+		}
+		if e.Checksum == "" {
+			t.Error("InventoryEntry.Checksum is empty")
+		}
+	}
+}
+
+// TestArchiveInventory_orderedByDestRel verifies stable ordering.
+func TestArchiveInventory_orderedByDestRel(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "inv-ord-run")
+
+	captureDate := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	// Insert files in reverse alphabetical order of destRel.
+	destRels := []string{
+		"2026/03-Mar/c.jpg",
+		"2026/03-Mar/a.jpg",
+		"2026/03-Mar/b.jpg",
+	}
+	for i, dr := range destRels {
+		id, err := db.InsertFile(&FileRecord{RunID: "inv-ord-run", SourcePath: fmt.Sprintf("/src/%d.jpg", i)})
+		if err != nil {
+			t.Fatalf("InsertFile %d: %v", i, err)
+		}
+		completeFile(t, db, id, fmt.Sprintf("cksum-%d", i), dr, captureDate)
+	}
+
+	inventory, err := db.ArchiveInventory()
+	if err != nil {
+		t.Fatalf("ArchiveInventory: %v", err)
+	}
+	if len(inventory) != 3 {
+		t.Fatalf("ArchiveInventory returned %d entries, want 3", len(inventory))
+	}
+
+	// Should be sorted: a, b, c.
+	expected := []string{
+		"2026/03-Mar/a.jpg",
+		"2026/03-Mar/b.jpg",
+		"2026/03-Mar/c.jpg",
+	}
+	for i, e := range inventory {
+		if e.DestRel != expected[i] {
+			t.Errorf("inventory[%d].DestRel = %q, want %q", i, e.DestRel, expected[i])
+		}
+	}
+}

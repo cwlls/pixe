@@ -32,7 +32,7 @@
 | 28 | Tests & Verification — Full Suite Green | High | @tester |  ✅ Complete | 26, 27 | `go vet`, `go test -race ./...`, `make lint` all pass |
 | 29 | Archive DB — `internal/archivedb` package & schema | High | @developer | ✅ Complete | 2 | SQLite database layer: Open, Close, schema creation, WAL mode, busy timeout |
 | 30 | Archive DB — Run & File CRUD operations | High | @developer | ✅ Complete | 29 | InsertRun, UpdateRun, InsertFile, UpdateFile, dedup query, batch insert |
-| 31 | Archive DB — Query methods | Medium | @developer | 🔲 Pending | 30 | Query families: by source, date range, run, status, checksum, duplicates |
+| 31 | Archive DB — Query methods | Medium | @developer | ✅ Complete | 30 | Query families: by source, date range, run, status, checksum, duplicates |
 | 32 | DB Location Resolver — `internal/dblocator` package | High | @developer | ✅ Complete | 29 | Priority chain: --db-path → dbpath marker → local default; network mount detection; slug generation |
 | 33 | Domain Types — SQLite-era updates | High | @developer | ✅ Complete | 2, 29 | Add `RunID` to Ledger, bump ledger version to 2, add `DBPath` to AppConfig |
 | 34 | JSON Manifest Migration — `internal/migrate` package | High | @developer | ✅ Complete | 29, 30 | Auto-detect manifest.json, create synthetic run, import entries, rename to .migrated |
@@ -55,83 +55,6 @@
 ---
 
 # Pixe Task Descriptions
-
-## Task 31 — Archive DB — Query Methods
-
-**Goal:** Add read-only query methods to `archivedb.DB` that expose the query patterns defined in Architecture Section 8.4. These are used by future CLI commands (`pixe query`) and by the pipeline for operational queries.
-
-**Architecture Reference:** Section 8.4 (Query Patterns)
-
-**Depends on:** Task 30
-
-**File to create: `internal/archivedb/queries.go`**
-
-```go
-package archivedb
-
-import "time"
-
-// RunSummary is a lightweight view of a run for listing purposes.
-type RunSummary struct {
-    ID          string
-    PixeVersion string
-    Source      string
-    StartedAt   time.Time
-    FinishedAt  *time.Time
-    Status      string
-    FileCount   int
-}
-
-// ListRuns returns all runs ordered by started_at descending.
-func (db *DB) ListRuns() ([]*RunSummary, error) { ... }
-
-// FilesBySource returns all files imported from a given source directory.
-func (db *DB) FilesBySource(sourceDir string) ([]*FileRecord, error) { ... }
-
-// FilesByCaptureDateRange returns completed files with capture dates in [start, end].
-func (db *DB) FilesByCaptureDateRange(start, end time.Time) ([]*FileRecord, error) { ... }
-
-// FilesByImportDateRange returns files verified within [start, end].
-func (db *DB) FilesByImportDateRange(start, end time.Time) ([]*FileRecord, error) { ... }
-
-// FilesWithErrors returns all files in error states across all runs,
-// joined with their run's source directory for context.
-type FileWithSource struct {
-    FileRecord
-    RunSource string
-}
-func (db *DB) FilesWithErrors() ([]*FileWithSource, error) { ... }
-
-// AllDuplicates returns all files marked as duplicates.
-func (db *DB) AllDuplicates() ([]*FileRecord, error) { ... }
-
-// DuplicatePairs returns each duplicate alongside the original it duplicates.
-type DuplicatePair struct {
-    DuplicateSource string
-    DuplicateDest   string
-    OriginalDest    string
-}
-func (db *DB) DuplicatePairs() ([]*DuplicatePair, error) { ... }
-
-// ArchiveInventory returns all completed, non-duplicate files (the canonical archive contents).
-type InventoryEntry struct {
-    DestRel     string
-    Checksum    string
-    CaptureDate *time.Time
-}
-func (db *DB) ArchiveInventory() ([]*InventoryEntry, error) { ... }
-```
-
-**Acceptance Criteria:**
-- `ListRuns` returns runs in reverse chronological order with file counts.
-- `FilesBySource` correctly filters by source directory path.
-- `FilesByCaptureDateRange` returns only completed files within the date range.
-- `FilesWithErrors` joins files with their run source and returns only error-state files.
-- `DuplicatePairs` correctly pairs each duplicate with its original via checksum join.
-- `ArchiveInventory` excludes duplicates and non-complete files.
-- All queries use the defined indexes (verify via `EXPLAIN QUERY PLAN` in tests).
-
----
 
 ## Task 32 — DB Location Resolver — `internal/dblocator` Package
 
