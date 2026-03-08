@@ -32,11 +32,10 @@ builds:
     main: .
 
 archives:
-  - format: tar.gz
-    # Use zip for windows specifically
+  - formats: [tar.gz]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
