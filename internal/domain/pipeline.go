@@ -125,6 +125,7 @@ type LedgerEntry struct {
 type Ledger struct {
 	Version     int           `json:"version"`
 	PixeVersion string        `json:"pixe_version"`
+	RunID       string        `json:"run_id,omitempty"` // UUID linking to archive DB (v2+)
 	PixeRun     time.Time     `json:"pixe_run"`
 	Algorithm   string        `json:"algorithm"`
 	Destination string        `json:"destination"`

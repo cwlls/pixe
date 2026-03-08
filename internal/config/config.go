@@ -46,4 +46,8 @@ type AppConfig struct {
 	// DryRun, when true, causes the pipeline to extract and hash files but
 	// skip all copy, verify, and tag operations. Output is printed to stdout.
 	DryRun bool
+
+	// DBPath is an explicit path to the SQLite archive database.
+	// If empty, the database location is auto-resolved (see dblocator package).
+	DBPath string
 }

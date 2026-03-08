@@ -34,7 +34,7 @@
 | 30 | Archive DB — Run & File CRUD operations | High | @developer | ✅ Complete | 29 | InsertRun, UpdateRun, InsertFile, UpdateFile, dedup query, batch insert |
 | 31 | Archive DB — Query methods | Medium | @developer | 🔲 Pending | 30 | Query families: by source, date range, run, status, checksum, duplicates |
 | 32 | DB Location Resolver — `internal/dblocator` package | High | @developer | ✅ Complete | 29 | Priority chain: --db-path → dbpath marker → local default; network mount detection; slug generation |
-| 33 | Domain Types — SQLite-era updates | High | @developer | 🔲 Pending | 2, 29 | Add `RunID` to Ledger, bump ledger version to 2, add `DBPath` to AppConfig |
+| 33 | Domain Types — SQLite-era updates | High | @developer | ✅ Complete | 2, 29 | Add `RunID` to Ledger, bump ledger version to 2, add `DBPath` to AppConfig |
 | 34 | JSON Manifest Migration — `internal/migrate` package | High | @developer | 🔲 Pending | 29, 30 | Auto-detect manifest.json, create synthetic run, import entries, rename to .migrated |
 | 35 | Pipeline Refactor — Replace JSON manifest with archive DB | High | @developer | 🔲 Pending | 29, 30, 32, 33 | Rewrite pipeline.go and worker.go to use archivedb instead of manifest.Save/Load |
 | 36 | Pipeline — Cross-process dedup race handling | Medium | @developer | 🔲 Pending | 35 | Post-commit dedup re-check, retroactive duplicate routing |
