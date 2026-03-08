@@ -19,6 +19,7 @@ package integration
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -33,7 +34,13 @@ import (
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
+	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
+	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
+	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
+	dnghandler "github.com/cwlls/pixe-go/internal/handler/dng"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
+	nefhandler "github.com/cwlls/pixe-go/internal/handler/nef"
+	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
@@ -98,6 +105,36 @@ func buildOpts(t *testing.T, dirA, dirB string, dryRun bool) pipeline.SortOption
 	}
 }
 
+// buildOptsWithRAW constructs a SortOptions with all handlers (JPEG + 6 RAW formats).
+func buildOptsWithRAW(t *testing.T, dirA, dirB string, dryRun bool) pipeline.SortOptions {
+	t.Helper()
+	h, err := hash.NewHasher("sha1")
+	if err != nil {
+		t.Fatalf("NewHasher: %v", err)
+	}
+	reg := discovery.NewRegistry()
+	reg.Register(jpeghandler.New())
+	reg.Register(dnghandler.New())
+	reg.Register(nefhandler.New())
+	reg.Register(cr2handler.New())
+	reg.Register(cr3handler.New())
+	reg.Register(pefhandler.New())
+	reg.Register(arwhandler.New())
+	return pipeline.SortOptions{
+		Config: &config.AppConfig{
+			Source:      dirA,
+			Destination: dirB,
+			Algorithm:   "sha1",
+			DryRun:      dryRun,
+		},
+		Hasher:       h,
+		Registry:     reg,
+		RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
+		Output:       &bytes.Buffer{},
+		PixeVersion:  "test",
+	}
+}
+
 // findFiles returns all regular files under root whose names match prefix.
 func findFiles(t *testing.T, root, prefix string) []string {
 	t.Helper()
@@ -128,6 +165,176 @@ func sha1File(t *testing.T, path string) string {
 		t.Fatalf("sha1File sum %q: %v", path, err)
 	}
 	return sum
+}
+
+// --- RAW Fixture Builders ---
+
+// buildFakeDNG writes a minimal valid TIFF LE file with .dng extension.
+func buildFakeDNG(t *testing.T, dir, name string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+
+	// Byte order marker (LE)
+	buf.WriteByte(0x49)
+	buf.WriteByte(0x49)
+
+	// TIFF magic (42 in LE)
+	binary.Write(buf, binary.LittleEndian, uint16(42))
+
+	// IFD0 offset (8)
+	binary.Write(buf, binary.LittleEndian, uint32(8))
+
+	// IFD0: 0 entries
+	binary.Write(buf, binary.LittleEndian, uint16(0))
+
+	// Next IFD offset (0 = end)
+	binary.Write(buf, binary.LittleEndian, uint32(0))
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// buildFakeNEF writes a minimal valid TIFF LE file with .nef extension.
+func buildFakeNEF(t *testing.T, dir, name string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+
+	// Byte order marker (LE)
+	buf.WriteByte(0x49)
+	buf.WriteByte(0x49)
+
+	// TIFF magic (42 in LE)
+	binary.Write(buf, binary.LittleEndian, uint16(42))
+
+	// IFD0 offset (8)
+	binary.Write(buf, binary.LittleEndian, uint32(8))
+
+	// IFD0: 0 entries
+	binary.Write(buf, binary.LittleEndian, uint16(0))
+
+	// Next IFD offset (0 = end)
+	binary.Write(buf, binary.LittleEndian, uint32(0))
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// buildFakeCR2 writes a CR2 file with TIFF LE header + "CR" at offset 8.
+func buildFakeCR2(t *testing.T, dir, name string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+
+	// Byte order marker (LE)
+	buf.WriteByte(0x49)
+	buf.WriteByte(0x49)
+
+	// TIFF magic (42 in LE)
+	binary.Write(buf, binary.LittleEndian, uint16(42))
+
+	// IFD0 offset (10)
+	binary.Write(buf, binary.LittleEndian, uint32(10))
+
+	// "CR" signature at offset 8
+	buf.WriteByte(0x43)
+	buf.WriteByte(0x52)
+
+	// IFD0: 0 entries
+	binary.Write(buf, binary.LittleEndian, uint16(0))
+
+	// Next IFD offset (0 = end)
+	binary.Write(buf, binary.LittleEndian, uint32(0))
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// buildFakeCR3 writes a minimal CR3 file with ftyp box and "crx " brand.
+func buildFakeCR3(t *testing.T, dir, name string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+
+	// ftyp box: size = 20
+	binary.Write(buf, binary.BigEndian, uint32(20))
+	buf.WriteString("ftyp")
+	buf.WriteString("crx ")
+	binary.Write(buf, binary.BigEndian, uint32(1)) // minor version
+	buf.WriteString("crx ")                        // compat
+
+	// mdat box: size = 16
+	binary.Write(buf, binary.BigEndian, uint32(16))
+	buf.WriteString("mdat")
+	binary.Write(buf, binary.BigEndian, uint64(0)) // dummy data
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// buildFakePEF writes a minimal valid TIFF LE file with .pef extension.
+func buildFakePEF(t *testing.T, dir, name string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+
+	// Byte order marker (LE)
+	buf.WriteByte(0x49)
+	buf.WriteByte(0x49)
+
+	// TIFF magic (42 in LE)
+	binary.Write(buf, binary.LittleEndian, uint16(42))
+
+	// IFD0 offset (8)
+	binary.Write(buf, binary.LittleEndian, uint32(8))
+
+	// IFD0: 0 entries
+	binary.Write(buf, binary.LittleEndian, uint16(0))
+
+	// Next IFD offset (0 = end)
+	binary.Write(buf, binary.LittleEndian, uint32(0))
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// buildFakeARW writes a minimal valid TIFF LE file with .arw extension.
+func buildFakeARW(t *testing.T, dir, name string) string {
+	t.Helper()
+	buf := new(bytes.Buffer)
+
+	// Byte order marker (LE)
+	buf.WriteByte(0x49)
+	buf.WriteByte(0x49)
+
+	// TIFF magic (42 in LE)
+	binary.Write(buf, binary.LittleEndian, uint16(42))
+
+	// IFD0 offset (8)
+	binary.Write(buf, binary.LittleEndian, uint32(8))
+
+	// IFD0: 0 entries
+	binary.Write(buf, binary.LittleEndian, uint16(0))
+
+	// Next IFD offset (0 = end)
+	binary.Write(buf, binary.LittleEndian, uint32(0))
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // --- Tests ---
@@ -389,6 +596,199 @@ func TestIntegration_DryRun(t *testing.T) {
 	ledgerPath := filepath.Join(dirA, ".pixe_ledger.json")
 	if _, err := os.Stat(ledgerPath); err == nil {
 		t.Error("dry-run should not write .pixe_ledger.json to dirA")
+	}
+}
+
+// --- RAW Handler Integration Tests (Task 59) ---
+
+// TestIntegration_RAW_Discovery verifies that all 6 RAW formats are discovered
+// and processed correctly.
+func TestIntegration_RAW_Discovery(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Create one file of each RAW format
+	buildFakeDNG(t, dirA, "test.dng")
+	buildFakeNEF(t, dirA, "test.nef")
+	buildFakeCR2(t, dirA, "test.cr2")
+	buildFakeCR3(t, dirA, "test.cr3")
+	buildFakePEF(t, dirA, "test.pef")
+	buildFakeARW(t, dirA, "test.arw")
+
+	result, err := pipeline.Run(buildOptsWithRAW(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Processed != 6 {
+		t.Errorf("Processed = %d, want 6", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Verify each file was discovered and output files exist with correct extensions
+	extensions := []string{".dng", ".nef", ".cr2", ".cr3", ".pef", ".arw"}
+	for _, ext := range extensions {
+		files := findFiles(t, dirB, "19020220_000000_")
+		found := false
+		for _, f := range files {
+			if strings.HasSuffix(f, ext) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no output file found with extension %q", ext)
+		}
+	}
+}
+
+// TestIntegration_RAW_FullSort verifies RAW files are sorted with correct naming
+// and extensions are preserved lowercase.
+func TestIntegration_RAW_FullSort(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Create a mix of JPEG and RAW files
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	buildFakeDNG(t, dirA, "RAW_0001.dng")
+	buildFakeCR2(t, dirA, "RAW_0002.cr2")
+
+	result, err := pipeline.Run(buildOptsWithRAW(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Processed != 3 {
+		t.Errorf("Processed = %d, want 3", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Verify JPEG lands in 2021/12-Dec/
+	jpegFiles := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	if len(jpegFiles) != 1 {
+		t.Errorf("expected 1 JPEG file in 2021/12-Dec/, got %d", len(jpegFiles))
+	}
+
+	// Verify RAW files land in 1902/02-Feb/ with lowercase extensions
+	rawFiles := findFiles(t, dirB, "19020220_000000_")
+	if len(rawFiles) < 2 {
+		t.Errorf("expected at least 2 RAW files with Ansel Adams prefix, got %d", len(rawFiles))
+	}
+
+	// Check that extensions are lowercase
+	for _, f := range rawFiles {
+		if strings.HasSuffix(f, ".DNG") || strings.HasSuffix(f, ".CR2") {
+			t.Errorf("RAW file has uppercase extension: %q", filepath.Base(f))
+		}
+	}
+}
+
+// TestIntegration_RAW_DuplicateDetection verifies that identical RAW files
+// are routed to duplicates/.
+func TestIntegration_RAW_DuplicateDetection(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Create the same RAW file twice with different names
+	buildFakeDNG(t, dirA, "RAW_0001.dng")
+	buildFakeDNG(t, dirA, "RAW_0001_copy.dng")
+
+	result, err := pipeline.Run(buildOptsWithRAW(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", result.Duplicates)
+	}
+
+	// Verify duplicates/ directory exists
+	dupDir := filepath.Join(dirB, "duplicates")
+	if _, err := os.Stat(dupDir); err != nil {
+		t.Errorf("duplicates/ directory not created: %v", err)
+	}
+}
+
+// TestIntegration_RAW_MixedWithJPEG verifies sorting a directory with both
+// JPEG and RAW files produces correct date-based organization.
+// Note: fixtureExif1 and fixtureExif2 have the same image payload (EXIF stripped),
+// so fixtureExif2 will be detected as a duplicate. We only verify fixtureExif1.
+func TestIntegration_RAW_MixedWithJPEG(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// JPEG with EXIF date 2021-12-25
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	// RAW files (no EXIF, will get Ansel Adams date 1902-02-20)
+	buildFakeDNG(t, dirA, "RAW_0001.dng")
+	buildFakeCR2(t, dirA, "RAW_0002.cr2")
+
+	result, err := pipeline.Run(buildOptsWithRAW(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Processed != 3 {
+		t.Errorf("Processed = %d, want 3", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Verify JPEG file is in 2021/12-Dec/
+	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	if len(files2021) != 1 {
+		t.Errorf("expected 1 file in 2021/12-Dec/, got %d", len(files2021))
+	}
+
+	// Verify RAW files are in 1902/02-Feb/
+	rawFiles := findFiles(t, dirB, "19020220_000000_")
+	if len(rawFiles) < 2 {
+		t.Errorf("expected at least 2 RAW files with Ansel Adams prefix, got %d", len(rawFiles))
+	}
+}
+
+// TestIntegration_RAW_Verify verifies that checksums for RAW files match
+// after sorting and verification.
+func TestIntegration_RAW_Verify(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Create RAW files
+	buildFakeDNG(t, dirA, "RAW_0001.dng")
+	buildFakeCR2(t, dirA, "RAW_0002.cr2")
+
+	// Sort
+	_, err := pipeline.Run(buildOptsWithRAW(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("sort Run: %v", err)
+	}
+
+	// Verify
+	h, _ := hash.NewHasher("sha1")
+	reg := discovery.NewRegistry()
+	reg.Register(dnghandler.New())
+	reg.Register(cr2handler.New())
+
+	vResult, err := verify.Run(verify.Options{
+		Dir:      dirB,
+		Hasher:   h,
+		Registry: reg,
+		Output:   &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("verify Run: %v", err)
+	}
+
+	if vResult.Mismatches != 0 {
+		t.Errorf("Mismatches = %d, want 0", vResult.Mismatches)
+	}
+	if vResult.Verified < 1 {
+		t.Errorf("Verified = %d, want >= 1", vResult.Verified)
 	}
 }
 
