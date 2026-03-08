@@ -958,6 +958,300 @@ make build                      ✅ PASS
 
 ---
 
+## Task 50 — TIFF-RAW Shared Base — `internal/handler/tiffraw`
+
+### Implementation Summary
+- Created shared base package providing ExtractDate, HashableReader, and WriteMetadataTags for TIFF-based RAW formats (DNG, NEF, CR2, PEF, ARW).
+- ExtractDate parses TIFF IFD chain for EXIF DateTimeOriginal/DateTime with Ansel Adams fallback.
+- HashableReader extracts embedded JPEG preview from TIFF IFDs; falls back to full-file.
+- WriteMetadataTags is a no-op stub (RAW archival originals should not be modified).
+
+### Key Features
+- **Base struct**: Embeddable handler providing shared logic
+- **EXIF parsing**: Uses rwcarlsen/goexif for TIFF-based RAW files
+- **JPEG preview extraction**: Navigates IFD chain to find largest embedded JPEG
+- **sectionReadCloser**: Properly closes underlying file handle
+
+### Dependencies
+- Task 2 (domain types), Task 7 (JPEG handler patterns)
+
+### Validation
+- go build ./... compiles successfully
+- Unit tests verify ExtractDate, HashableReader, WriteMetadataTags behavior
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 51 — DNG Filetype Module — `internal/handler/dng`
+
+### Implementation Summary
+- Created thin wrapper handler embedding tiffraw.Base.
+- Extension-primary detection with .dng extension.
+- Magic bytes: TIFF LE (II*0) and TIFF BE (MM0*) at offset 0.
+
+### Key Features
+- **Handler struct**: Embeds tiffraw.Base
+- **Detect**: Validates .dng extension + TIFF header
+- **Inherited methods**: ExtractDate, HashableReader, WriteMetadataTags from Base
+
+### Dependencies
+- Task 50
+
+### Validation
+- Interface compliance verified
+- Detect returns true for valid .dng files
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 52 — NEF Filetype Module — `internal/handler/nef`
+
+### Implementation Summary
+- Created thin wrapper handler embedding tiffraw.Base.
+- Extension-primary detection with .nef extension.
+- Magic bytes: TIFF LE only (Nikon uses little-endian).
+
+### Key Features
+- **Handler struct**: Embeds tiffraw.Base
+- **Detect**: Validates .nef extension + TIFF LE header
+
+### Dependencies
+- Task 50
+
+### Validation
+- Interface compliance verified
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 53 — CR2 Filetype Module — `internal/handler/cr2`
+
+### Implementation Summary
+- Created thin wrapper handler embedding tiffraw.Base.
+- Detection: .cr2 extension + TIFF LE header + "CR" at offset 8.
+
+### Key Features
+- **Handler struct**: Embeds tiffraw.Base
+- **Detect**: Validates extension + TIFF LE + CR signature at offset 8
+
+### Dependencies
+- Task 50
+
+### Validation
+- Interface compliance verified
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 54 — PEF Filetype Module — `internal/handler/pef`
+
+### Implementation Summary
+- Created thin wrapper handler embedding tiffraw.Base.
+- Extension-primary detection with .pef extension.
+- Magic bytes: TIFF LE only.
+
+### Key Features
+- **Handler struct**: Embeds tiffraw.Base
+- **Detect**: Validates .pef extension + TIFF LE header
+
+### Dependencies
+- Task 50
+
+### Validation
+- Interface compliance verified
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 55 — ARW Filetype Module — `internal/handler/arw`
+
+### Implementation Summary
+- Created thin wrapper handler embedding tiffraw.Base.
+- Extension-primary detection with .arw extension.
+- Magic bytes: TIFF LE only.
+
+### Key Features
+- **Handler struct**: Embeds tiffraw.Base
+- **Detect**: Validates .arw extension + TIFF LE header
+
+### Dependencies
+- Task 50
+
+### Validation
+- Interface compliance verified
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 56 — CR3 Filetype Module — `internal/handler/cr3`
+
+### Implementation Summary
+- Created standalone ISOBMFF-based handler (does NOT use tiffraw.Base).
+- Uses ISOBMFF container parsing like HEIC handler.
+- Magic bytes: "ftyp" at offset 4 with "crx " brand check.
+
+### Key Features
+- **ExtractDate**: Parses ISOBMFF box structure for EXIF
+- **HashableReader**: Extracts embedded JPEG preview from container
+- **WriteMetadataTags**: No-op
+
+### Dependencies
+- Task 12 (HEIC handler ISOBMFF patterns)
+
+### Validation
+- Interface compliance verified
+- Detect distinguishes CR3 from HEIC/MP4 via brand
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 57 — RAW Handler Registration — Wire into CLI
+
+### Implementation Summary
+- Registered all 6 RAW handlers + HEIC + MP4 in cmd/sort.go, cmd/verify.go, cmd/resume.go.
+- JPEG registered first (required for fast-path).
+- All 9 handlers now available in CLI.
+
+### Key Features
+- **sort.go**: All handlers registered
+- **verify.go**: All handlers registered
+- **resume.go**: All handlers registered
+
+### Dependencies
+- Tasks 51, 52, 53, 54, 55, 56
+
+### Validation
+- go build ./... compiles
+- Dry-run discovers RAW files correctly
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 58 — RAW Handlers — Unit Tests
+
+### Implementation Summary
+- Created comprehensive unit tests for tiffraw base and all 6 RAW handler packages.
+- Tests cover: Extensions, MagicBytes, Detect, ExtractDate fallback, HashableReader determinism, WriteMetadataTags no-op.
+- Synthetic test fixtures generated programmatically (no real RAW files in repo).
+
+### Key Features
+- **tiffraw_test.go**: Tests Base methods with synthetic TIFF fixtures
+- **Per-format test files**: dng_test.go, nef_test.go, cr2_test.go, cr3_test.go, pef_test.go, arw_test.go
+- **CR2-specific**: Tests TIFF without CR at offset 8 returns false
+- **CR3-specific**: Tests HEIC brand and MP4 brand return false
+
+### Dependencies
+- Tasks 50, 51, 52, 53, 54, 55, 56
+
+### Validation
+- All tests pass with -race flag
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 59 — RAW Handlers — Integration Tests
+
+### Implementation Summary
+- Added 5 new integration tests for RAW file handling.
+- Tests verify: discovery, full sort, duplicate detection, mixed with JPEG, verify.
+
+### Key Features
+- **RAW_Discovery**: All 6 RAW formats discovered and matched correctly
+- **RAW_FullSort**: Correct output naming with lowercase extensions
+- **RAW_DuplicateDetection**: Second copy routed to duplicates/
+- **RAW_MixedWithJPEG**: Both JPEG and RAW sorted to same date dirs
+- **RAW_Verify**: Checksums match after sort
+
+### Dependencies
+- Tasks 57, 58
+
+### Validation
+- All 5 integration tests pass
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
+## Task 60 — Tests & Verification — Full Suite Green (RAW)
+
+### Implementation Summary
+- Verified go vet, go test -race, go build, make lint all pass.
+- All 22 test packages pass with zero failures.
+- All 9 handlers registered in CLI commands.
+
+### Verification Results
+```
+go vet ./...                    ✅ PASS
+go build ./...                   ✅ PASS
+go test -race ./...              ✅ PASS (all packages)
+make lint                        ✅ PASS
+go mod tidy                      ✅ PASS
+```
+
+### Dependencies
+- Tasks 58, 59
+
+### Validation
+- Full suite green
+- No regressions in JPEG, HEIC, MP4 handlers
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | [RAW handler commit]
+
+---
+
 ## Task 29 — Archive DB — `internal/archivedb` Package & Schema
 
 ### Implementation Summary
