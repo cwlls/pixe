@@ -89,7 +89,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("find interrupted runs: %w", err)
 	}
 	if len(interrupted) == 0 {
-		fmt.Fprintln(os.Stdout, "No interrupted runs found.")
+		_, _ = fmt.Fprintln(os.Stdout, "No interrupted runs found.")
 		return nil
 	}
 

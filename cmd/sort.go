@@ -141,7 +141,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("migrate manifest: %w", err)
 	}
 	if migResult.Migrated {
-		fmt.Fprintln(os.Stdout, migResult.Notice)
+		_, _ = fmt.Fprintln(os.Stdout, migResult.Notice)
 	}
 
 	// ------------------------------------------------------------------
