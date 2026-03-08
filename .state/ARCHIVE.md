@@ -72,3 +72,56 @@
 2026-03-07 | fe495f323ceca8ba963845916107fb20e68f287b
 
 ---
+
+## Task 37 — CLI Updates — `--db-path` Flag & Resume Rewrite
+
+### Implementation Summary
+- Added `--db-path` flag to both `pixe sort` and `pixe resume` commands, bound to Viper key `db_path` (env var `PIXE_DB_PATH`).
+- Fully rewrote `cmd/sort.go` to implement complete DB lifecycle: resolve location, open DB, write marker, auto-migrate from JSON manifest, generate run ID, and pass DB + RunID into pipeline.
+- Completely rewrote `cmd/resume.go` to use database discovery chain instead of JSON manifest loading.
+- Implemented database-aware resume flow: resolve DB location, find interrupted runs, validate source exists, rebuild config from run metadata, generate fresh run ID.
+
+### Key Features
+- **`cmd/sort.go` — DB Lifecycle**:
+  - `cfg.DBPath` populated from `viper.GetString("db_path")`
+  - `dblocator.Resolve(cfg.Destination, cfg.DBPath)` resolves DB path via priority chain
+  - `loc.Notice` printed to stderr when non-empty (explicit path or network mount)
+  - `archivedb.Open(loc.DBPath)` opens DB with deferred close
+  - `dblocator.WriteMarker()` writes marker when `loc.MarkerNeeded`
+  - `migrate.MigrateIfNeeded(db, cfg.Destination)` auto-migrates from legacy JSON manifest
+  - Fresh `runID := uuid.New().String()` generated
+  - `DB: db` and `RunID: runID` passed into `pipeline.SortOptions`
+
+- **`cmd/resume.go` — DB-Based Resume**:
+  - Removed all `manifest.Load()` usage
+  - New `--db-path` flag bound to Viper key `db_path`
+  - `dblocator.Resolve(dir, dbPath)` finds DB via priority chain
+  - `archivedb.Open(loc.DBPath)` opens DB
+  - `db.FindInterruptedRuns()` retrieves interrupted runs; prints "No interrupted runs found." if empty
+  - Takes `interrupted[0]` (most recent), validates `run.Source` still exists
+  - Rebuilds `config.AppConfig` from run's recorded `Source` and `Algorithm`
+  - Generates fresh `runID` for resume attempt
+  - Passes `DB: db` and `RunID: runID` into `pipeline.SortOptions`
+
+### Test Results
+- `go vet ./...` — PASS (zero warnings)
+- `go build ./...` — PASS (clean compilation)
+- `go test -race ./...` — all 15 packages PASS
+- Smoke tests: default DB location, custom --db-path, marker file, resume no-runs message — all PASS
+
+### Validation
+- Validated by @tester (Pass)
+- All acceptance criteria met:
+  - `pixe sort --db-path /tmp/custom.db --source ... --dest ...` uses specified DB path
+  - `pixe sort` without `--db-path` auto-resolves DB location
+  - `pixe resume --dir <dirB>` discovers DB via priority chain
+  - `pixe resume --dir <dirB> --db-path /tmp/custom.db` uses explicit path
+  - `--db-path` flag bindable via config file (`db_path`) and env var (`PIXE_DB_PATH`)
+
+### Status
+✅ Complete
+
+### Date & Commit
+2026-03-07 | 1dea7b94418a5afa359d2f952bbfcde5a7d133fa
+
+---

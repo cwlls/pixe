@@ -21,13 +21,17 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/cwlls/pixe-go/internal/archivedb"
 	"github.com/cwlls/pixe-go/internal/config"
+	"github.com/cwlls/pixe-go/internal/dblocator"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe-go/internal/migrate"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 	"github.com/cwlls/pixe-go/internal/pipeline"
 )
@@ -39,11 +43,11 @@ var sortCmd = &cobra.Command{
 extracts capture dates from metadata, computes data-only checksums, and copies
 files into the destination directory (--dest) using the naming convention:
 
-  YYYY/M/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+  YYYY/MM-Mon/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 
 The source directory is never modified. Every copy is verified by re-hashing
-the destination file. A manifest is written to <dest>/.pixe/manifest.json and
-a ledger is written to <source>/.pixe_ledger.json.`,
+the destination file. An archive database is written to <dest>/.pixe/pixe.db
+and a ledger is written to <source>/.pixe_ledger.json.`,
 	RunE: runSort,
 }
 
@@ -59,6 +63,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		Copyright:   viper.GetString("copyright"),
 		CameraOwner: viper.GetString("camera_owner"),
 		DryRun:      viper.GetBool("dry_run"),
+		DBPath:      viper.GetString("db_path"),
 	}
 
 	// ------------------------------------------------------------------
@@ -103,11 +108,47 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	reg := discovery.NewRegistry()
 	reg.Register(jpeghandler.New())
-	// HEIC and MP4 handlers registered here once Tasks 12 & 13 are complete.
 
 	// ------------------------------------------------------------------
-	// 5. Run the pipeline.
+	// 5. Resolve and open the archive database.
 	// ------------------------------------------------------------------
+	loc, err := dblocator.Resolve(cfg.Destination, cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("resolve database location: %w", err)
+	}
+	if loc.Notice != "" {
+		fmt.Fprintln(os.Stderr, loc.Notice)
+	}
+
+	db, err := archivedb.Open(loc.DBPath)
+	if err != nil {
+		return fmt.Errorf("open archive database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Write dbpath marker if needed (explicit path or network mount).
+	if loc.MarkerNeeded {
+		if err := dblocator.WriteMarker(cfg.Destination, loc.DBPath); err != nil {
+			return fmt.Errorf("write dbpath marker: %w", err)
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 6. Auto-migrate from legacy JSON manifest if present.
+	// ------------------------------------------------------------------
+	migResult, err := migrate.MigrateIfNeeded(db, cfg.Destination)
+	if err != nil {
+		return fmt.Errorf("migrate manifest: %w", err)
+	}
+	if migResult.Migrated {
+		fmt.Fprintln(os.Stdout, migResult.Notice)
+	}
+
+	// ------------------------------------------------------------------
+	// 7. Run the pipeline.
+	// ------------------------------------------------------------------
+	runID := uuid.New().String()
+
 	opts := pipeline.SortOptions{
 		Config:       cfg,
 		Hasher:       h,
@@ -115,6 +156,8 @@ func runSort(cmd *cobra.Command, args []string) error {
 		RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
 		Output:       os.Stdout,
 		PixeVersion:  Version(),
+		DB:           db,
+		RunID:        runID,
 	}
 
 	result, err := pipeline.Run(opts)
@@ -139,6 +182,7 @@ func init() {
 	sortCmd.Flags().String("copyright", "", `copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"`)
 	sortCmd.Flags().String("camera-owner", "", "camera owner string injected into destination files")
 	sortCmd.Flags().Bool("dry-run", false, "preview operations without copying any files")
+	sortCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
 
 	// Mark required flags.
 	_ = sortCmd.MarkFlagRequired("source")
@@ -150,4 +194,5 @@ func init() {
 	_ = viper.BindPFlag("copyright", sortCmd.Flags().Lookup("copyright"))
 	_ = viper.BindPFlag("camera_owner", sortCmd.Flags().Lookup("camera-owner"))
 	_ = viper.BindPFlag("dry_run", sortCmd.Flags().Lookup("dry-run"))
+	_ = viper.BindPFlag("db_path", sortCmd.Flags().Lookup("db-path"))
 }
