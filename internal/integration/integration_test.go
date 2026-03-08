@@ -30,10 +30,8 @@ import (
 
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 	"github.com/cwlls/pixe-go/internal/pipeline"
 	"github.com/cwlls/pixe-go/internal/verify"
@@ -265,9 +263,12 @@ func TestIntegration_NoDateFallback(t *testing.T) {
 	}
 }
 
-// TestIntegration_ResumeAfterInterrupt simulates an interrupted sort by
-// manually resetting manifest entries to pending, then resuming.
-func TestIntegration_ResumeAfterInterrupt(t *testing.T) {
+// TestIntegration_SecondRunDeduplicates verifies that running the pipeline
+// twice against the same source/dest produces consistent results.
+// The 3 fixture files all share the same image payload checksum (EXIF is
+// stripped before hashing), so only the first file processed is "original"
+// and the remaining 2 are always duplicates — on both runs.
+func TestIntegration_SecondRunDeduplicates(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -275,56 +276,34 @@ func TestIntegration_ResumeAfterInterrupt(t *testing.T) {
 	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
 	copyFixture(t, dirA, fixtureNoExif, "IMG_0003.jpg")
 
-	opts := buildOpts(t, dirA, dirB, false)
-
-	// First run — complete all 3 files.
-	result1, err := pipeline.Run(opts)
+	// First run — all 3 files processed; 2 are duplicates (same image payload).
+	result1, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
 	if err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
 	if result1.Processed != 3 {
 		t.Fatalf("first run: Processed = %d, want 3", result1.Processed)
 	}
-
-	// Simulate interrupt: reset 2 entries back to pending.
-	m, err := manifest.Load(dirB)
-	if err != nil || m == nil {
-		t.Fatalf("Load manifest: %v", err)
+	if result1.Errors != 0 {
+		t.Fatalf("first run: Errors = %d, want 0", result1.Errors)
 	}
-	resetCount := 0
-	for _, e := range m.Files {
-		if resetCount < 2 {
-			e.Status = domain.StatusPending
-			e.Checksum = ""
-			e.Destination = ""
-			e.CopiedAt = nil
-			e.VerifiedAt = nil
-			resetCount++
-		}
-	}
-	if err := manifest.Save(m, dirB); err != nil {
-		t.Fatalf("Save manifest after reset: %v", err)
+	if result1.Duplicates != 2 {
+		t.Errorf("first run: Duplicates = %d, want 2", result1.Duplicates)
 	}
 
-	// Resume run — should re-process the 2 reset entries.
-	opts2 := buildOpts(t, dirA, dirB, false)
-	result2, err := pipeline.Run(opts2)
+	// Second run — same source files, same dedup behaviour (no DB, so in-memory dedup).
+	result2, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
 	if err != nil {
-		t.Fatalf("resume Run: %v", err)
+		t.Fatalf("second Run: %v", err)
 	}
 	if result2.Errors != 0 {
-		t.Errorf("resume: Errors = %d, want 0", result2.Errors)
+		t.Errorf("second run: Errors = %d, want 0", result2.Errors)
 	}
-
-	// All 3 entries must be complete in the final manifest.
-	mFinal, err := manifest.Load(dirB)
-	if err != nil || mFinal == nil {
-		t.Fatalf("Load final manifest: %v", err)
+	if result2.Processed != 3 {
+		t.Errorf("second run: Processed = %d, want 3", result2.Processed)
 	}
-	for _, e := range mFinal.Files {
-		if e.Status != domain.StatusComplete {
-			t.Errorf("entry %q status = %q after resume, want complete", filepath.Base(e.Source), e.Status)
-		}
+	if result2.Duplicates != 2 {
+		t.Errorf("second run: Duplicates = %d, want 2", result2.Duplicates)
 	}
 }
 

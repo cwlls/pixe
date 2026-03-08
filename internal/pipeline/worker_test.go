@@ -22,7 +22,6 @@ import (
 
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/manifest"
@@ -61,7 +60,7 @@ func newOptsN(t *testing.T, cfg *config.AppConfig, workers int, out *bytes.Buffe
 }
 
 // TestRun_multipleWorkers processes 4 files with 4 workers and asserts all
-// appear in the manifest as complete.
+// are processed and the ledger is written with 4 entries.
 func TestRun_multipleWorkers(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
@@ -88,17 +87,20 @@ func TestRun_multipleWorkers(t *testing.T) {
 		t.Errorf("Errors = %d, want 0\nOutput:\n%s", result.Errors, out.String())
 	}
 
-	// All 4 entries should be complete in the manifest.
-	m, err := manifest.Load(dirB)
+	// Ledger should have 4 entries (2 unique + 2 duplicates).
+	l, err := manifest.LoadLedger(dirA)
 	if err != nil {
-		t.Fatalf("Load manifest: %v", err)
+		t.Fatalf("LoadLedger: %v", err)
 	}
-	if m == nil {
-		t.Fatal("manifest not written")
+	if l == nil {
+		t.Fatal("ledger not written to dirA")
 	}
-	for _, e := range m.Files {
-		if e.Status != domain.StatusComplete {
-			t.Errorf("entry %q status = %q, want complete", e.Source, e.Status)
+	if len(l.Files) != 4 {
+		t.Errorf("ledger.Files len = %d, want 4\nOutput:\n%s", len(l.Files), out.String())
+	}
+	for _, e := range l.Files {
+		if e.Checksum == "" {
+			t.Errorf("ledger entry %q has empty checksum", e.Path)
 		}
 	}
 }

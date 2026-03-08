@@ -26,7 +26,6 @@ import (
 
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/manifest"
@@ -204,7 +203,7 @@ func TestRun_duplicateRouting(t *testing.T) {
 	}
 }
 
-func TestRun_manifestWritten(t *testing.T) {
+func TestRun_ledgerWritten_withEntry(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -217,21 +216,21 @@ func TestRun_manifestWritten(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	m, err := manifest.Load(dirB)
+	l, err := manifest.LoadLedger(dirA)
 	if err != nil {
-		t.Fatalf("Load manifest: %v", err)
+		t.Fatalf("LoadLedger: %v", err)
 	}
-	if m == nil {
-		t.Fatal("manifest not written")
+	if l == nil {
+		t.Fatal("ledger not written to dirA")
 	}
-	if len(m.Files) != 1 {
-		t.Errorf("manifest.Files len = %d, want 1", len(m.Files))
+	if len(l.Files) != 1 {
+		t.Errorf("ledger.Files len = %d, want 1", len(l.Files))
 	}
-	if m.Files[0].Status != domain.StatusComplete {
-		t.Errorf("manifest entry status = %q, want %q", m.Files[0].Status, domain.StatusComplete)
+	if l.Files[0].Checksum == "" {
+		t.Error("ledger entry checksum should not be empty")
 	}
-	if m.Files[0].Checksum == "" {
-		t.Error("manifest entry checksum should not be empty")
+	if l.Files[0].Destination == "" {
+		t.Error("ledger entry destination should not be empty")
 	}
 }
 
