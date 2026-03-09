@@ -179,7 +179,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						archivedb.WithError(wr.err.Error()))
 				}
 				result.Errors++
-				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(wr.df.Path), wr.err)
+				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", wr.df.RelPath, wr.err)
 				completed++
 				continue
 			}
@@ -214,7 +214,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			}
 			if fr.err != nil {
 				result.Errors++
-				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(fr.df.Path), fr.err)
+				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", fr.df.RelPath, fr.err)
 			} else {
 				finalRelDest := fr.relDest
 				finalIsDup := fr.isDuplicate
@@ -230,7 +230,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						if dedupErr != nil {
 							result.Errors++
 							_, _ = fmt.Fprintf(out, "  ERROR  %s: dedup check: %v\n",
-								filepath.Base(fr.df.Path), dedupErr)
+								fr.df.RelPath, dedupErr)
 							completed++
 							continue
 						}
@@ -245,7 +245,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 									archivedb.WithError(renErr.Error()))
 								result.Errors++
 								_, _ = fmt.Fprintf(out, "  ERROR  %s: relocate duplicate: %v\n",
-									filepath.Base(fr.df.Path), renErr)
+									fr.df.RelPath, renErr)
 								completed++
 								continue
 							}
@@ -268,7 +268,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					result.Duplicates++
 				}
 				ledger.Files = append(ledger.Files, domain.LedgerEntry{
-					Path:        relPath(dirA, fr.df.Path),
+					Path:        fr.df.RelPath,
 					Checksum:    fr.checksum,
 					Destination: finalRelDest,
 					VerifiedAt:  fr.verifiedAt,
@@ -355,7 +355,7 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			if opts.Config.DryRun {
-				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", filepath.Base(item.df.Path), assign.relDest)
+				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", item.df.RelPath, assign.relDest)
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "complete",
 						archivedb.WithDestination(assign.absDest, assign.relDest),
@@ -371,7 +371,7 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			// --- Copy ---
-			_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", filepath.Base(item.df.Path), assign.relDest)
+			_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", item.df.RelPath, assign.relDest)
 			if err := copypkg.Execute(item.df.Path, assign.absDest); err != nil {
 				ferr := fmt.Errorf("copy: %w", err)
 				if db != nil {
@@ -407,7 +407,7 @@ func runWorker(ctx context.Context, id int,
 						_ = db.UpdateFileStatus(item.fileID, "tag_failed", archivedb.WithError(err.Error()))
 					}
 					_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n",
-						filepath.Base(item.df.Path), err)
+						item.df.RelPath, err)
 				} else {
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tagged")

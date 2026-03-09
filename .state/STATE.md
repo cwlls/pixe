@@ -8,7 +8,7 @@
 | 4 | Implement DB schema v2 migration | high | Developer | ✅ Complete | 3 | `recursive` on `runs`, `skip_reason`+`skipped` on `files` |
 | 5 | Add `CheckSourceProcessed` query to archivedb | high | Developer | ✅ Complete | 4 | Skip-detection query by absolute `source_path` |
 | 6 | Build the ignore-list matcher | high | Developer | ✅ Complete | 1 | New `internal/ignore` package with glob matching |
-| 7 | Refactor `discovery.Walk` for recursive + ignore + skip output | high | Developer | pending | 1, 6 | Controlled recursion, ignore filtering, structured skip returns |
+| 7 | Refactor `discovery.Walk` for recursive + ignore + skip output | high | Developer | ✅ Complete | 1, 6 | Controlled recursion, ignore filtering, structured skip returns |
 | 8 | Upgrade `LedgerEntry` and `Ledger` to v3 | high | Developer | pending | 3 | New fields: `Status`, `Reason`, `Matches`, `Recursive` |
 | 9 | Refactor pipeline stdout output to COPY/SKIP/DUPE/ERR format | high | Developer | pending | 3, 5, 7, 8 | Central formatting; all outcomes produce one line |
 | 10 | Wire skip/dupe/err entries into ledger and DB | high | Developer | pending | 8, 9 | Skipped + unsupported files get ledger entries + DB rows |

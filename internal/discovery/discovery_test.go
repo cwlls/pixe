@@ -171,7 +171,7 @@ func TestWalk_classifiesKnownFiles(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
 
-	discovered, skipped, err := Walk(dir, reg)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -193,14 +193,14 @@ func TestWalk_skipsDotfiles(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
 
-	discovered, skipped, err := Walk(dir, reg)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
 	if len(discovered) != 1 {
 		t.Errorf("discovered: got %d, want 1", len(discovered))
 	}
-	// Both dotfiles should appear in skipped.
+	// Both dotfiles should appear in skipped (no ignore matcher supplied).
 	if len(skipped) != 2 {
 		t.Errorf("skipped: got %d, want 2 (dotfiles)", len(skipped))
 	}
@@ -216,7 +216,7 @@ func TestWalk_skipsDotDirectories(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
 
-	discovered, _, err := Walk(dir, reg)
+	discovered, _, err := Walk(dir, reg, WalkOptions{Recursive: true})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestWalk_recurseSubdirectories(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
 
-	discovered, _, err := Walk(dir, reg)
+	discovered, _, err := Walk(dir, reg, WalkOptions{Recursive: true})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestWalk_emptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	reg := NewRegistry()
 
-	discovered, skipped, err := Walk(dir, reg)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{})
 	if err != nil {
 		t.Fatalf("Walk on empty dir: %v", err)
 	}

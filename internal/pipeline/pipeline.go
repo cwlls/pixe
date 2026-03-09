@@ -36,6 +36,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
 	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe-go/internal/ignore"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 )
@@ -110,7 +111,11 @@ func Run(opts SortOptions) (SortResult, error) {
 	// ------------------------------------------------------------------
 	// 2. Walk dirA.
 	// ------------------------------------------------------------------
-	discovered, skipped, err := discovery.Walk(dirA, opts.Registry)
+	walkOpts := discovery.WalkOptions{
+		Recursive: cfg.Recursive,
+		Ignore:    ignore.New(cfg.Ignore),
+	}
+	discovered, skipped, err := discovery.Walk(dirA, opts.Registry, walkOpts)
 	if err != nil {
 		return SortResult{}, fmt.Errorf("pipeline: walk source: %w", err)
 	}
@@ -197,7 +202,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
 			}
-			_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", filepath.Base(df.Path), err)
+			_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", df.RelPath, err)
 			continue
 		}
 
@@ -275,7 +280,7 @@ func processFile(
 	absDest := filepath.Join(dirB, relDest)
 
 	if cfg.DryRun {
-		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", filepath.Base(df.Path), relDest)
+		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", df.RelPath, relDest)
 		if db != nil {
 			_ = db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithDestination(absDest, relDest),
@@ -285,7 +290,7 @@ func processFile(
 	}
 
 	// --- Copy ---
-	_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", filepath.Base(df.Path), relDest)
+	_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", df.RelPath, relDest)
 	if err := copypkg.Execute(df.Path, absDest); err != nil {
 		return nil, false, fmt.Errorf("copy: %w", err)
 	}
@@ -314,7 +319,7 @@ func processFile(
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "tag_failed", archivedb.WithError(err.Error()))
 			}
-			_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", filepath.Base(df.Path), err)
+			_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", df.RelPath, err)
 			// Tag failure is non-fatal: file is copied and verified.
 		} else {
 			if db != nil {
@@ -360,7 +365,7 @@ func processFile(
 	}
 
 	le := &domain.LedgerEntry{
-		Path:        relPath(dirA, df.Path),
+		Path:        df.RelPath,
 		Checksum:    checksum,
 		Destination: relDest,
 		VerifiedAt:  verifiedAt,
@@ -396,14 +401,4 @@ func renderCopyright(tmplStr string, date time.Time) string {
 		return tmplStr
 	}
 	return buf.String()
-}
-
-// relPath returns the path of target relative to base.
-// Falls back to target if Rel fails.
-func relPath(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return target
-	}
-	return rel
 }

@@ -21,73 +21,108 @@ import (
 	"strings"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/ignore"
 )
 
 // DiscoveredFile pairs a source path with its resolved FileTypeHandler.
 type DiscoveredFile struct {
-	Path    string
+	Path    string // absolute path for file I/O
+	RelPath string // relative path from dirA for display and ledger
 	Handler domain.FileTypeHandler
 }
 
 // SkippedFile records a file that could not be classified or was intentionally
-// excluded from processing.
+// excluded from processing. Path is relative to dirA.
 type SkippedFile struct {
-	Path   string
-	Reason string
+	Path   string // relative path from dirA
+	Reason string // human-readable reason
 }
 
-// Walk recursively walks dirA, classifies each regular file using the
+// WalkOptions configures the discovery walk.
+type WalkOptions struct {
+	// Recursive, when true, causes Walk to descend into subdirectories of dirA.
+	// When false (the default) only the top-level files in dirA are processed.
+	Recursive bool
+
+	// Ignore is an optional matcher for files to exclude completely.
+	// Ignored files do not appear in either the discovered or skipped slices.
+	// If nil, only the hardcoded ledger-file exclusion applies (handled inside
+	// the ignore package's zero-value Matcher).
+	Ignore *ignore.Matcher
+}
+
+// Walk discovers files in dirA, classifies each regular file using the
 // provided registry, and returns two slices:
 //   - discovered: files with a matched handler, ready for the pipeline.
-//   - skipped: files that were excluded (dotfiles, unrecognised formats).
+//   - skipped: files that were excluded with a human-readable reason.
 //
-// Walk never modifies any file. Directories are traversed but not returned.
-// Dotfiles and dot-directories (names starting with ".") are skipped entirely.
-func Walk(dirA string, reg *Registry) (discovered []DiscoveredFile, skipped []SkippedFile, err error) {
+// Files matching the ignore list (including the hardcoded .pixe_ledger.json)
+// are completely invisible — they appear in neither slice.
+//
+// Dot-directories (names starting with ".") are never descended into.
+// When opts.Recursive is false, all subdirectories are skipped.
+func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []DiscoveredFile, skipped []SkippedFile, err error) {
 	err = filepath.WalkDir(dirA, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// Surface walk errors (e.g. permission denied on a subdirectory).
 			return fmt.Errorf("discovery: walk %q: %w", path, walkErr)
 		}
 
 		name := d.Name()
 
-		// Skip dot-directories entirely (don't descend into them).
+		// --- Directory handling ---
 		if d.IsDir() {
-			if strings.HasPrefix(name, ".") && path != dirA {
-				return filepath.SkipDir
+			if path == dirA {
+				return nil // always enter the root
 			}
-			return nil
+			if strings.HasPrefix(name, ".") {
+				return filepath.SkipDir // always skip dot-directories
+			}
+			if !opts.Recursive {
+				return filepath.SkipDir // non-recursive: skip all subdirs
+			}
+			return nil // recursive: descend
 		}
 
-		// Skip dotfiles (e.g. .pixe_ledger.json, .DS_Store).
+		// --- Compute relative path from dirA ---
+		relPath, _ := filepath.Rel(dirA, path)
+
+		// --- Apply ignore matcher (includes hardcoded ledger ignore) ---
+		if opts.Ignore != nil && opts.Ignore.Match(name, relPath) {
+			return nil // completely invisible
+		}
+
+		// --- Dotfile policy (hardcoded, not configurable) ---
+		// .pixe_ledger.json is caught above by the ignore matcher.
+		// Other dotfiles (e.g. .DS_Store) are skipped with a reason.
 		if strings.HasPrefix(name, ".") {
 			skipped = append(skipped, SkippedFile{
-				Path:   path,
-				Reason: "dotfile skipped",
+				Path:   relPath,
+				Reason: "dotfile",
 			})
 			return nil
 		}
 
-		// Attempt to classify the file.
+		// --- Classify via registry ---
 		handler, detErr := reg.Detect(path)
 		if detErr != nil {
 			skipped = append(skipped, SkippedFile{
-				Path:   path,
+				Path:   relPath,
 				Reason: fmt.Sprintf("detection error: %v", detErr),
 			})
 			return nil
 		}
 		if handler == nil {
+			ext := filepath.Ext(name)
 			skipped = append(skipped, SkippedFile{
-				Path:   path,
-				Reason: "unrecognised format",
+				Path:   relPath,
+				Reason: fmt.Sprintf("unsupported format: %s", ext),
 			})
 			return nil
 		}
 
 		discovered = append(discovered, DiscoveredFile{
-			Path:    path,
+			Path:    path,    // absolute, for file I/O
+			RelPath: relPath, // relative, for display and ledger
 			Handler: handler,
 		})
 		return nil
