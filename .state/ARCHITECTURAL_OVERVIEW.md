@@ -12,7 +12,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 1. **Safety above all else.** Source files are never modified or moved. Every copy is verified before being considered complete. An interrupted run can always be resumed.
 2. **Native Go execution.** All functionality — metadata extraction, hashing, file operations — uses native Go packages. No shelling out to `exiftool`, `ffmpeg`, or other external binaries.
-3. **Deterministic output.** Given the same input files, configuration, and system locale, Pixe always produces the same directory structure and filenames. (Month directory names are locale-aware; see Section 4.3.)
+3. **Deterministic output.** Given the same input files, configuration, and system locale, Pixe always produces the same directory structure and filenames. (Month directory names are locale-aware; see Section 4.5.)
 4. **Modular by design.** New file types are added by implementing a Go interface. The core engine is format-agnostic.
 
 ---
@@ -173,17 +173,20 @@ dirA (read-only source)          dirB (organized destination)
 ┌──────────────────┐             ┌──────────────────────────────────────┐
 │ IMG_0001.jpg     │  ────────>  │ 2021/12-Dec/                         │
 │ IMG_0002.jpg     │   discover  │   20211225_062223_7d97e98f...jpg      │
-│ IMG_1234.jpg     │   extract   │ 2022/02-Feb/                         │
-│ VID_0010.mp4     │   hash      │   20220202_123101_447d3060...jpg      │
-│                  │   copy      │ 2022/03-Mar/                         │
-│                  │   verify    │   20220316_232122_321c7d6f...jpg      │
-│                  │   tag       │ duplicates/                          │
-│                  │             │   20260306_103000/                    │
-│ .pixe_ledger.json│             │     2022/02-Feb/                     │
+│ IMG_1234.jpg     │   filter    │ 2022/02-Feb/                         │
+│ VID_0010.mp4     │   extract   │   20220202_123101_447d3060...jpg      │
+│ notes.txt        │   hash      │ 2022/03-Mar/                         │
+│ subfolder/       │   copy      │   20220316_232122_321c7d6f...jpg      │
+│   IMG_5678.jpg   │   verify    │ duplicates/                          │
+│                  │   tag       │   20260306_103000/                    │
+│ .pixe_ledger.json│  (ignored)  │     2022/02-Feb/                     │
 └──────────────────┘             │       20220202_123101_447d...jpg      │
                                  │ .pixe/                               │
-                                 │   pixe.db  (or dbpath marker)        │
-                                 └──────────────────────────────────────┘
+  stdout:                        │   pixe.db  (or dbpath marker)        │
+  COPY IMG_0001.jpg -> 2021/...  └──────────────────────────────────────┘
+  SKIP IMG_1234.jpg -> previously imported
+  DUPE IMG_0002.jpg -> matches 2022/02-Feb/20220202...jpg
+  ERR  notes.txt    -> unsupported format: .txt
 ```
 
 ### 4.2 Pipeline Stages
@@ -206,13 +209,92 @@ pending → extracted → hashed → copied → verified → tagged → complete
 
 Error states (`failed`, `mismatch`, `tag_failed`) halt processing for that file and flag it for user attention.
 
-### 4.3 Output Naming Convention
+### 4.3 Pipeline Output
+
+Every file discovered in `dirA` produces exactly one line of stdout output, regardless of outcome. This provides a complete, auditable record of what happened during the run. The output format mirrors `COPY` for all four outcomes:
+
+```
+COPY <source_filename> -> <destination_relative_path>
+SKIP <source_filename> -> <reason>
+DUPE <source_filename> -> <reason>
+ERR  <source_filename> -> <reason>
+```
+
+#### Output Verbs
+
+| Verb | Meaning | Example |
+|---|---|---|
+| **`COPY`** | File successfully processed and copied to `dirB` | `COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223_7d97e98f...jpg` |
+| **`SKIP`** | File not copied because it was already processed | `SKIP IMG_0001.jpg -> previously imported` |
+| **`SKIP`** | File not copied because its type is not recognized | `SKIP notes.txt -> unsupported format: .txt` |
+| **`DUPE`** | File is a content duplicate of an already-archived file | `DUPE IMG_0042.jpg -> matches 2022/02-Feb/20220202_123101_447d3060...jpg` |
+| **`ERR`** | File processing failed at some pipeline stage | `ERR  IMG_9999.jpg -> EXIF parse failed: truncated IFD at offset 0x1A` |
+
+**Skip reasons:**
+
+- `previously imported` — The file's source path was already processed in a prior run (found in the archive database with a terminal status).
+- `unsupported format: .<ext>` — No registered `FileTypeHandler` claims this file extension, or magic-byte verification failed.
+
+**Duplicate reasons:**
+
+- `matches <dest_rel>` — The file's content checksum matches an already-archived file. The `<dest_rel>` is the relative path within `dirB` of the existing copy. The duplicate is still physically copied to `duplicates/<run_timestamp>/...` for user review, and the `DUPE` line confirms this routing.
+
+**Error reasons:**
+
+- Freetext description of the failure, drawn from the error returned by the pipeline stage that failed (e.g., `EXIF parse failed: ...`, `copy failed: permission denied`, `verification mismatch: expected abc123, got def456`).
+
+#### Ledger Recording
+
+All four outcomes — `COPY`, `SKIP`, `DUPE`, `ERR` — are recorded in the ledger (see Section 8.8). Every file discovered in `dirA` appears in the ledger's `files` array with a `status` field indicating its outcome. This ensures the ledger is a complete manifest of what Pixe saw and decided for every file in the source directory.
+
+### 4.4 Ignore List
+
+Pixe maintains a list of **glob patterns** for files that should be completely invisible to the pipeline — not discovered, not counted, not reported, and not recorded in the ledger. Ignored files are as if they do not exist in `dirA`.
+
+#### Hardcoded Ignores
+
+The following pattern is always ignored, regardless of configuration:
+
+- `.pixe_ledger.json` — Pixe's own ledger file. Without this, Pixe would discover its own ledger when re-processing a source directory and report it as an unrecognized file type.
+
+This is the **only** hardcoded entry. All other ignore patterns are user-configured.
+
+#### User-Configured Ignores
+
+Additional ignore patterns are specified via CLI flag or config file, using standard glob syntax (as implemented by Go's `filepath.Match`):
+
+**CLI flag:** `--ignore <glob>` (repeatable — each occurrence adds one pattern)
+
+```bash
+pixe sort --source ./photos --dest ./archive --ignore "*.txt" --ignore ".DS_Store" --ignore "Thumbs.db"
+```
+
+**Config file (`.pixe.yaml`):**
+
+```yaml
+ignore:
+  - "*.txt"
+  - ".DS_Store"
+  - "Thumbs.db"
+  - "*.aae"
+```
+
+Patterns from the CLI flag and config file are **merged** (additive). The hardcoded ledger ignore is always present in addition to user patterns.
+
+#### Matching Behavior
+
+- Patterns are matched against the **filename only** (not the full path) for files in the top-level directory.
+- When `--recursive` is enabled, patterns are matched against the **relative path from `dirA`** as well as the filename. This allows patterns like `subfolder/*.tmp` or `**/Thumbs.db`.
+- Matching uses Go's `filepath.Match` semantics (supports `*`, `?`, `[...]` character classes, but not `**` recursive glob — `**` support may be added via `doublestar` library if needed).
+- Directories themselves are never ignored — only files within them. (A future enhancement could support directory-level ignore patterns for recursive mode.)
+
+### 4.5 Output Naming Convention
 
 ```
 YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 ```
 
-- **Date/Time**: Extracted from file metadata (see Section 4.5).
+- **Date/Time**: Extracted from file metadata (see Section 4.7).
 - **Checksum**: Hex-encoded hash of the media payload. Default SHA-1 (40 hex characters).
 - **Extension**: Lowercase, preserved from original.
 
@@ -227,7 +309,7 @@ YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 
 > **Note:** This format applies only to the month **directory name**. The filename retains its existing `YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>` format with a zero-padded numeric month.
 
-### 4.4 Duplicate Handling
+### 4.6 Duplicate Handling
 
 When a file's checksum matches an already-processed file (same data payload):
 
@@ -239,7 +321,7 @@ When a file's checksum matches an already-processed file (same data payload):
 - The subdirectory structure mirrors the normal import layout, as if `duplicates/<run_timestamp>/` were the root of `dirB`. The month directory uses the same `<MM>-<Mon>` format as the primary archive.
 - This preserves the duplicate for user review without polluting the primary archive.
 
-### 4.5 Date Fallback Chain
+### 4.7 Date Fallback Chain
 
 Each filetype module extracts dates using format-appropriate methods. The **authoritative fallback chain** is:
 
@@ -249,7 +331,7 @@ Each filetype module extracts dates using format-appropriate methods. The **auth
 
 Filesystem timestamps (`ModTime`, `CreationTime`) are explicitly **not used** — they are unreliable across copies, cloud syncs, and OS transfers.
 
-### 4.6 Metadata Tagging (Optional)
+### 4.8 Metadata Tagging (Optional)
 
 On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destination file. These are **never written to the source**.
 
@@ -262,6 +344,61 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 - Tagging occurs **after** copy and verify — the checksum reflects the original data, not the tagged version.
 - Each filetype module defines how these tags are written for its format (EXIF for JPEG/HEIC, metadata atoms for MP4, etc.).
 
+### 4.9 Recursive Source Processing
+
+By default, Pixe processes only the **top-level files** in `dirA`. Subdirectories are not traversed. The `--recursive` / `-r` flag enables recursive descent into all subdirectories of `dirA`.
+
+#### Default Behavior (non-recursive)
+
+```bash
+pixe sort --source ./photos --dest ./archive
+```
+
+Only files directly inside `./photos/` are discovered. Subdirectories like `./photos/vacation/` are silently ignored.
+
+#### Recursive Behavior
+
+```bash
+pixe sort --source ./photos --dest ./archive --recursive
+```
+
+All files in `./photos/` and all nested subdirectories (e.g., `./photos/vacation/IMG_0001.jpg`, `./photos/2024/trip/VID_0010.mp4`) are discovered and processed. The source directory structure has **no effect** on the destination structure — all files are organized into `dirB` by their capture date regardless of where they were found in the source tree.
+
+#### File Identity in Recursive Mode
+
+When recursive mode is enabled, files are identified by their **relative path from `dirA`** throughout the system:
+
+- **Stdout output**: `COPY vacation/IMG_0001.jpg -> 2024/07-Jul/20240715_143022_abc123...jpg`
+- **Ledger entries**: `"path": "vacation/IMG_0001.jpg"`
+- **Database `source_path`**: Absolute path as always (e.g., `/Users/wells/photos/vacation/IMG_0001.jpg`)
+- **Skip detection**: The archive database is queried by absolute `source_path`, so a file processed in a prior non-recursive run of the same `dirA` will be correctly skipped when a subsequent recursive run encounters it.
+
+#### Incremental Recursive Runs
+
+A common workflow is to first run Pixe non-recursively on a `dirA`, then later run it recursively on the same `dirA` to pick up files in subdirectories:
+
+```bash
+# First run: processes only top-level files
+pixe sort --source ./photos --dest ./archive
+
+# Later run: processes everything, skipping already-imported top-level files
+pixe sort --source ./photos --dest ./archive --recursive
+```
+
+The second run will:
+1. Discover all files (top-level + nested).
+2. Skip top-level files already recorded in the archive database (stdout: `SKIP IMG_0001.jpg -> previously imported`).
+3. Process newly discovered files from subdirectories.
+4. Write a single updated ledger at `dirA/.pixe_ledger.json` containing entries for **all** files from this run (both skipped and newly processed), using relative paths.
+
+#### Ledger Placement
+
+Regardless of recursion depth, a **single ledger** is written at the root of `dirA` (`dirA/.pixe_ledger.json`). There is no per-subdirectory ledger. All file paths within the ledger use **relative paths from `dirA`** (e.g., `vacation/IMG_0001.jpg`, not the absolute path).
+
+#### Ignore Patterns in Recursive Mode
+
+The ignore list (Section 4.4) applies at every level of the directory tree. Patterns are matched against both the **filename** and the **relative path from `dirA`**. The hardcoded `.pixe_ledger.json` ignore matches by filename, so a ledger file at any depth (should one exist from a prior run targeting a subdirectory) is ignored.
+
 ---
 
 ## 5. Global Constraints
@@ -272,7 +409,7 @@ On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destinatio
 > - **Copy-then-verify.** Every file is copied to `dirB`, then the destination is independently re-read and re-hashed to confirm integrity.
 > - **Database-backed resumability.** A SQLite database tracks per-file state across all runs. Interrupted runs resume from the last committed state. Each file completion is committed individually for crash safety.
 > - **Ledger in `dirA`.** A `.pixe_ledger.json` is written to the source directory, recording which files were successfully processed. Each ledger entry includes a `run_id` linking back to the archive database for full queryability.
-> - **No silent data loss.** Hash mismatches, copy failures, and unrecognized files are always reported. Pixe never exits silently on error.
+> - **No silent outcomes.** Every discovered file produces exactly one line of stdout output (`COPY`, `SKIP`, `DUPE`, or `ERR`) and a corresponding ledger entry. Hash mismatches, copy failures, unrecognized files, duplicates, and skipped files are never silent. Pixe never exits without accounting for every file it saw.
 > - **Concurrent-run safety.** Multiple `pixe sort` processes may target the same `dirB` simultaneously. The SQLite database uses WAL mode and busy-retry to ensure integrity without requiring external coordination.
 
 > [!IMPORTANT]
@@ -506,15 +643,17 @@ pixe version
 #### `pixe sort`
 Primary operation. Discovers files in `dirA`, processes them through the pipeline, and writes organized output to `dirB`.
 
-| Flag | Default | Description |
-|---|---|---|
-| `--source` | (required) | Source directory (read-only) |
-| `--dest` | (required) | Destination directory |
-| `--workers` | auto | Number of concurrent workers |
-| `--algorithm` | `sha1` | Hash algorithm (`sha1`, `sha256`, etc.) |
-| `--copyright` | (none) | Copyright string template. `{{.Year}}` supported. |
-| `--camera-owner` | (none) | CameraOwner freetext string |
-| `--dry-run` | `false` | Preview operations without copying |
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--source` | | (required) | Source directory (read-only) |
+| `--dest` | | (required) | Destination directory |
+| `--workers` | | auto | Number of concurrent workers |
+| `--algorithm` | | `sha1` | Hash algorithm (`sha1`, `sha256`, etc.) |
+| `--copyright` | | (none) | Copyright string template. `{{.Year}}` supported. |
+| `--camera-owner` | | (none) | CameraOwner freetext string |
+| `--dry-run` | | `false` | Preview operations without copying |
+| `--recursive` | `-r` | `false` | Recursively process subdirectories of `--source` |
+| `--ignore` | | (none) | Glob pattern for files to ignore. Repeatable: each `--ignore` adds one pattern. Merged with patterns from config file. |
 
 #### `pixe verify`
 Walks a previously sorted `dirB`, parses checksums from filenames, recomputes data-only hashes, and reports mismatches.
@@ -553,7 +692,14 @@ algorithm: sha1
 workers: 8
 copyright: "Copyright {{.Year}} My Family, all rights reserved"
 camera_owner: "Wells Family"
+recursive: false
+ignore:
+  - "*.txt"
+  - ".DS_Store"
+  - "Thumbs.db"
 ```
+
+The `ignore` key is a list of glob patterns. Patterns from the config file are merged with any `--ignore` CLI flags (additive). The hardcoded `.pixe_ledger.json` ignore is always active regardless of config.
 
 ---
 
@@ -608,6 +754,7 @@ CREATE TABLE runs (
     destination   TEXT NOT NULL,      -- absolute path to dirB
     algorithm     TEXT NOT NULL,      -- e.g., "sha1", "sha256"
     workers       INTEGER NOT NULL,   -- worker count for this run
+    recursive     INTEGER NOT NULL DEFAULT 0,  -- 1 if --recursive was enabled
     started_at    TEXT NOT NULL,      -- ISO 8601 UTC timestamp
     finished_at   TEXT,               -- NULL if still running or interrupted
     status        TEXT NOT NULL       -- "running", "completed", "interrupted"
@@ -627,12 +774,14 @@ CREATE TABLE files (
     dest_path     TEXT,               -- absolute path to file in dirB (NULL until copied)
     dest_rel      TEXT,               -- relative path within dirB (NULL until copied)
     checksum      TEXT,               -- hex-encoded hash (NULL until hashed)
-    status        TEXT NOT NULL       -- pipeline stage
+    status        TEXT NOT NULL       -- pipeline stage or terminal outcome
         CHECK (status IN (
             'pending', 'extracted', 'hashed', 'copied',
             'verified', 'tagged', 'complete',
-            'failed', 'mismatch', 'tag_failed', 'duplicate'
+            'failed', 'mismatch', 'tag_failed', 'duplicate',
+            'skipped'
         )),
+    skip_reason   TEXT,               -- reason for skip (NULL unless status = 'skipped')
     is_duplicate  INTEGER NOT NULL DEFAULT 0,  -- 1 if routed to duplicates/
     capture_date  TEXT,               -- ISO 8601, extracted from metadata
     file_size     INTEGER,            -- source file size in bytes
@@ -669,6 +818,8 @@ CREATE TABLE schema_version (
 
 Future Pixe versions can check this table and apply incremental migrations.
 
+> **Note:** The addition of `recursive` to `runs`, and `skipped` status + `skip_reason` to `files`, constitutes a schema version bump (v1 → v2). Existing databases are migrated by adding the new columns with defaults (`recursive = 0`, `skip_reason = NULL`) and inserting a new `schema_version` row. The `skipped` status value is additive to the CHECK constraint and does not affect existing rows.
+
 ### 8.4 Query Patterns
 
 The schema supports the following query families, all served by indexed lookups:
@@ -684,6 +835,8 @@ The schema supports the following query families, all served by indexed lookups:
 | **All errors/mismatches** | `SELECT f.*, r.source FROM files f JOIN runs r ON f.run_id = r.id WHERE f.status IN ('failed', 'mismatch', 'tag_failed')` |
 | **All duplicates** | `SELECT * FROM files WHERE is_duplicate = 1` |
 | **Duplicate pairs** | `SELECT d.source_path, d.dest_path, o.dest_path AS original FROM files d JOIN files o ON d.checksum = o.checksum AND o.is_duplicate = 0 AND o.status = 'complete' WHERE d.is_duplicate = 1` |
+| **All skipped** | `SELECT source_path, skip_reason FROM files WHERE status = 'skipped'` |
+| **Skip check** | `SELECT id FROM files WHERE source_path = ? AND status IN ('complete', 'duplicate') LIMIT 1` |
 | **Archive inventory** | `SELECT dest_rel, checksum, capture_date FROM files WHERE status = 'complete' AND is_duplicate = 0` |
 
 ### 8.5 Concurrency & Integrity
@@ -748,30 +901,77 @@ The migration is idempotent — if `manifest.json.migrated` already exists, the 
 
 ### 8.8 Ledger (`dirA/.pixe_ledger.json`)
 
-The ledger remains a **lightweight JSON receipt** left in the source directory. It confirms which files were successfully processed and links back to the archive database for full details.
+The ledger is a **complete JSON receipt** left in the source directory. It records the outcome for **every file** Pixe discovered in `dirA` during the run — not just successful copies. This makes the ledger a full manifest of what Pixe saw and decided, and links back to the archive database for detailed query.
+
+#### Ledger Format (v3)
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "pixe_version": "0.10.0",
   "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "pixe_run": "2026-03-06T10:30:00Z",
   "algorithm": "sha1",
   "destination": "/path/to/dirB",
+  "recursive": true,
   "files": [
     {
       "path": "IMG_0001.jpg",
+      "status": "copy",
       "checksum": "7d97e98f8af710c7e7fe703abc8f639e0ee507c4",
       "destination": "2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
       "verified_at": "2026-03-06T10:30:03Z"
+    },
+    {
+      "path": "IMG_0002.jpg",
+      "status": "skip",
+      "reason": "previously imported"
+    },
+    {
+      "path": "vacation/IMG_0042.jpg",
+      "status": "duplicate",
+      "checksum": "447d3060abc123...",
+      "destination": "duplicates/20260306_103000/2022/02-Feb/20220202_123101_447d3060...jpg",
+      "matches": "2022/02-Feb/20220202_123101_447d3060...jpg"
+    },
+    {
+      "path": "notes.txt",
+      "status": "skip",
+      "reason": "unsupported format: .txt"
+    },
+    {
+      "path": "corrupt.jpg",
+      "status": "error",
+      "reason": "EXIF parse failed: truncated IFD at offset 0x1A"
     }
   ]
 }
 ```
 
-**Changes from v1:**
-- `version` bumped to `2`.
-- `run_id` field added — the UUID of the run in the archive database. This allows a user to query the database for full details: `SELECT * FROM files WHERE run_id = '<run_id>'`.
+#### Field Definitions
+
+| Field | Presence | Description |
+|---|---|---|
+| `path` | Always | Relative path from `dirA`. Top-level files are just the filename; recursive files include the subdirectory prefix (e.g., `vacation/IMG_0042.jpg`). |
+| `status` | Always | One of: `copy`, `skip`, `duplicate`, `error`. Corresponds to the stdout verbs `COPY`, `SKIP`, `DUPE`, `ERR`. |
+| `checksum` | `copy`, `duplicate` | Hex-encoded content hash. Present when the file was hashed (even if it was then identified as a duplicate). |
+| `destination` | `copy`, `duplicate` | Relative path within `dirB` where the file was written. For duplicates, this is the path under `duplicates/`. |
+| `verified_at` | `copy` | ISO 8601 UTC timestamp of successful verification. |
+| `matches` | `duplicate` | Relative path within `dirB` of the existing file this duplicate matches. |
+| `reason` | `skip`, `error` | Human-readable explanation of why the file was skipped or why processing failed. Same text shown on stdout. |
+
+#### Changes from v2
+
+- `version` bumped to `3`.
+- `recursive` field added — records whether `--recursive` was active for this run.
+- `status` field added to every file entry — makes each entry self-describing.
+- `reason` field added for `skip` and `error` entries.
+- `matches` field added for `duplicate` entries — identifies the existing archive file.
+- The `files` array now contains **all discovered files**, not just successful copies. Ignored files (matching the ignore list) are **not** included — they are invisible to the pipeline entirely.
+
+#### Ledger Placement
+
+A single ledger is always written at `dirA/.pixe_ledger.json`, regardless of whether `--recursive` is enabled. In recursive mode, file paths within the ledger use relative paths from `dirA` (e.g., `vacation/IMG_0042.jpg`).
 
 The ledger is still written atomically (write `.tmp`, then rename) and is the **only file** Pixe writes to `dirA`.
 
@@ -806,13 +1006,15 @@ dirB (organized destination)
 
 ## 9. CLI Additions
 
-### 9.1 New Flag
+### 9.1 New Flags
 
-| Command | Flag | Default | Description |
-|---|---|---|---|
-| `pixe sort` | `--db-path` | (auto-detected) | Explicit path to the SQLite database file. Overrides all automatic location logic. |
+| Command | Flag | Short | Default | Config Key | Description |
+|---|---|---|---|---|---|
+| `pixe sort` | `--db-path` | | (auto-detected) | `db_path` | Explicit path to the SQLite database file. Overrides all automatic location logic. |
+| `pixe sort` | `--recursive` | `-r` | `false` | `recursive` | Recursively process subdirectories of `--source`. Default is top-level only. |
+| `pixe sort` | `--ignore` | | (none) | `ignore` (list) | Glob pattern for files to ignore. Repeatable on CLI; list in config. Merged additively. `.pixe_ledger.json` is always ignored (hardcoded). |
 
-This flag is also supported via config file (`db_path`) and environment variable (`PIXE_DB_PATH`).
+All flags are supported via config file and environment variable (e.g., `PIXE_RECURSIVE`, `PIXE_IGNORE`). The `--ignore` flag can appear multiple times on the command line, each specifying one glob pattern. In the config file, `ignore` is a YAML list.
 
 ### 9.2 Updated `pixe resume`
 
@@ -833,3 +1035,6 @@ These items are explicitly **out of scope** for the current build but are acknow
 7. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
 8. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
 9. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
+10. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
+11. **Directory-level ignore patterns** — In recursive mode, allow ignoring entire subdirectories (e.g., `--ignore ".git/"` to skip `.git` trees). Currently only files are subject to ignore matching.
+12. **`.pixeignore` file** — A `.gitignore`-style file in `dirA` that specifies ignore patterns, complementing the CLI flag and config file. Lower priority than the other configuration sources.

@@ -59,6 +59,11 @@ const (
 	// StatusTagFailed means copy and verify succeeded but metadata tag
 	// injection failed. The file is otherwise intact.
 	StatusTagFailed FileStatus = "tag_failed"
+
+	// StatusSkipped means the file was intentionally not processed.
+	// The skip_reason field records why (e.g., "previously imported",
+	// "unsupported format: .txt").
+	StatusSkipped FileStatus = "skipped"
 )
 
 // String implements fmt.Stringer.
@@ -68,7 +73,7 @@ func (s FileStatus) String() string { return string(s) }
 // one from which the pipeline will not advance further.
 func (s FileStatus) IsTerminal() bool {
 	switch s {
-	case StatusComplete, StatusFailed, StatusMismatch, StatusTagFailed:
+	case StatusComplete, StatusFailed, StatusMismatch, StatusTagFailed, StatusSkipped:
 		return true
 	}
 	return false

@@ -50,11 +50,13 @@ CREATE TABLE IF NOT EXISTS files (
     dest_path     TEXT,
     dest_rel      TEXT,
     checksum      TEXT,
+    skip_reason   TEXT,
     status        TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN (
             'pending', 'extracted', 'hashed', 'copied',
             'verified', 'tagged', 'complete',
-            'failed', 'mismatch', 'tag_failed', 'duplicate'
+            'failed', 'mismatch', 'tag_failed', 'duplicate',
+            'skipped'
         )),
     is_duplicate  INTEGER NOT NULL DEFAULT 0,
     capture_date  TEXT,

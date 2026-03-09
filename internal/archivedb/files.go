@@ -39,6 +39,7 @@ type FileRecord struct {
 	VerifiedAt  *time.Time
 	TaggedAt    *time.Time
 	Error       *string
+	SkipReason  *string // non-nil when status = "skipped"
 }
 
 // updateParams holds the optional fields that can be set during a status update.
@@ -50,6 +51,7 @@ type updateParams struct {
 	fileSize    *int64
 	errMsg      *string
 	isDuplicate *bool
+	skipReason  *string
 }
 
 // UpdateOption configures optional fields on a file status update.
@@ -86,6 +88,11 @@ func WithError(msg string) UpdateOption {
 // WithIsDuplicate sets the is_duplicate field on a file status update.
 func WithIsDuplicate(dup bool) UpdateOption {
 	return func(p *updateParams) { p.isDuplicate = &dup }
+}
+
+// WithSkipReason sets the skip_reason field on a file status update.
+func WithSkipReason(reason string) UpdateOption {
+	return func(p *updateParams) { p.skipReason = &reason }
 }
 
 // InsertFile creates a new file record with status "pending".
@@ -218,6 +225,10 @@ func (db *DB) UpdateFileStatus(fileID int64, status string, opts ...UpdateOption
 		setClauses = append(setClauses, "is_duplicate = ?")
 		args = append(args, val)
 	}
+	if p.skipReason != nil {
+		setClauses = append(setClauses, "skip_reason = ?")
+		args = append(args, *p.skipReason)
+	}
 
 	args = append(args, fileID)
 	q := fmt.Sprintf("UPDATE files SET %s WHERE id = ?", strings.Join(setClauses, ", "))
@@ -326,7 +337,8 @@ func (db *DB) GetFilesByRun(runID string) ([]*FileRecord, error) {
 	const q = `
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
-		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error
+		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
+		       skip_reason
 		FROM files WHERE run_id = ?
 		ORDER BY id`
 
@@ -340,16 +352,17 @@ func (db *DB) GetFilesByRun(runID string) ([]*FileRecord, error) {
 }
 
 // GetIncompleteFiles returns all files for a run that are not in a terminal state.
-// Terminal states are: "complete", "failed", "mismatch", "tag_failed", "duplicate".
+// Terminal states are: "complete", "failed", "mismatch", "tag_failed", "duplicate", "skipped".
 // Used by resume to find files that need reprocessing.
 func (db *DB) GetIncompleteFiles(runID string) ([]*FileRecord, error) {
 	const q = `
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
-		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error
+		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
+		       skip_reason
 		FROM files
 		WHERE run_id = ?
-		  AND status NOT IN ('complete', 'failed', 'mismatch', 'tag_failed', 'duplicate')
+		  AND status NOT IN ('complete', 'failed', 'mismatch', 'tag_failed', 'duplicate', 'skipped')
 		ORDER BY id`
 
 	rows, err := db.conn.Query(q, runID)
@@ -383,7 +396,7 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 	var destPath, destRel, checksum, captureDate sql.NullString
 	var fileSize sql.NullInt64
 	var extractedAt, hashedAt, copiedAt, verifiedAt, taggedAt sql.NullString
-	var errMsg sql.NullString
+	var errMsg, skipReason sql.NullString
 	var isDupInt int
 
 	err := s.Scan(
@@ -403,6 +416,7 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 		&verifiedAt,
 		&taggedAt,
 		&errMsg,
+		&skipReason,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("archivedb: scan file row: %w", err)
@@ -424,6 +438,9 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 	}
 	if errMsg.Valid {
 		f.Error = &errMsg.String
+	}
+	if skipReason.Valid {
+		f.SkipReason = &skipReason.String
 	}
 
 	parseOptTime := func(ns sql.NullString, fieldName string) (*time.Time, error) {

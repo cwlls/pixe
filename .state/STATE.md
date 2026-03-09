@@ -4,7 +4,7 @@
 |:--|:-----|:---------|:------|:-------|:-----------|:------|
 | 1 | Add `Recursive` and `Ignore` fields to `AppConfig` | high | Developer | ✅ Complete | — | Struct changes only; no behavior yet |
 | 2 | Register `--recursive` and `--ignore` CLI flags | high | Developer | ✅ Complete | 1 | Cobra flag registration + Viper binding in `cmd/sort.go` |
-| 3 | Add `StatusSkipped` to domain and `skip_reason` to DB schema | high | Developer | pending | — | Domain const + schema v2 migration |
+| 3 | Add `StatusSkipped` to domain and `skip_reason` to DB schema | high | Developer | ✅ Complete | — | Domain const + schema v2 migration |
 | 4 | Implement DB schema v2 migration | high | Developer | pending | 3 | `recursive` on `runs`, `skip_reason`+`skipped` on `files` |
 | 5 | Add `CheckSourceProcessed` query to archivedb | high | Developer | pending | 4 | Skip-detection query by absolute `source_path` |
 | 6 | Build the ignore-list matcher | high | Developer | pending | 1 | New `internal/ignore` package with glob matching |
