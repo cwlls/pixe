@@ -262,7 +262,7 @@ func TestRun_ledgerWritten(t *testing.T) {
 	}
 }
 
-func TestRun_ledgerVersion2WithRunID(t *testing.T) {
+func TestRun_ledgerVersion3WithRunID(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -286,8 +286,8 @@ func TestRun_ledgerVersion2WithRunID(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if l.Version != 2 {
-		t.Errorf("ledger.Version = %d, want 2", l.Version)
+	if l.Version != 3 {
+		t.Errorf("ledger.Version = %d, want 3", l.Version)
 	}
 	if l.RunID != wantRunID {
 		t.Errorf("ledger.RunID = %q, want %q", l.RunID, wantRunID)

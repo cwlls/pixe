@@ -116,13 +116,26 @@ type Manifest struct {
 	Files       []*ManifestEntry `json:"files"`
 }
 
-// LedgerEntry is a minimal, immutable record of a successfully processed
-// file. Written to dirA/.pixe_ledger.json after verification completes.
+// Ledger status constants identify the outcome of a single file in the ledger.
+// These are distinct from FileStatus (which tracks pipeline stages) — ledger
+// statuses are the four user-visible outcomes written to .pixe_ledger.json.
+const (
+	LedgerStatusCopy      = "copy"
+	LedgerStatusSkip      = "skip"
+	LedgerStatusDuplicate = "duplicate"
+	LedgerStatusError     = "error"
+)
+
+// LedgerEntry records the outcome of a single file discovered in dirA.
+// Every discovered file (except ignored files) gets one entry.
 type LedgerEntry struct {
-	Path        string    `json:"path"`        // relative path within dirA
-	Checksum    string    `json:"checksum"`    // hex-encoded media payload hash
-	Destination string    `json:"destination"` // relative path within dirB
-	VerifiedAt  time.Time `json:"verified_at"`
+	Path        string     `json:"path"`                  // relative path from dirA
+	Status      string     `json:"status"`                // "copy", "skip", "duplicate", "error"
+	Checksum    string     `json:"checksum,omitempty"`    // hex hash (copy, duplicate)
+	Destination string     `json:"destination,omitempty"` // relative path in dirB (copy, duplicate)
+	VerifiedAt  *time.Time `json:"verified_at,omitempty"` // ISO 8601 UTC (copy only)
+	Matches     string     `json:"matches,omitempty"`     // existing file path (duplicate only)
+	Reason      string     `json:"reason,omitempty"`      // explanation (skip, error)
 }
 
 // Ledger is the source-side record written to dirA/.pixe_ledger.json.
@@ -134,5 +147,6 @@ type Ledger struct {
 	PixeRun     time.Time     `json:"pixe_run"`
 	Algorithm   string        `json:"algorithm"`
 	Destination string        `json:"destination"`
+	Recursive   bool          `json:"recursive"`
 	Files       []LedgerEntry `json:"files"`
 }

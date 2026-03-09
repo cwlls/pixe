@@ -146,12 +146,13 @@ func Run(opts SortOptions) (SortResult, error) {
 	// 4. Process files (sequential or concurrent).
 	// ------------------------------------------------------------------
 	ledger := &domain.Ledger{
-		Version:     2,
+		Version:     3,
 		PixeVersion: opts.PixeVersion,
 		RunID:       opts.RunID,
 		PixeRun:     startedAt,
 		Algorithm:   opts.Hasher.Algorithm(),
 		Destination: dirB,
+		Recursive:   cfg.Recursive,
 	}
 
 	var result SortResult
@@ -366,9 +367,10 @@ func processFile(
 
 	le := &domain.LedgerEntry{
 		Path:        df.RelPath,
+		Status:      domain.LedgerStatusCopy,
 		Checksum:    checksum,
 		Destination: relDest,
-		VerifiedAt:  verifiedAt,
+		VerifiedAt:  &verifiedAt,
 	}
 	return le, isDuplicate, nil
 }

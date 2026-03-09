@@ -51,7 +51,7 @@ func sampleManifest(dirB string) *domain.Manifest {
 func sampleLedger() *domain.Ledger {
 	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
 	return &domain.Ledger{
-		Version:     1,
+		Version:     3,
 		PixeVersion: "test",
 		PixeRun:     now,
 		Algorithm:   "sha1",
@@ -59,9 +59,10 @@ func sampleLedger() *domain.Ledger {
 		Files: []domain.LedgerEntry{
 			{
 				Path:        "IMG_0001.jpg",
+				Status:      domain.LedgerStatusCopy,
 				Checksum:    "abc123",
 				Destination: "2021/12/20211225_062223_abc123.jpg",
-				VerifiedAt:  now,
+				VerifiedAt:  &now,
 			},
 		},
 	}

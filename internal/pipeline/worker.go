@@ -269,9 +269,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				}
 				ledger.Files = append(ledger.Files, domain.LedgerEntry{
 					Path:        fr.df.RelPath,
+					Status:      domain.LedgerStatusCopy,
 					Checksum:    fr.checksum,
 					Destination: finalRelDest,
-					VerifiedAt:  fr.verifiedAt,
+					VerifiedAt:  &fr.verifiedAt,
 				})
 			}
 			completed++

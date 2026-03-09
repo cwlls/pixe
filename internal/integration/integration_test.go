@@ -879,10 +879,10 @@ func TestIntegration_SQLite_FullSort(t *testing.T) {
 		}
 	}
 
-	// Verify ledger has version 2 and run_id.
+	// Verify ledger has version 3 and run_id.
 	ledger := loadLedger(t, dirA)
-	if ledger.Version != 2 {
-		t.Errorf("ledger Version = %d, want 2", ledger.Version)
+	if ledger.Version != 3 {
+		t.Errorf("ledger Version = %d, want 3", ledger.Version)
 	}
 	if ledger.RunID != opts.RunID {
 		t.Errorf("ledger RunID = %q, want %q", ledger.RunID, opts.RunID)
