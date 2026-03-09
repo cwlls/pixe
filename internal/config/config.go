@@ -50,4 +50,15 @@ type AppConfig struct {
 	// DBPath is an explicit path to the SQLite archive database.
 	// If empty, the database location is auto-resolved (see dblocator package).
 	DBPath string
+
+	// Recursive, when true, causes discovery to descend into subdirectories
+	// of Source. Default is false (top-level only).
+	Recursive bool
+
+	// Ignore is a list of glob patterns for files to exclude from processing.
+	// Patterns are matched against the filename (and relative path in recursive
+	// mode) using filepath.Match semantics. The ledger file (.pixe_ledger.json)
+	// is always ignored regardless of this list — that is handled in the
+	// ignore package, not here.
+	Ignore []string
 }

@@ -72,6 +72,8 @@ func runSort(cmd *cobra.Command, args []string) error {
 		CameraOwner: viper.GetString("camera_owner"),
 		DryRun:      viper.GetBool("dry_run"),
 		DBPath:      viper.GetString("db_path"),
+		Recursive:   viper.GetBool("recursive"),
+		Ignore:      viper.GetStringSlice("ignore"),
 	}
 
 	// ------------------------------------------------------------------
@@ -199,6 +201,8 @@ func init() {
 	sortCmd.Flags().String("camera-owner", "", "camera owner string injected into destination files")
 	sortCmd.Flags().Bool("dry-run", false, "preview operations without copying any files")
 	sortCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
+	sortCmd.Flags().BoolP("recursive", "r", false, "recursively process subdirectories of --source")
+	sortCmd.Flags().StringArray("ignore", nil, `glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")`)
 
 	// Mark required flags.
 	_ = sortCmd.MarkFlagRequired("source")
@@ -211,4 +215,6 @@ func init() {
 	_ = viper.BindPFlag("camera_owner", sortCmd.Flags().Lookup("camera-owner"))
 	_ = viper.BindPFlag("dry_run", sortCmd.Flags().Lookup("dry-run"))
 	_ = viper.BindPFlag("db_path", sortCmd.Flags().Lookup("db-path"))
+	_ = viper.BindPFlag("recursive", sortCmd.Flags().Lookup("recursive"))
+	_ = viper.BindPFlag("ignore", sortCmd.Flags().Lookup("ignore"))
 }
