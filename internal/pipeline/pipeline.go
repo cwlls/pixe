@@ -67,6 +67,14 @@ type SortResult struct {
 	Errors     int
 }
 
+// formatOutput returns a single stdout line for a file outcome.
+// verb is one of "COPY", "SKIP", "DUPE", "ERR ".
+// source is the relative path from dirA (displayed on the left).
+// detail is the destination path or reason (displayed on the right).
+func formatOutput(verb, source, detail string) string {
+	return fmt.Sprintf("%s %s -> %s\n", verb, source, detail)
+}
+
 // Run executes the full sort pipeline, selecting sequential or concurrent
 // execution based on opts.Config.Workers.
 //
@@ -157,12 +165,10 @@ func Run(opts SortOptions) (SortResult, error) {
 
 	var result SortResult
 	if cfg.Workers > 1 {
-		result = RunConcurrent(opts, discovered, fileIDs, dirA, dirB, out, ledger)
+		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, ledger)
 	} else {
-		result = runSequential(opts, discovered, fileIDs, dirA, dirB, out, ledger)
+		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, ledger)
 	}
-	// Preserve the skipped count from discovery (not tracked by the processing functions).
-	result.Skipped = len(skipped)
 
 	// ------------------------------------------------------------------
 	// 5. Finalise: write ledger to dirA, mark run complete in DB.
@@ -186,6 +192,7 @@ func Run(opts SortOptions) (SortResult, error) {
 
 // runSequential processes all discovered files one at a time.
 func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
+	skipped []discovery.SkippedFile,
 	fileIDs map[string]int64, dirA, dirB string, out io.Writer, ledger *domain.Ledger) SortResult {
 
 	var result SortResult
@@ -194,8 +201,53 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	// Maps checksum → relative destination of the first completed file.
 	memSeen := make(map[string]string)
 
+	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
+	for _, sf := range skipped {
+		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
+		ledger.Files = append(ledger.Files, domain.LedgerEntry{
+			Path:   sf.Path,
+			Status: domain.LedgerStatusSkip,
+			Reason: sf.Reason,
+		})
+		// Insert a DB row for the skipped file (no fileID pre-allocated; insert directly).
+		if db != nil {
+			skipFileID, insertErr := db.InsertFile(&archivedb.FileRecord{
+				RunID:      opts.RunID,
+				SourcePath: filepath.Join(dirA, sf.Path),
+			})
+			if insertErr == nil {
+				_ = db.UpdateFileStatus(skipFileID, "skipped",
+					archivedb.WithSkipReason(sf.Reason))
+			}
+		}
+		result.Skipped++
+	}
+
 	for _, df := range discovered {
 		fileID := fileIDs[df.Path]
+
+		// --- Check if previously imported ---
+		if db != nil {
+			processed, checkErr := db.CheckSourceProcessed(df.Path)
+			if checkErr != nil {
+				_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, checkErr.Error()))
+				result.Errors++
+				continue
+			}
+			if processed {
+				const reason = "previously imported"
+				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
+				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					Path:   df.RelPath,
+					Status: domain.LedgerStatusSkip,
+					Reason: reason,
+				})
+				_ = db.UpdateFileStatus(fileID, "skipped",
+					archivedb.WithSkipReason(reason))
+				result.Skipped++
+				continue
+			}
+		}
 
 		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen)
 		if err != nil {
@@ -203,7 +255,12 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
 			}
-			_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", df.RelPath, err)
+			_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, err.Error()))
+			ledger.Files = append(ledger.Files, domain.LedgerEntry{
+				Path:   df.RelPath,
+				Status: domain.LedgerStatusError,
+				Reason: err.Error(),
+			})
 			continue
 		}
 
@@ -265,14 +322,17 @@ func processFile(
 
 	// --- Dedup check ---
 	var isDuplicate bool
+	var existingDestForLedger string
 	if db != nil {
 		existingDest, err := db.CheckDuplicate(checksum)
 		if err != nil {
 			return nil, false, fmt.Errorf("dedup check: %w", err)
 		}
 		isDuplicate = existingDest != ""
-	} else if _, seen := memSeen[checksum]; seen {
+		existingDestForLedger = existingDest
+	} else if dest, seen := memSeen[checksum]; seen {
 		isDuplicate = true
+		existingDestForLedger = dest
 	}
 
 	// --- Build destination path ---
@@ -281,7 +341,7 @@ func processFile(
 	absDest := filepath.Join(dirB, relDest)
 
 	if cfg.DryRun {
-		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", df.RelPath, relDest)
+		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, relDest)
 		if db != nil {
 			_ = db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithDestination(absDest, relDest),
@@ -291,7 +351,6 @@ func processFile(
 	}
 
 	// --- Copy ---
-	_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", df.RelPath, relDest)
 	if err := copypkg.Execute(df.Path, absDest); err != nil {
 		return nil, false, fmt.Errorf("copy: %w", err)
 	}
@@ -359,10 +418,35 @@ func processFile(
 					archivedb.WithIsDuplicate(true))
 				relDest = dupRelDest
 				isDuplicate = true
+				existingDestForLedger = existingDest
 			}
 			// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
 			// No further DB update needed for the non-race path.
 		}
+	}
+
+	// --- Emit output line after outcome is known ---
+	if isDuplicate {
+		matchDetail := existingDestForLedger
+		if matchDetail == "" {
+			matchDetail = relDest
+		}
+		_, _ = fmt.Fprint(out, formatOutput("DUPE", df.RelPath,
+			fmt.Sprintf("matches %s", matchDetail)))
+	} else {
+		_, _ = fmt.Fprint(out, formatOutput("COPY", df.RelPath, relDest))
+	}
+
+	// Build ledger entry.
+	if isDuplicate {
+		le := &domain.LedgerEntry{
+			Path:        df.RelPath,
+			Status:      domain.LedgerStatusDuplicate,
+			Checksum:    checksum,
+			Destination: relDest,
+			Matches:     existingDestForLedger,
+		}
+		return le, true, nil
 	}
 
 	le := &domain.LedgerEntry{
@@ -372,7 +456,7 @@ func processFile(
 		Destination: relDest,
 		VerifiedAt:  &verifiedAt,
 	}
-	return le, isDuplicate, nil
+	return le, false, nil
 }
 
 // resolveTags renders the Copyright template and returns a MetadataTags value.

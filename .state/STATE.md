@@ -10,8 +10,8 @@
 | 6 | Build the ignore-list matcher | high | Developer | ✅ Complete | 1 | New `internal/ignore` package with glob matching |
 | 7 | Refactor `discovery.Walk` for recursive + ignore + skip output | high | Developer | ✅ Complete | 1, 6 | Controlled recursion, ignore filtering, structured skip returns |
 | 8 | Upgrade `LedgerEntry` and `Ledger` to v3 | high | Developer | ✅ Complete | 3 | New fields: `Status`, `Reason`, `Matches`, `Recursive` |
-| 9 | Refactor pipeline stdout output to COPY/SKIP/DUPE/ERR format | high | Developer | pending | 3, 5, 7, 8 | Central formatting; all outcomes produce one line |
-| 10 | Wire skip/dupe/err entries into ledger and DB | high | Developer | pending | 8, 9 | Skipped + unsupported files get ledger entries + DB rows |
+| 9 | Refactor pipeline stdout output to COPY/SKIP/DUPE/ERR format | high | Developer | ✅ Complete | 3, 5, 7, 8 | Central formatting; all outcomes produce one line |
+| 10 | Wire skip/dupe/err entries into ledger and DB | high | Developer | ✅ Complete | 8, 9 | Skipped + unsupported files get ledger entries + DB rows |
 | 11 | Update `Run` struct and `InsertRun` for `recursive` column | medium | Developer | pending | 4 | Propagate `cfg.Recursive` into the runs table |
 | 12 | Update concurrent worker path (`worker.go`) for new output format | high | Developer | pending | 9 | Mirror sequential changes in the concurrent coordinator |
 | 13 | Tests: ignore-list matcher | high | Tester | pending | 6 | Unit tests for glob matching, hardcoded ledger ignore |

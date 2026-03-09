@@ -65,21 +65,23 @@ type workResult struct {
 // destAssignment is sent from the coordinator to the worker after the dedup
 // decision has been made.
 type destAssignment struct {
-	absDest     string
-	relDest     string
-	isDuplicate bool
+	absDest               string
+	relDest               string
+	isDuplicate           bool
+	existingDestForLedger string // non-empty when isDuplicate is true
 }
 
 // workerFinalResult is sent from a worker to the coordinator after
 // copy+verify+tag completes.
 type workerFinalResult struct {
-	df          discovery.DiscoveredFile
-	fileID      int64
-	checksum    string
-	relDest     string
-	isDuplicate bool
-	verifiedAt  time.Time
-	err         error
+	df                    discovery.DiscoveredFile
+	fileID                int64
+	checksum              string
+	relDest               string
+	isDuplicate           bool
+	existingDestForLedger string
+	verifiedAt            time.Time
+	err                   error
 }
 
 // RunConcurrent executes the sort pipeline with N concurrent workers.
@@ -87,6 +89,8 @@ type workerFinalResult struct {
 // Architecture:
 //
 //	coordinator goroutine:
+//	  - emits SKIP lines for discovery-phase skips
+//	  - checks previously-imported files and emits SKIP lines
 //	  - feeds workItems into workCh
 //	  - receives workResults from resultCh (extract+hash done)
 //	  - performs dedup check via db.CheckDuplicate (single-writer)
@@ -102,14 +106,16 @@ type workerFinalResult struct {
 //	  - copy + verify + tag → db.UpdateFileStatus per stage
 //	  - send final result to doneCh
 func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
+	skipped []discovery.SkippedFile,
 	fileIDs map[string]int64, dirA, dirB string, out io.Writer, ledger *domain.Ledger) SortResult {
 
 	ctx := context.Background()
-	return runConcurrentCtx(ctx, opts, discovered, fileIDs, dirA, dirB, out, ledger)
+	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, ledger)
 }
 
 // runConcurrentCtx is the context-aware implementation, used by tests.
 func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
+	skipped []discovery.SkippedFile,
 	fileIDs map[string]int64, dirA, dirB string, out io.Writer, ledger *domain.Ledger) SortResult {
 
 	// Wrap out in a mutex so concurrent workers don't race on writes.
@@ -119,6 +125,59 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 	n := opts.Config.Workers
 	if n < 1 {
 		n = 1
+	}
+
+	db := opts.DB
+	var result SortResult
+
+	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
+	for _, sf := range skipped {
+		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
+		ledger.Files = append(ledger.Files, domain.LedgerEntry{
+			Path:   sf.Path,
+			Status: domain.LedgerStatusSkip,
+			Reason: sf.Reason,
+		})
+		if db != nil {
+			skipFileID, insertErr := db.InsertFile(&archivedb.FileRecord{
+				RunID:      opts.RunID,
+				SourcePath: filepath.Join(dirA, sf.Path),
+			})
+			if insertErr == nil {
+				_ = db.UpdateFileStatus(skipFileID, "skipped",
+					archivedb.WithSkipReason(sf.Reason))
+			}
+		}
+		result.Skipped++
+	}
+
+	// --- Filter out previously-imported files before feeding workers ---
+	// actualDiscovered holds files that need real processing.
+	actualDiscovered := make([]discovery.DiscoveredFile, 0, len(discovered))
+	for _, df := range discovered {
+		if db != nil {
+			processed, checkErr := db.CheckSourceProcessed(df.Path)
+			if checkErr != nil {
+				_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, checkErr.Error()))
+				result.Errors++
+				continue
+			}
+			if processed {
+				const reason = "previously imported"
+				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
+				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					Path:   df.RelPath,
+					Status: domain.LedgerStatusSkip,
+					Reason: reason,
+				})
+				fileID := fileIDs[df.Path]
+				_ = db.UpdateFileStatus(fileID, "skipped",
+					archivedb.WithSkipReason(reason))
+				result.Skipped++
+				continue
+			}
+		}
+		actualDiscovered = append(actualDiscovered, df)
 	}
 
 	workCh := make(chan workItem, n*2)
@@ -146,7 +205,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 
 	// Feed work items.
 	go func() {
-		for _, df := range discovered {
+		for _, df := range actualDiscovered {
 			select {
 			case <-ctx.Done():
 				close(workCh)
@@ -157,9 +216,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 		close(workCh)
 	}()
 
-	pendingCount := len(discovered)
+	pendingCount := len(actualDiscovered)
 	completed := 0
-	var result SortResult
 	// memSeen is an in-memory dedup fallback used when no DB is available (e.g. tests).
 	// The coordinator is single-threaded, so no mutex is needed.
 	memSeen := make(map[string]string)
@@ -174,38 +232,53 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				goto done
 			}
 			if wr.err != nil {
-				if opts.DB != nil {
-					_ = opts.DB.UpdateFileStatus(wr.fileID, "failed",
+				if db != nil {
+					_ = db.UpdateFileStatus(wr.fileID, "failed",
 						archivedb.WithError(wr.err.Error()))
 				}
 				result.Errors++
-				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", wr.df.RelPath, wr.err)
+				_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, wr.err.Error()))
+				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					Path:   wr.df.RelPath,
+					Status: domain.LedgerStatusError,
+					Reason: wr.err.Error(),
+				})
 				completed++
 				continue
 			}
 
 			// Dedup check — single-writer on the DB (or memSeen when DB is nil).
 			var isDuplicate bool
-			if opts.DB != nil {
-				existingDest, err := opts.DB.CheckDuplicate(wr.checksum)
+			var existingDestForLedger string
+			if db != nil {
+				existingDest, err := db.CheckDuplicate(wr.checksum)
 				if err != nil {
-					_ = opts.DB.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error()))
+					_ = db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error()))
 					result.Errors++
+					_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, err.Error()))
+					ledger.Files = append(ledger.Files, domain.LedgerEntry{
+						Path:   wr.df.RelPath,
+						Status: domain.LedgerStatusError,
+						Reason: err.Error(),
+					})
 					completed++
 					continue
 				}
 				isDuplicate = existingDest != ""
-			} else if _, seen := memSeen[wr.checksum]; seen {
+				existingDestForLedger = existingDest
+			} else if dest, seen := memSeen[wr.checksum]; seen {
 				isDuplicate = true
+				existingDestForLedger = dest
 			}
 
 			relDest := pathbuilder.Build(wr.date, wr.checksum, wr.ext, isDuplicate, opts.RunTimestamp)
 			absDest := filepath.Join(dirB, relDest)
 
 			assignChs[wr.workerID] <- destAssignment{
-				absDest:     absDest,
-				relDest:     relDest,
-				isDuplicate: isDuplicate,
+				absDest:               absDest,
+				relDest:               relDest,
+				isDuplicate:           isDuplicate,
+				existingDestForLedger: existingDestForLedger,
 			}
 
 		case fr, ok := <-doneCh:
@@ -214,23 +287,34 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			}
 			if fr.err != nil {
 				result.Errors++
-				_, _ = fmt.Fprintf(out, "  ERROR  %s: %v\n", fr.df.RelPath, fr.err)
+				_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, fr.err.Error()))
+				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					Path:   fr.df.RelPath,
+					Status: domain.LedgerStatusError,
+					Reason: fr.err.Error(),
+				})
 			} else {
 				finalRelDest := fr.relDest
 				finalIsDup := fr.isDuplicate
+				finalExistingDest := fr.existingDestForLedger
 
-				if opts.DB != nil {
+				if db != nil {
 					if finalIsDup {
 						// Pre-copy dedup — just mark complete.
-						_ = opts.DB.UpdateFileStatus(fr.fileID, "complete",
+						_ = db.UpdateFileStatus(fr.fileID, "complete",
 							archivedb.WithIsDuplicate(true))
 					} else {
 						// Atomic post-copy dedup re-check to handle cross-process races.
-						existingDest, dedupErr := opts.DB.CompleteFileWithDedupCheck(fr.fileID, fr.checksum)
+						existingDest, dedupErr := db.CompleteFileWithDedupCheck(fr.fileID, fr.checksum)
 						if dedupErr != nil {
 							result.Errors++
-							_, _ = fmt.Fprintf(out, "  ERROR  %s: dedup check: %v\n",
-								fr.df.RelPath, dedupErr)
+							errMsg := fmt.Sprintf("dedup check: %v", dedupErr)
+							_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
+							ledger.Files = append(ledger.Files, domain.LedgerEntry{
+								Path:   fr.df.RelPath,
+								Status: domain.LedgerStatusError,
+								Reason: errMsg,
+							})
 							completed++
 							continue
 						}
@@ -241,19 +325,25 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							dupAbsDest := filepath.Join(dirB, dupRelDest)
 							absDest := filepath.Join(dirB, fr.relDest)
 							if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
-								_ = opts.DB.UpdateFileStatus(fr.fileID, "failed",
+								_ = db.UpdateFileStatus(fr.fileID, "failed",
 									archivedb.WithError(renErr.Error()))
 								result.Errors++
-								_, _ = fmt.Fprintf(out, "  ERROR  %s: relocate duplicate: %v\n",
-									fr.df.RelPath, renErr)
+								errMsg := fmt.Sprintf("relocate duplicate: %v", renErr)
+								_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
+								ledger.Files = append(ledger.Files, domain.LedgerEntry{
+									Path:   fr.df.RelPath,
+									Status: domain.LedgerStatusError,
+									Reason: errMsg,
+								})
 								completed++
 								continue
 							}
-							_ = opts.DB.UpdateFileStatus(fr.fileID, "complete",
+							_ = db.UpdateFileStatus(fr.fileID, "complete",
 								archivedb.WithDestination(dupAbsDest, dupRelDest),
 								archivedb.WithIsDuplicate(true))
 							finalRelDest = dupRelDest
 							finalIsDup = true
+							finalExistingDest = existingDest
 						}
 						// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
 					}
@@ -266,14 +356,29 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				result.Processed++
 				if finalIsDup {
 					result.Duplicates++
+					matchDetail := finalExistingDest
+					if matchDetail == "" {
+						matchDetail = finalRelDest
+					}
+					_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
+						fmt.Sprintf("matches %s", matchDetail)))
+					ledger.Files = append(ledger.Files, domain.LedgerEntry{
+						Path:        fr.df.RelPath,
+						Status:      domain.LedgerStatusDuplicate,
+						Checksum:    fr.checksum,
+						Destination: finalRelDest,
+						Matches:     finalExistingDest,
+					})
+				} else {
+					_, _ = fmt.Fprint(out, formatOutput("COPY", fr.df.RelPath, finalRelDest))
+					ledger.Files = append(ledger.Files, domain.LedgerEntry{
+						Path:        fr.df.RelPath,
+						Status:      domain.LedgerStatusCopy,
+						Checksum:    fr.checksum,
+						Destination: finalRelDest,
+						VerifiedAt:  &fr.verifiedAt,
+					})
 				}
-				ledger.Files = append(ledger.Files, domain.LedgerEntry{
-					Path:        fr.df.RelPath,
-					Status:      domain.LedgerStatusCopy,
-					Checksum:    fr.checksum,
-					Destination: finalRelDest,
-					VerifiedAt:  &fr.verifiedAt,
-				})
 			}
 			completed++
 		}
@@ -356,7 +461,7 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			if opts.Config.DryRun {
-				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s → %s\n", item.df.RelPath, assign.relDest)
+				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, assign.relDest)
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "complete",
 						archivedb.WithDestination(assign.absDest, assign.relDest),
@@ -365,14 +470,14 @@ func runWorker(ctx context.Context, id int,
 				doneCh <- workerFinalResult{
 					df: item.df, fileID: item.fileID,
 					checksum: checksum, relDest: assign.relDest,
-					isDuplicate: assign.isDuplicate,
-					verifiedAt:  time.Now().UTC(),
+					isDuplicate:           assign.isDuplicate,
+					existingDestForLedger: assign.existingDestForLedger,
+					verifiedAt:            time.Now().UTC(),
 				}
 				continue
 			}
 
 			// --- Copy ---
-			_, _ = fmt.Fprintf(out, "  COPY     %s → %s\n", item.df.RelPath, assign.relDest)
 			if err := copypkg.Execute(item.df.Path, assign.absDest); err != nil {
 				ferr := fmt.Errorf("copy: %w", err)
 				if db != nil {
@@ -417,12 +522,13 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			doneCh <- workerFinalResult{
-				df:          item.df,
-				fileID:      item.fileID,
-				checksum:    checksum,
-				relDest:     assign.relDest,
-				isDuplicate: assign.isDuplicate,
-				verifiedAt:  verifiedAt,
+				df:                    item.df,
+				fileID:                item.fileID,
+				checksum:              checksum,
+				relDest:               assign.relDest,
+				isDuplicate:           assign.isDuplicate,
+				existingDestForLedger: assign.existingDestForLedger,
+				verifiedAt:            verifiedAt,
 			}
 		}
 	}
