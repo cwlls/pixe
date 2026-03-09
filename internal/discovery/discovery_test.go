@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/ignore"
 )
 
 // --- Mock handler ---
@@ -256,4 +257,258 @@ func TestWalk_emptyDirectory(t *testing.T) {
 	if len(discovered) != 0 || len(skipped) != 0 {
 		t.Errorf("empty dir: got discovered=%d skipped=%d, want 0 0", len(discovered), len(skipped))
 	}
+}
+
+// --- Recursive + ignore tests (Task 14) ---
+
+// TestWalk_nonRecursiveSkipsSubdirs verifies that with Recursive=false only
+// top-level files are returned; nested files are silently ignored.
+func TestWalk_nonRecursiveSkipsSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "a.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "sub", "b.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: false})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (only a.jpg)", len(discovered))
+	}
+	if discovered[0].RelPath != "a.jpg" {
+		t.Errorf("discovered[0].RelPath = %q, want %q", discovered[0].RelPath, "a.jpg")
+	}
+	// b.jpg is in a subdir that was skipped entirely — it should not appear in skipped either.
+	for _, sf := range skipped {
+		if sf.Path == filepath.Join("sub", "b.jpg") {
+			t.Errorf("b.jpg should not appear in skipped when its parent dir is skipped")
+		}
+	}
+}
+
+// TestWalk_recursiveFindsNestedFiles verifies that Recursive=true descends into
+// subdirectories and discovers files at any depth.
+func TestWalk_recursiveFindsNestedFiles(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "a.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "sub", "b.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "sub", "deep", "c.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, _, err := Walk(dir, reg, WalkOptions{Recursive: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 3 {
+		t.Errorf("discovered: got %d, want 3", len(discovered))
+	}
+}
+
+// TestWalk_ignorePatternExcludesFile verifies that a file matching an ignore
+// pattern is completely invisible — not in discovered, not in skipped.
+func TestWalk_ignorePatternExcludesFile(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "a.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "notes.txt"), []byte("hello"))
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	// notes.txt would normally appear in skipped (unsupported format).
+	// With the ignore pattern it should be completely invisible.
+	ignoreMatcher := newIgnoreMatcher(t, []string{"*.txt"})
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{
+		Recursive: false,
+		Ignore:    ignoreMatcher,
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (a.jpg only)", len(discovered))
+	}
+	for _, sf := range skipped {
+		if sf.Path == "notes.txt" {
+			t.Errorf("notes.txt should be invisible (ignored), not in skipped")
+		}
+	}
+}
+
+// TestWalk_ledgerFileAlwaysIgnored verifies that .pixe_ledger.json is always
+// invisible even without an explicit ignore pattern.
+func TestWalk_ledgerFileAlwaysIgnored(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, ".pixe_ledger.json"), []byte("{}"))
+	writeFile(t, filepath.Join(dir, "a.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	// Supply an ignore matcher with no patterns — the ledger hardcode still applies.
+	ignoreMatcher := newIgnoreMatcher(t, nil)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{
+		Recursive: false,
+		Ignore:    ignoreMatcher,
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (a.jpg only)", len(discovered))
+	}
+	for _, sf := range skipped {
+		if sf.Path == ".pixe_ledger.json" {
+			t.Errorf(".pixe_ledger.json should be invisible (hardcoded ignore), not in skipped")
+		}
+	}
+}
+
+// TestWalk_dotfilesStillSkipped verifies that dotfiles not covered by the
+// ignore list (e.g. .DS_Store) appear in skipped with reason "dotfile".
+func TestWalk_dotfilesStillSkipped(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, ".DS_Store"), []byte("junk"))
+	writeFile(t, filepath.Join(dir, "a.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	// No ignore patterns — .DS_Store should land in skipped with reason "dotfile".
+	ignoreMatcher := newIgnoreMatcher(t, nil)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{
+		Recursive: false,
+		Ignore:    ignoreMatcher,
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1", len(discovered))
+	}
+	found := false
+	for _, sf := range skipped {
+		if sf.Path == ".DS_Store" && sf.Reason == "dotfile" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected .DS_Store in skipped with reason %q; skipped = %v", "dotfile", skipped)
+	}
+}
+
+// TestWalk_relPathPopulatedCorrectly verifies that DiscoveredFile.RelPath is
+// set to the path relative to dirA (not the absolute path).
+func TestWalk_relPathPopulatedCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "sub", "c.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, _, err := Walk(dir, reg, WalkOptions{Recursive: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Fatalf("discovered: got %d, want 1", len(discovered))
+	}
+	wantRel := filepath.Join("sub", "c.jpg")
+	if discovered[0].RelPath != wantRel {
+		t.Errorf("RelPath = %q, want %q", discovered[0].RelPath, wantRel)
+	}
+	// AbsPath must be absolute and end with the relative path.
+	if !filepath.IsAbs(discovered[0].Path) {
+		t.Errorf("Path %q should be absolute", discovered[0].Path)
+	}
+}
+
+// TestWalk_skippedFileRelPath verifies that SkippedFile.Path is relative to dirA.
+func TestWalk_skippedFileRelPath(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "sub", "notes.txt"), []byte("hello"))
+
+	reg := NewRegistry()
+	// No handlers registered — notes.txt will be skipped as unsupported.
+
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Errorf("discovered: got %d, want 0", len(discovered))
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped: got %d, want 1", len(skipped))
+	}
+	wantRel := filepath.Join("sub", "notes.txt")
+	if skipped[0].Path != wantRel {
+		t.Errorf("skipped[0].Path = %q, want %q", skipped[0].Path, wantRel)
+	}
+}
+
+// TestWalk_ignorePatternInSubdir verifies that a path-qualified ignore pattern
+// (e.g. "sub/*.txt") only ignores files in that subdirectory.
+func TestWalk_ignorePatternInSubdir(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "a.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "sub", "notes.txt"), []byte("hello"))
+	writeFile(t, filepath.Join(dir, "notes.txt"), []byte("top-level")) // should NOT be ignored
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	ignoreMatcher := newIgnoreMatcher(t, []string{"sub/*.txt"})
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{
+		Recursive: true,
+		Ignore:    ignoreMatcher,
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	// a.jpg discovered, top-level notes.txt in skipped (unsupported), sub/notes.txt invisible.
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1", len(discovered))
+	}
+	topLevelTxtFound := false
+	subTxtFound := false
+	for _, sf := range skipped {
+		if sf.Path == "notes.txt" {
+			topLevelTxtFound = true
+		}
+		if sf.Path == filepath.Join("sub", "notes.txt") {
+			subTxtFound = true
+		}
+	}
+	if !topLevelTxtFound {
+		t.Error("expected top-level notes.txt in skipped (unsupported format)")
+	}
+	if subTxtFound {
+		t.Error("sub/notes.txt should be invisible (matched ignore pattern sub/*.txt)")
+	}
+}
+
+// newIgnoreMatcher is a test helper that constructs an *ignore.Matcher.
+func newIgnoreMatcher(t *testing.T, patterns []string) *ignore.Matcher {
+	t.Helper()
+	return ignore.New(patterns)
 }
