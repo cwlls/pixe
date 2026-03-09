@@ -12,14 +12,14 @@
 | 8 | Upgrade `LedgerEntry` and `Ledger` to v3 | high | Developer | ✅ Complete | 3 | New fields: `Status`, `Reason`, `Matches`, `Recursive` |
 | 9 | Refactor pipeline stdout output to COPY/SKIP/DUPE/ERR format | high | Developer | ✅ Complete | 3, 5, 7, 8 | Central formatting; all outcomes produce one line |
 | 10 | Wire skip/dupe/err entries into ledger and DB | high | Developer | ✅ Complete | 8, 9 | Skipped + unsupported files get ledger entries + DB rows |
-| 11 | Update `Run` struct and `InsertRun` for `recursive` column | medium | @developer | pending | 4 | Propagate `cfg.Recursive` into the runs table |
+| 11 | Update `Run` struct and `InsertRun` for `recursive` column | medium | Developer | ✅ Complete | 4 | Propagate `cfg.Recursive` into the runs table |
 | 12 | Update concurrent worker path (`worker.go`) for new output format | high | @developer | ✅ Complete | 9 | Mirror sequential changes in the concurrent coordinator |
 | 13 | Tests: ignore-list matcher | high | Developer | ✅ Complete | 6 | Unit tests for glob matching, hardcoded ledger ignore |
 | 14 | Tests: discovery.Walk with recursive + ignore | high | Developer | ✅ Complete | 7 | Integration tests with nested dirs, dotfiles, ignore patterns |
 | 15 | Tests: pipeline output format (COPY/SKIP/DUPE/ERR) | high | Developer | ✅ Complete | 9, 10 | Capture stdout, verify exact format for each verb |
-| 16 | Tests: ledger v3 serialization | medium | @tester | pending | 10 | Round-trip JSON, verify all status/reason/matches fields |
-| 17 | Tests: schema v2 migration from v1 DB | medium | @tester | pending | 4 | Create v1 DB, run migration, verify new columns |
-| 18 | Tests: recursive incremental run (skip previously imported) | medium | @tester | pending | 9, 10 | Two-run scenario: flat then recursive, verify skips |
+| 16 | Tests: ledger v3 serialization | medium | @tester | ✅ Complete | 10 | Round-trip JSON, verify all status/reason/matches fields |
+| 17 | Tests: schema v2 migration from v1 DB | medium | Tester | ✅ Complete | 4 | Create v1 DB, run migration, verify new columns |
+| 18 | Tests: recursive incremental run (skip previously imported) | medium | Tester | ✅ Complete | 9, 10 | Two-run scenario: flat then recursive, verify skips |
 
 ---
 

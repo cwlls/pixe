@@ -1455,6 +1455,299 @@ func TestArchiveInventory_orderedByDestRel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Task 17: Schema v2 migration tests
+// ---------------------------------------------------------------------------
+
+// v1DDL is the schema DDL from before v2 (no recursive column on runs,
+// no skip_reason column on files, no 'skipped' in the files CHECK constraint).
+const v1DDL = `
+CREATE TABLE IF NOT EXISTS schema_version (
+    version    INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id            TEXT PRIMARY KEY,
+    pixe_version  TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    destination   TEXT NOT NULL,
+    algorithm     TEXT NOT NULL,
+    workers       INTEGER NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    status        TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'completed', 'interrupted'))
+);
+
+CREATE TABLE IF NOT EXISTS files (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT NOT NULL REFERENCES runs(id),
+    source_path   TEXT NOT NULL,
+    dest_path     TEXT,
+    dest_rel      TEXT,
+    checksum      TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN (
+            'pending', 'extracted', 'hashed', 'copied',
+            'verified', 'tagged', 'complete',
+            'failed', 'mismatch', 'tag_failed', 'duplicate'
+        )),
+    is_duplicate  INTEGER NOT NULL DEFAULT 0,
+    capture_date  TEXT,
+    file_size     INTEGER,
+    extracted_at  TEXT,
+    hashed_at     TEXT,
+    copied_at     TEXT,
+    verified_at   TEXT,
+    tagged_at     TEXT,
+    error         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_checksum ON files(checksum) WHERE status = 'complete';
+CREATE INDEX IF NOT EXISTS idx_files_run_id ON files(run_id);
+CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
+CREATE INDEX IF NOT EXISTS idx_files_source ON files(source_path);
+CREATE INDEX IF NOT EXISTS idx_files_capture_date ON files(capture_date);
+`
+
+// openV1DB creates a v1 database at path using the v1 DDL and inserts a
+// schema_version row with version=1. Returns the raw *sql.DB for setup.
+func openV1DB(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open v1: %v", err)
+	}
+	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if _, err := conn.Exec(v1DDL); err != nil {
+		t.Fatalf("apply v1 DDL: %v", err)
+	}
+	_, err = conn.Exec(
+		`INSERT INTO schema_version (version, applied_at) VALUES (1, ?)`,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert schema_version v1: %v", err)
+	}
+	return conn
+}
+
+// hasColumn returns true if the given table has a column with the given name,
+// using PRAGMA table_info.
+func hasColumn(t *testing.T, conn *sql.DB, table, column string) bool {
+	t.Helper()
+	rows, err := conn.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(%s): %v", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan table_info row: %v", err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
+}
+
+// TestMigrateSchema_v1ToV2_runsColumn verifies that opening a v1 database
+// adds the recursive column to the runs table.
+func TestMigrateSchema_v1ToV2_runsColumn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1.db")
+
+	// Create a v1 database.
+	v1conn := openV1DB(t, path)
+	_ = v1conn.Close()
+
+	// Open with the new code — should migrate to v2.
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v1 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if !hasColumn(t, db.conn, "runs", "recursive") {
+		t.Error("runs table missing 'recursive' column after migration")
+	}
+}
+
+// TestMigrateSchema_v1ToV2_filesColumn verifies that opening a v1 database
+// adds the skip_reason column to the files table.
+func TestMigrateSchema_v1ToV2_filesColumn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1files.db")
+
+	v1conn := openV1DB(t, path)
+	_ = v1conn.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v1 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if !hasColumn(t, db.conn, "files", "skip_reason") {
+		t.Error("files table missing 'skip_reason' column after migration")
+	}
+}
+
+// TestMigrateSchema_v1ToV2_schemaVersionRow verifies that after migration
+// the schema_version table has a row with version=2.
+func TestMigrateSchema_v1ToV2_schemaVersionRow(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1ver.db")
+
+	v1conn := openV1DB(t, path)
+	_ = v1conn.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v1 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var maxVersion int
+	if err := db.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
+		t.Fatalf("query schema_version: %v", err)
+	}
+	if maxVersion != 2 {
+		t.Errorf("MAX(version) = %d, want 2", maxVersion)
+	}
+}
+
+// TestMigrateSchema_v1ToV2_existingDataIntact verifies that existing rows
+// in the runs table survive the migration.
+func TestMigrateSchema_v1ToV2_existingDataIntact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1data.db")
+
+	v1conn := openV1DB(t, path)
+	// Insert a run using the v1 schema (no recursive column).
+	_, err := v1conn.Exec(
+		`INSERT INTO runs (id, pixe_version, source, destination, algorithm, workers, started_at, status)
+		 VALUES ('run-v1-001', '0.9.0', '/src', '/dst', 'sha1', 2, '2026-01-01T00:00:00Z', 'completed')`,
+	)
+	if err != nil {
+		t.Fatalf("insert v1 run: %v", err)
+	}
+	_ = v1conn.Close()
+
+	// Open with new code.
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v1 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// The existing run should still be retrievable.
+	got, err := db.GetRun("run-v1-001")
+	if err != nil {
+		t.Fatalf("GetRun after migration: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetRun returned nil, want run")
+	}
+	if got.ID != "run-v1-001" {
+		t.Errorf("ID = %q, want %q", got.ID, "run-v1-001")
+	}
+	if got.Source != "/src" {
+		t.Errorf("Source = %q, want %q", got.Source, "/src")
+	}
+	// recursive defaults to 0 (false) for migrated rows.
+	if got.Recursive {
+		t.Error("Recursive = true, want false (default 0 from migration)")
+	}
+}
+
+// TestMigrateSchema_v1ToV2_idempotent verifies that opening a migrated
+// database a second time does not error.
+func TestMigrateSchema_v1ToV2_idempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1idem.db")
+
+	v1conn := openV1DB(t, path)
+	_ = v1conn.Close()
+
+	// First open — migrates to v2.
+	db1, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	_ = db1.Close()
+
+	// Second open — already at v2, should be a no-op.
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open (idempotent): %v", err)
+	}
+	defer func() { _ = db2.Close() }()
+
+	var maxVersion int
+	if err := db2.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
+		t.Fatalf("query schema_version: %v", err)
+	}
+	if maxVersion != 2 {
+		t.Errorf("MAX(version) = %d, want 2 after idempotent open", maxVersion)
+	}
+}
+
+// TestInsertRun_recursive verifies that InsertRun persists the Recursive field
+// and GetRun round-trips it correctly.
+func TestInsertRun_recursive(t *testing.T) {
+	db := openTestDB(t)
+
+	r := makeTestRun("run-recursive")
+	r.Recursive = true
+
+	if err := db.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+
+	got, err := db.GetRun("run-recursive")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetRun returned nil")
+	}
+	if !got.Recursive {
+		t.Error("Recursive = false, want true")
+	}
+}
+
+// TestInsertRun_nonRecursive verifies that Recursive=false is stored as 0.
+func TestInsertRun_nonRecursive(t *testing.T) {
+	db := openTestDB(t)
+
+	r := makeTestRun("run-nonrecursive")
+	r.Recursive = false
+
+	if err := db.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+
+	got, err := db.GetRun("run-nonrecursive")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetRun returned nil")
+	}
+	if got.Recursive {
+		t.Error("Recursive = true, want false")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Concurrency tests (Task 39)
 // ---------------------------------------------------------------------------
 

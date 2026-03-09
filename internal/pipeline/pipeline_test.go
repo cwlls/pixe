@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/text/language"
 
+	"github.com/cwlls/pixe-go/internal/archivedb"
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
@@ -811,6 +812,287 @@ func TestRun_outputFormat_concurrentSkip(t *testing.T) {
 	}
 	if result.Skipped != 1 {
 		t.Errorf("Skipped = %d, want 1", result.Skipped)
+	}
+}
+
+// --- Task 18: recursive incremental run tests ---
+
+// openTestDB opens a fresh archivedb in t.TempDir() for pipeline tests.
+func openTestDB(t *testing.T) *archivedb.DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := archivedb.Open(path)
+	if err != nil {
+		t.Fatalf("archivedb.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// newOptsWithDB builds SortOptions wired to a real DB and a unique RunID.
+func newOptsWithDB(t *testing.T, cfg *config.AppConfig, out *bytes.Buffer, db *archivedb.DB, runID string) SortOptions {
+	t.Helper()
+	opts := newOpts(t, cfg, out)
+	opts.DB = db
+	opts.RunID = runID
+	return opts
+}
+
+// writeUniqueJPEG writes a minimal valid JPEG into subdir/name.
+// The JPEG has a unique SOS payload (image data) so its checksum differs
+// from the standard test fixtures. It uses a hardcoded minimal 1×1 JPEG
+// with a unique grayscale value derived from the name length.
+//
+// The JPEG structure is: SOI + SOF0 + DHT + SOS(unique pixel) + EOI.
+// No EXIF data is included, so the pipeline uses the Ansel Adams fallback date.
+func writeUniqueJPEG(t *testing.T, dir, subdir, name string) string {
+	t.Helper()
+	sub := filepath.Join(dir, subdir)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("MkdirAll %q: %v", sub, err)
+	}
+
+	// A minimal 1×1 grayscale JPEG. The SOS entropy data encodes a single
+	// DC coefficient. We vary the last byte of the entropy data (before EOI)
+	// using the name length to produce a unique image payload per file.
+	//
+	// This is a pre-encoded minimal JPEG where the entropy data byte at
+	// position [len-3] (just before 0xFF 0xD9 EOI) is replaced with a
+	// value derived from the name.
+	//
+	// Minimal 1×1 grayscale JPEG (no EXIF, no APP0):
+	// SOI FF D8
+	// SOF0 FF C0 00 0B 08 00 01 00 01 01 01 11 00
+	// DHT  FF C4 00 1F 00 00 01 05 01 01 01 01 01 01 00 00 00 00 00 00 00 00 01 02 03 04 05 06 07 08 09 0A 0B
+	// SOS  FF DA 00 08 01 01 00 00 3F 00 <entropy> FF D9
+	//
+	// We use a known-good minimal JPEG and patch a byte in the entropy data.
+	minimalJPEG := []byte{
+		// SOI
+		0xFF, 0xD8,
+		// SOF0: 1×1, 8-bit, 1 component (grayscale)
+		0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+		// DHT: minimal Huffman table for DC (all-zeros image)
+		0xFF, 0xC4, 0x00, 0x1F,
+		0x00, // table class/id: DC table 0
+		0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+		// SOS header
+		0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00,
+		// Entropy-coded data: encode DC=0 (all black pixel).
+		// The Huffman code for DC=0 with the above table is 0x00 (1 bit, value 0).
+		// We use 0xF8 as a valid entropy byte (7 bits of 1s + 1 bit of 0 = EOB).
+		// We vary this byte by XOR-ing with a value derived from the name.
+		byte(0xF8 ^ (len(name) & 0xFF)),
+		// EOI
+		0xFF, 0xD9,
+	}
+
+	dst := filepath.Join(sub, name)
+	if err := os.WriteFile(dst, minimalJPEG, 0o644); err != nil {
+		t.Fatalf("writeUniqueJPEG write %q: %v", dst, err)
+	}
+	return dst
+}
+
+// TestRun_recursiveIncremental_skipPreviouslyImported is the Task 18 end-to-end
+// scenario: two runs against the same source, the second run is recursive and
+// should skip the file already imported in run 1.
+//
+// Setup:
+//   - dirA/with_exif_date.jpg  (top-level, has EXIF date)
+//   - dirA/sub/no_exif.jpg     (nested, different content → different checksum)
+//
+// Run 1: non-recursive → copies with_exif_date.jpg, does NOT see sub/
+// Run 2: recursive     → skips with_exif_date.jpg (previously imported),
+//
+//	copies sub/no_exif.jpg
+func TestRun_recursiveIncremental_skipPreviouslyImported(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	db := openTestDB(t)
+
+	// Place fixtures — use writeUniqueJPEG for the sub file to ensure a
+	// different image payload (and thus different checksum) from the top-level file.
+	copyFixture(t, dirA, "with_exif_date.jpg")
+	writeUniqueJPEG(t, dirA, "sub", "unique_sub.jpg")
+
+	// --- Run 1: non-recursive ---
+	var out1 bytes.Buffer
+	cfg1 := &config.AppConfig{
+		Source:      dirA,
+		Destination: dirB,
+		Algorithm:   "sha1",
+		Recursive:   false,
+	}
+	result1, err := Run(newOptsWithDB(t, cfg1, &out1, db, "run-1"))
+	if err != nil {
+		t.Fatalf("Run 1: %v\nOutput:\n%s", err, out1.String())
+	}
+
+	// Run 1 should have processed exactly 1 file (top-level only).
+	if result1.Processed != 1 {
+		t.Errorf("Run 1: Processed = %d, want 1\nOutput:\n%s", result1.Processed, out1.String())
+	}
+	if result1.Skipped != 0 {
+		t.Errorf("Run 1: Skipped = %d, want 0", result1.Skipped)
+	}
+
+	// sub/unique_sub.jpg must NOT have been seen in run 1.
+	output1 := out1.String()
+	if strings.Contains(output1, "unique_sub.jpg") {
+		t.Errorf("Run 1 (non-recursive) should not have seen sub/unique_sub.jpg; output:\n%s", output1)
+	}
+
+	// --- Run 2: recursive ---
+	var out2 bytes.Buffer
+	cfg2 := &config.AppConfig{
+		Source:      dirA,
+		Destination: dirB,
+		Algorithm:   "sha1",
+		Recursive:   true,
+	}
+	result2, err := Run(newOptsWithDB(t, cfg2, &out2, db, "run-2"))
+	if err != nil {
+		t.Fatalf("Run 2: %v\nOutput:\n%s", err, out2.String())
+	}
+
+	output2 := out2.String()
+
+	// with_exif_date.jpg should be skipped as previously imported.
+	if !strings.Contains(output2, "SKIP with_exif_date.jpg -> previously imported") {
+		t.Errorf("Run 2: expected 'SKIP with_exif_date.jpg -> previously imported'; output:\n%s", output2)
+	}
+
+	// sub/unique_sub.jpg should be copied (unique image payload → unique checksum).
+	if !strings.Contains(output2, "COPY sub/unique_sub.jpg -> ") {
+		t.Errorf("Run 2: expected 'COPY sub/unique_sub.jpg -> ...'; output:\n%s", output2)
+	}
+
+	// Run 2 counts: 1 processed (sub/unique_sub.jpg), 1 skipped (with_exif_date.jpg).
+	if result2.Processed != 1 {
+		t.Errorf("Run 2: Processed = %d, want 1\nOutput:\n%s", result2.Processed, output2)
+	}
+	if result2.Skipped != 1 {
+		t.Errorf("Run 2: Skipped = %d, want 1\nOutput:\n%s", result2.Skipped, output2)
+	}
+}
+
+// TestRun_recursiveIncremental_ledger verifies that the ledger written after
+// run 2 contains 2 entries: 1 skip and 1 copy.
+func TestRun_recursiveIncremental_ledger(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	db := openTestDB(t)
+
+	copyFixture(t, dirA, "with_exif_date.jpg")
+	writeUniqueJPEG(t, dirA, "sub", "unique_sub.jpg")
+
+	// Run 1: non-recursive.
+	var out1 bytes.Buffer
+	cfg1 := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1", Recursive: false}
+	if _, err := Run(newOptsWithDB(t, cfg1, &out1, db, "rl-run-1")); err != nil {
+		t.Fatalf("Run 1: %v", err)
+	}
+
+	// Run 2: recursive.
+	var out2 bytes.Buffer
+	cfg2 := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1", Recursive: true}
+	if _, err := Run(newOptsWithDB(t, cfg2, &out2, db, "rl-run-2")); err != nil {
+		t.Fatalf("Run 2: %v", err)
+	}
+
+	// Load the ledger written by run 2.
+	l, err := manifest.LoadLedger(dirA)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if l == nil {
+		t.Fatal("ledger not written")
+	}
+
+	// Ledger should reflect run 2: 1 skip + 1 copy = 2 entries.
+	if len(l.Files) != 2 {
+		t.Fatalf("ledger.Files len = %d, want 2; entries: %v", len(l.Files), l.Files)
+	}
+
+	statusCounts := make(map[string]int)
+	for _, e := range l.Files {
+		statusCounts[e.Status]++
+	}
+	if statusCounts["skip"] != 1 {
+		t.Errorf("ledger skip entries = %d, want 1; entries: %v", statusCounts["skip"], l.Files)
+	}
+	if statusCounts["copy"] != 1 {
+		t.Errorf("ledger copy entries = %d, want 1; entries: %v", statusCounts["copy"], l.Files)
+	}
+
+	// Ledger should be marked recursive=true.
+	if !l.Recursive {
+		t.Error("ledger.Recursive = false, want true for run 2")
+	}
+}
+
+// TestRun_recursiveIncremental_dbStatus verifies that the DB records the
+// correct statuses: with_exif_date.jpg is 'complete' in run 1 and 'skipped'
+// in run 2; sub/no_exif.jpg is 'complete' in run 2.
+func TestRun_recursiveIncremental_dbStatus(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	db := openTestDB(t)
+
+	copyFixture(t, dirA, "with_exif_date.jpg")
+	writeUniqueJPEG(t, dirA, "sub", "unique_sub.jpg")
+
+	// Run 1: non-recursive.
+	var out1 bytes.Buffer
+	cfg1 := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1", Recursive: false}
+	if _, err := Run(newOptsWithDB(t, cfg1, &out1, db, "ds-run-1")); err != nil {
+		t.Fatalf("Run 1: %v", err)
+	}
+
+	// Run 2: recursive.
+	var out2 bytes.Buffer
+	cfg2 := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1", Recursive: true}
+	if _, err := Run(newOptsWithDB(t, cfg2, &out2, db, "ds-run-2")); err != nil {
+		t.Fatalf("Run 2: %v", err)
+	}
+
+	// Files from run 1: with_exif_date.jpg should be 'complete'.
+	run1Files, err := db.GetFilesByRun("ds-run-1")
+	if err != nil {
+		t.Fatalf("GetFilesByRun run-1: %v", err)
+	}
+	if len(run1Files) != 1 {
+		t.Fatalf("run 1 file count = %d, want 1", len(run1Files))
+	}
+	if run1Files[0].Status != "complete" {
+		t.Errorf("run 1 file status = %q, want %q", run1Files[0].Status, "complete")
+	}
+
+	// Files from run 2: with_exif_date.jpg should be 'skipped',
+	// sub/no_exif.jpg should be 'complete'.
+	run2Files, err := db.GetFilesByRun("ds-run-2")
+	if err != nil {
+		t.Fatalf("GetFilesByRun run-2: %v", err)
+	}
+	if len(run2Files) != 2 {
+		t.Fatalf("run 2 file count = %d, want 2", len(run2Files))
+	}
+
+	statusByPath := make(map[string]string)
+	for _, f := range run2Files {
+		statusByPath[f.SourcePath] = f.Status
+	}
+
+	topLevelPath := filepath.Join(dirA, "with_exif_date.jpg")
+	subPath := filepath.Join(dirA, "sub", "unique_sub.jpg")
+
+	if statusByPath[topLevelPath] != "skipped" {
+		t.Errorf("run 2 with_exif_date.jpg status = %q, want %q", statusByPath[topLevelPath], "skipped")
+	}
+	if statusByPath[subPath] != "complete" {
+		t.Errorf("run 2 sub/unique_sub.jpg status = %q, want %q", statusByPath[subPath], "complete")
 	}
 }
 

@@ -93,10 +93,13 @@ func (db *DB) applySchema() error {
 		return fmt.Errorf("archivedb: apply schema DDL: %w", err)
 	}
 
-	// Insert schema version row if not already present (fresh DB path).
+	// Insert the current schema version only for fresh databases (empty table).
+	// For existing databases the version row already exists; migrateSchema will
+	// advance it after applying ALTER TABLE statements.
 	appliedAt := time.Now().UTC().Format(time.RFC3339)
 	_, err = tx.Exec(
-		`INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)`,
+		`INSERT INTO schema_version (version, applied_at)
+		 SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM schema_version)`,
 		schemaVersion, appliedAt,
 	)
 	if err != nil {

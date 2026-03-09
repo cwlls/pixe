@@ -108,6 +108,7 @@ func Run(opts SortOptions) (SortResult, error) {
 		Destination: dirB,
 		Algorithm:   opts.Hasher.Algorithm(),
 		Workers:     cfg.Workers,
+		Recursive:   cfg.Recursive,
 		StartedAt:   startedAt,
 	}
 	if db != nil {
