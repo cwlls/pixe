@@ -280,6 +280,33 @@ func (db *DB) ArchiveInventory() ([]*InventoryEntry, error) {
 	return entries, nil
 }
 
+// CheckSourceProcessed returns true if a file with the given absolute source
+// path has already been successfully processed (status 'complete' or
+// 'duplicate') in any prior run. Used by the pipeline to decide whether to
+// emit a SKIP line instead of re-processing the file.
+//
+// Note: 'skipped' and 'failed' statuses are intentionally excluded — a
+// previously-skipped file (e.g. unsupported format) should be re-evaluated
+// in case a new handler has been registered, and a previously-failed file
+// should be retried.
+func (db *DB) CheckSourceProcessed(sourcePath string) (bool, error) {
+	const q = `
+		SELECT 1 FROM files
+		WHERE source_path = ?
+		  AND status IN ('complete', 'duplicate')
+		LIMIT 1`
+
+	var exists int
+	err := db.conn.QueryRow(q, sourcePath).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("archivedb: check source processed: %w", err)
+	}
+	return true, nil
+}
+
 // ---------------------------------------------------------------------------
 // Internal scan helpers
 // ---------------------------------------------------------------------------
