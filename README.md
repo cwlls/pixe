@@ -70,6 +70,8 @@ When a file's checksum matches an already-processed file:
 <dest>/duplicates/<run_timestamp>/<YYYY>/<MM-Mon>/<filename>
 ```
 
+Use the `--skip-duplicates` flag to skip copying duplicate files entirely instead of copying them to the `duplicates/` directory. When active, duplicates are detected and checksummed but not physically copied to the destination.
+
 ### Archive Database & Ledger
 
 - **Archive DB** (`<dest>/.pixe/<slug>.db`): SQLite database tracking all files ever processed across all runs. Enables duplicate detection, skip-on-resume, and queryable history. Automatically migrated from legacy JSON manifest if present.
@@ -109,6 +111,7 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
 | `-r, --recursive` | Recursively process subdirectories of `--source` |
 | `--ignore` | Glob pattern for files to exclude (repeatable, e.g. `--ignore "*.txt"`) |
+| `--skip-duplicates` | Skip copying duplicate files instead of copying to `duplicates/` |
 | `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
 | `--camera-owner` | Camera owner string to inject |
 | `--dry-run` | Preview operations without copying |
@@ -213,7 +216,7 @@ Each file type extracts dates in this order:
 ## Safety Guarantees
 
 - **Source is read-only** — Pixe never modifies, renames, moves, or deletes source files. Only `.pixe_ledger.json` is written to the source directory.
-- **Copy-then-verify** — Every file is copied to the destination, then independently re-hashed to confirm integrity.
+- **Atomic copy-then-verify** — Files are first written to a uniquely-named temp file (`.<name>.pixe-tmp-*`) in the destination directory, then independently re-hashed. Only after verification passes is the temp file atomically renamed to its canonical path. A file at its canonical location is always complete and verified — partial files never appear at canonical paths.
 - **Database-backed resumability** — The SQLite archive database tracks each file's state across all runs. Interrupted runs resume without re-processing completed files.
 - **Crash-safe ledger** — The JSONL ledger is written one line at a time. An interrupted run leaves a partial but fully valid receipt.
 - **No silent data loss** — Hash mismatches, copy failures, and unrecognized files are always reported. Pixe never exits silently on error.

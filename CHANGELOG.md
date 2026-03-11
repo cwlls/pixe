@@ -8,6 +8,22 @@
 
 - No pending tasks.
 
+## [v1.5.0] - 2026-03-11
+
+- **Features**:
+  - `--skip-duplicates` flag on `pixe sort`: skip copying duplicate files instead of copying to `duplicates/`. When active, duplicate files are detected and checksummed but not physically copied to `dirB`. DB row is marked `status='complete'`, `is_duplicate=1`, with NULL `dest_path`/`dest_rel`. Ledger entry includes `status:"duplicate"` and `checksum` but omits `destination` field.
+  - Atomic copy-then-verify via temp file: `copy.Execute` now writes to a uniquely-named temp file (`.<basename>.pixe-tmp-<random>`) in the destination directory, never touching the canonical path during copy. `copy.Verify` re-hashes the temp file. `copy.Promote` atomically renames temp → canonical path only after verification passes. Guarantees: a file at its canonical path in `dirB` is always complete and verified; partial files never appear at canonical paths.
+
+- **Improvements**:
+  - `CheckDuplicate` now returns `"<duplicate>"` sentinel when a complete row exists with NULL `dest_rel`, ensuring skipped-duplicate rows are correctly detected as duplicates by subsequent runs.
+  - Concurrent race condition fixed in no-DB mode: `memSeen` is now updated at assignment time, and `os.CreateTemp` ensures unique temp file names so concurrent workers never overwrite each other's temp files.
+
+- **Bug Fixes**:
+  - Interrupted run safety: orphaned temp files are left on disk but do not interfere with subsequent runs. They are identifiable by the `.pixe-tmp` suffix and can be cleaned by a future `pixe clean` command.
+
+- **Test Coverage**:
+  - Integration tests added: `TestSort_noPartialFilesOnInterrupt`, `TestSort_tempFileCleanupOnResume`, `TestSort_verifiedFileAtCanonicalPath`.
+
 ## [v1.4.0] - 2026-03-11
 
 - **Features**:
