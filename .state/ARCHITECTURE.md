@@ -2251,7 +2251,469 @@ The `resume` command now locates the database via the same discovery chain (flag
 
 ---
 
-## 10. Open Questions & Future Considerations
+## 10. Documentation Site (`docs/`)
+
+### 10.1 Overview
+
+The Pixe documentation site is a Jekyll-based static site deployed to GitHub Pages from the `docs/` directory. It replaces the prior single-file `docs/index.html` with a multi-page site built from Markdown content files, a custom local theme, and Jekyll's standard layout/include system. The site preserves the visual identity of the original single-page design: dark background (`#0c0c0c`), warm amber accent (`#b5a642`, "darkroom safelight"), monospace brand typography, card-based content blocks, and a minimal, developer-focused aesthetic.
+
+### 10.2 Design Goals
+
+1. **Preserve the visual identity.** The site must look and feel like the existing `index.html` — same color palette, same typography, same card and grid components. A visitor who saw the old site should recognize the new one immediately.
+2. **Content in Markdown.** All page content is authored in Markdown files with YAML front matter. No content lives in HTML layout files. This makes documentation contributions accessible to anyone who can edit Markdown.
+3. **Local theme, not a gem.** The theme (layouts, includes, SCSS) lives inside `docs/` as standard Jekyll convention directories. It is not packaged as a standalone gem — it exists solely to serve this project.
+4. **Top navigation.** The site uses a sticky top nav bar (carried over from the original design) for primary navigation between pages. No sidebar. The nav links update across pages via a `_data/navigation.yml` data file.
+5. **Landing page preserves the marketing feel.** The homepage retains the hero section, condensed "why" summary, pipeline visualization, and call-to-action buttons from the original design. Detailed reference content moves to inner pages.
+6. **Standard GitHub Pages deployment.** Built and served by GitHub Pages' built-in Jekyll support. Base URL: `https://cwlls.github.io/pixe-go/`.
+
+### 10.3 Site Structure
+
+#### 10.3.1 Directory Layout
+
+```
+docs/
+├── _config.yml                  ← Jekyll configuration
+├── _data/
+│   └── navigation.yml           ← Top nav link definitions
+├── _includes/
+│   ├── head.html                ← <head> block: meta, CSS links
+│   ├── nav.html                 ← Sticky top navigation bar
+│   ├── footer.html              ← Site footer
+│   ├── hero.html                ← Homepage hero section (used only by landing layout)
+│   ├── pipeline.html            ← Pipeline visualization component
+│   └── format-grid.html         ← Supported file types grid component
+├── _layouts/
+│   ├── default.html             ← Base layout: head, nav, {{ content }}, footer
+│   ├── landing.html             ← Homepage layout: extends default, adds hero + marketing sections
+│   └── page.html                ← Inner page layout: extends default, adds section-label + title + prose container
+├── _sass/
+│   ├── _variables.scss          ← CSS custom properties (color palette, fonts, spacing, radius)
+│   ├── _reset.scss              ← Box-sizing reset, base element styles
+│   ├── _typography.scss         ← Headings, paragraphs, links, inline code
+│   ├── _nav.scss                ← Sticky nav bar, brand, nav links, GitHub button
+│   ├── _layout.scss             ← Container, section spacing, responsive breakpoints
+│   ├── _hero.scss               ← Hero section: title, subtitle, promise, action buttons
+│   ├── _cards.scss              ← Problem grid cards, format grid cards, AI card
+│   ├── _code.scss               ← Code blocks, terminal output styling, pre-label
+│   ├── _tables.scss             ← Flag tables, command reference tables
+│   ├── _components.scss         ← Pipeline visualization, callouts, step lists, cmd-block accordion
+│   ├── _footer.scss             ← Footer layout and links
+│   └── _utilities.scss          ← Margin helpers, .dim class, .section-label
+├── assets/
+│   └── css/
+│       └── main.scss            ← SCSS entry point: imports all partials
+├── index.md                     ← Homepage content (uses landing layout)
+├── install.md                   ← Installation & quick start
+├── commands.md                  ← Complete command reference (all commands, all flags)
+├── how-it-works.md              ← Pipeline, output format, naming, archive database, file types
+├── technical.md                 ← Technical benefits: safety, determinism, integrity, native Go
+├── contributing.md              ← Contributing guide
+├── adding-formats.md            ← Developer guide: implementing a new FileTypeHandler
+├── changelog.md                 ← Changelog (pulls from or mirrors root CHANGELOG.md)
+├── ai.md                        ← AI collaboration statement
+└── .nojekyll                    ← NOT present (we want Jekyll processing)
+```
+
+#### 10.3.2 Jekyll Configuration (`_config.yml`)
+
+```yaml
+title: Pixe
+description: Safe, deterministic photo and video sorting
+url: "https://cwlls.github.io"
+baseurl: "/pixe-go"
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    default_lang: bash
+sass:
+  sass_dir: _sass
+  style: compressed
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+```
+
+#### 10.3.3 Navigation Data (`_data/navigation.yml`)
+
+```yaml
+- title: Install
+  url: /install/
+- title: Commands
+  url: /commands/
+- title: How It Works
+  url: /how-it-works/
+- title: Technical
+  url: /technical/
+- title: Contributing
+  url: /contributing/
+- title: Changelog
+  url: /changelog/
+```
+
+The nav include iterates over this list and highlights the current page. The "pixe" brand link and "GitHub ↗" button are hardcoded in the nav include (not data-driven) to match the original design.
+
+### 10.4 Theme Specification
+
+The theme is a direct translation of the inline CSS from the original `index.html` into Jekyll's SCSS partial system. Every CSS custom property, every component class, and every responsive breakpoint from the original is preserved. The theme is not a generic documentation theme — it is purpose-built for Pixe's visual identity.
+
+#### 10.4.1 Design Tokens (`_variables.scss`)
+
+Extracted verbatim from the original `:root` block:
+
+| Token | Value | Purpose |
+|---|---|---|
+| `--bg` | `#0c0c0c` | Page background |
+| `--bg-raised` | `#141414` | Elevated surface (AI section background) |
+| `--bg-card` | `#181818` | Card/panel background |
+| `--border` | `#262626` | Default border color |
+| `--border-hi` | `#333` | Hover/active border |
+| `--text` | `#e8e8e8` | Primary text |
+| `--text-dim` | `#888` | Secondary/descriptive text |
+| `--text-faint` | `#555` | Tertiary/muted text |
+| `--accent` | `#b5a642` | Warm amber — brand color, links, highlights |
+| `--accent-lo` | `#b5a64222` | Accent at low opacity (tag backgrounds, active pipeline steps) |
+| `--green` | `#4a9e6e` | Success/positive indicators |
+| `--green-lo` | `#4a9e6e18` | Green at low opacity (callout backgrounds) |
+| `--red` | `#c0554a` | Error indicators |
+| `--mono` | `'SF Mono', 'Cascadia Code', 'Fira Mono', 'Consolas', monospace` | Code, brand, labels |
+| `--sans` | `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` | Body text |
+| `--radius` | `6px` | Border radius |
+| `--nav-h` | `56px` | Nav bar height |
+
+#### 10.4.2 Component Inventory
+
+Every visual component from the original site is preserved as a reusable CSS class. Components used on multiple pages are styled globally. Components unique to the homepage (hero, problem grid) are scoped but available for reuse.
+
+| Component | CSS Classes | Used On |
+|---|---|---|
+| **Sticky nav** | `.nav-brand`, `.nav-links`, `.nav-spacer`, `.nav-gh` | All pages (include) |
+| **Hero section** | `.hero-tag`, `.hero-title`, `.hero-sub`, `.hero-promise`, `.hero-actions`, `.btn`, `.btn-primary`, `.btn-ghost` | Homepage only |
+| **Section label** | `.section-label` | All content pages |
+| **Problem grid** | `.problem-grid`, `.problem-card`, `.problem-q`, `.problem-a`, `.tag-ok` | Homepage |
+| **Pipeline visualization** | `.pipeline`, `.pipeline-step`, `.pipeline-step.active`, `.pipeline-arrow` | Homepage, How It Works |
+| **Code blocks** | `pre`, `code`, `.pre-label`, `.term-prompt`, `.term-cmd`, `.term-copy`, `.term-skip`, `.term-dupe`, `.term-err`, `.term-done`, `.term-comment` | Multiple pages |
+| **Format grid** | `.format-grid`, `.format-card`, `.format-name`, `.format-ext` | How It Works |
+| **Flag tables** | `.flag-table-wrap`, `.flag-table` | Commands |
+| **Command accordion** | `.cmd-block`, `.cmd-header`, `.cmd-name`, `.cmd-desc`, `.cmd-toggle`, `.cmd-body` | Commands |
+| **Contributing steps** | `.contribute-steps`, `.step`, `.step-num`, `.step-text` | Contributing |
+| **AI card** | `.ai-card`, `.ai-ref` | AI statement |
+| **Callout** | `.callout` | Multiple pages |
+| **Footer** | `.footer-inner`, `.footer-brand`, `.footer-links`, `.footer-spacer`, `.footer-copy` | All pages (include) |
+
+#### 10.4.3 Markdown Rendering Styles
+
+The `page` layout wraps content in a `.container` div with max-width `880px` (matching the original). Standard Markdown elements receive styling that matches the original design:
+
+| Markdown Element | Rendered Style |
+|---|---|
+| `# H1` | Same as `.hero-title` but smaller (used as page title, rendered by layout) |
+| `## H2` | `1.75rem`, weight `700`, letter-spacing `-0.02em`, color `--text` |
+| `### H3` | `1.1rem`, weight `600`, `2rem` top margin, color `--text` |
+| `p` | `1rem` bottom margin, color `--text`, line-height `1.65` |
+| `` `inline code` `` | `0.85em`, `--bg-card` background, `1px solid --border`, `--accent` color |
+| ```` ``` code blocks ```` | `#0a0a0a` background, `1px solid --border`, `0.82rem` font, `1.7` line-height |
+| `> blockquote` | Left border `2px solid --accent`, padding-left `1rem`, color `--text-dim` |
+| Tables | Same styling as `.flag-table` — monospace first column in `--accent`, `--border` row separators |
+| `- list items` | Color `--text-dim`, `0.5rem` spacing, left padding `1.5rem` |
+| `**bold**` | Color `--text` (stands out against `--text-dim` surrounding text) |
+| Horizontal rules `---` | `1px solid --border`, `3rem` vertical margin |
+
+#### 10.4.4 Rouge Syntax Highlighting
+
+Code blocks use Rouge (GitHub Pages' built-in highlighter) with a custom dark theme that matches the terminal styling from the original site:
+
+| Token Type | Color | Maps to Original |
+|---|---|---|
+| Comment | `--text-faint` (`#555`) | `.term-comment` |
+| String | `--green` (`#4a9e6e`) | `.term-copy` |
+| Keyword | `--accent` (`#b5a642`) | `.term-dupe` |
+| Name/Function | `--text` (`#e8e8e8`) | `.term-cmd` |
+| Error | `--red` (`#c0554a`) | `.term-err` |
+| Background | `#0a0a0a` | `pre` background |
+
+The Rouge theme is defined as a SCSS partial (`_sass/_code.scss`) using Rouge's class selectors (`.highlight .c`, `.highlight .s`, etc.).
+
+#### 10.4.5 Responsive Behavior
+
+Preserved from the original, breakpoint at `640px`:
+
+- Problem grid collapses to single column
+- Nav links collapse (hidden on mobile; the brand and GitHub button remain)
+- H2 shrinks to `1.4rem`
+- Pipeline component reduces padding
+- Footer stacks vertically
+
+### 10.5 Page Content Specification
+
+#### 10.5.1 Homepage (`index.md`)
+
+**Layout:** `landing`
+
+The homepage preserves the marketing/landing page feel. It contains:
+
+1. **Hero section** — Rendered by the `hero.html` include (not Markdown). Preserves the version tag, `pixe` title in monospace, subtitle, promise paragraph, and two CTA buttons ("Get Started" → `/install/`, "View on GitHub" → repo). The version tag value is set in `_config.yml` as a site variable (`version: v1.8.0`) so it can be updated in one place.
+2. **Why Pixe (condensed)** — The six problem/answer cards from the original, rendered via the `hero.html` include or as a Markdown section with HTML card markup. This stays on the homepage because it's the primary value proposition.
+3. **Pipeline visualization** — The discover → extract → hash → copy → verify → tag → complete pipeline, rendered via the `pipeline.html` include. Brief one-line descriptions of each stage.
+4. **Quick start snippet** — A condensed install + first-command block (3-4 lines). Links to the full Install page.
+
+Content that moves to inner pages:
+- Detailed output format and naming → How It Works
+- Supported file types grid → How It Works
+- Full command reference with flag tables → Commands
+- Configuration file details → Commands
+- Contributing steps → Contributing
+- AI statement → AI
+
+#### 10.5.2 Installation (`install.md`)
+
+**Layout:** `page`  
+**Section label:** `Installation`  
+**Title:** Get started in minutes
+
+Content (carried from the original Install section):
+- Install via Go (`go install ...`)
+- Build from source (`git clone`, `make build`)
+- Quick start examples (sort, status, verify)
+- Dry-run tip callout
+- Link to the Commands page for full reference
+
+#### 10.5.3 Command Reference (`commands.md`)
+
+**Layout:** `page`  
+**Section label:** `Reference`  
+**Title:** Commands
+
+This is the comprehensive command reference page. Every command gets its own section with:
+- Command signature
+- Description paragraph
+- Flag table (using the `.flag-table-wrap` / `.flag-table` styling)
+- Usage examples in terminal-styled code blocks
+
+Commands covered (in order):
+1. **`pixe sort`** — All flags from Section 7.1, including `--source`, `--dest`, `--workers`, `--algorithm`, `--recursive`, `--ignore`, `--skip-duplicates`, `--copyright`, `--camera-owner`, `--dry-run`, `--db-path`
+2. **`pixe status`** — Flags: `--source`, `--recursive`, `--ignore`, `--json`
+3. **`pixe verify`** — Flags: `--dir`, `--algorithm`, `--workers`
+4. **`pixe resume`** — Flags: `--dir`, `--db-path`
+5. **`pixe query`** — Parent flags (`--dir`, `--db-path`, `--json`) plus each subcommand: `runs`, `run <id>`, `duplicates`, `errors`, `skipped`, `files`, `inventory`
+6. **`pixe clean`** — Flags: `--dir`, `--db-path`, `--dry-run`, `--temp-only`, `--vacuum-only`
+7. **`pixe version`**
+
+Each command uses the expandable accordion component (`.cmd-block`) from the original design, with the sort command expanded by default.
+
+Ends with a **Configuration file** section explaining `.pixe.yaml` with a YAML example.
+
+#### 10.5.4 How It Works (`how-it-works.md`)
+
+**Layout:** `page`  
+**Section label:** `Internals`  
+**Title:** How it works
+
+Content (expanded from the original "How It Works" section):
+- **Pipeline stages** — Full pipeline diagram with the `pipeline.html` include, plus detailed descriptions of each stage (pending → extracted → hashed → copied → verified → tagged → complete) and error states
+- **Output format** — The four outcome verbs (COPY, SKIP, DUPE, ERR) with terminal-styled examples
+- **Output naming** — `YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>` convention, directory structure `<YYYY>/<MM-Mon>/`, locale-aware month names
+- **Date fallback chain** — EXIF DateTimeOriginal → CreateDate → Ansel Adams birthday (1902-02-20)
+- **Duplicate handling** — Default copy-to-quarantine behavior vs `--skip-duplicates`
+- **Archive database** — SQLite at `<dest>/.pixe/<slug>.db`, what it tracks, WAL mode
+- **Supported file types** — The format grid (via `format-grid.html` include) with all 9 formats: JPEG, HEIC, MP4/MOV, DNG, NEF, CR2, CR3, PEF, ARW
+
+#### 10.5.5 Technical Benefits (`technical.md`)
+
+**Layout:** `page`  
+**Section label:** `Design`  
+**Title:** Why Pixe is built this way
+
+A concise, focused page explaining the technical design values that distinguish Pixe. Not a rehash of features — a statement of engineering principles and why they matter for photo archiving. Sections:
+
+1. **Source files are never touched** — Read-only `dirA` constraint. Only the ledger is written. Why this matters for irreplaceable media.
+2. **Copy-then-verify** — Atomic temp file write, independent re-hash, rename only on match. Why checksums on both sides matter (bit rot, flaky USB, NAS packet loss).
+3. **Deterministic output** — Same input always produces the same archive structure. Why this enables confidence in re-runs and multi-source merges.
+4. **No external dependencies** — Single binary, no exiftool, no ffmpeg. All parsing in pure Go. Why this matters for long-term archival (the tool works in 10 years without a dependency chain).
+5. **Crash-safe by design** — Per-file transaction commits, streaming JSONL ledger, atomic rename. An interrupted run loses at most one in-flight file.
+6. **Content-based deduplication** — Checksum of the media payload, not filenames. Why `IMG_0001.jpg` from two different cameras are correctly handled.
+
+Each section is 2-3 short paragraphs. No code examples — this page is prose-focused for a reader evaluating whether to trust Pixe with their photo archive.
+
+#### 10.5.6 Contributing (`contributing.md`)
+
+**Layout:** `page`  
+**Section label:** `Open Source`  
+**Title:** Contributing to Pixe
+
+Content (carried from the original Contributing section):
+- Opening paragraph about Apache 2.0 and what contributions are welcome
+- The 5-step contributing flow (using the `.contribute-steps` / `.step` component)
+- Link to GitHub Issues
+
+#### 10.5.7 Adding a New Format (`adding-formats.md`)
+
+**Layout:** `page`  
+**Section label:** `Developer Guide`  
+**Title:** Adding a new file format
+
+A developer-facing guide for implementing a new `FileTypeHandler`. Sections:
+
+1. **Overview** — Pixe's format support is modular. Each format is an isolated package that implements the `FileTypeHandler` interface. The core pipeline requires no changes.
+2. **The `FileTypeHandler` interface** — Full interface listing with doc comments (from ARCHITECTURE.md Section 6.1). Each method explained in plain language.
+3. **Step-by-step walkthrough** — Using a hypothetical format (e.g., WEBP) as an example:
+   - Create the package directory (`internal/handler/webp/`)
+   - Implement `Extensions()` and `MagicBytes()` for detection
+   - Implement `Detect()` with extension + magic byte verification
+   - Implement `ExtractDate()` with the date fallback chain
+   - Implement `HashableReader()` — what the "hashable region" means and how to identify it
+   - Implement `MetadataSupport()` — choosing between Embed, Sidecar, or None
+   - Implement `WriteMetadataTags()` (or no-op stub for Sidecar/None)
+   - Register in `cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go`, `cmd/status.go`
+   - Write tests using the project's testing conventions
+4. **TIFF-based RAW shortcut** — If the new format is TIFF-based, embed `tiffraw.Base` and supply only Extensions/MagicBytes/Detect. Reference existing handlers (DNG, NEF, etc.) as templates.
+5. **Testing conventions** — stdlib only, `t.TempDir()`, `t.Helper()`, `-race` always, fixture files
+
+#### 10.5.8 Changelog (`changelog.md`)
+
+**Layout:** `page`  
+**Section label:** `History`  
+**Title:** Changelog
+
+This page renders the project changelog. The content is maintained in the root `CHANGELOG.md` file. The `docs/changelog.md` page uses a Jekyll include or a simple content copy approach:
+
+**Approach:** The `docs/changelog.md` file contains front matter and a brief intro, then includes the changelog content. Since Jekyll cannot include files outside `docs/`, the changelog content is either:
+- **Option A (recommended):** Manually kept in sync — `docs/changelog.md` contains the full changelog content. When the root `CHANGELOG.md` is updated, the docs version is updated in the same commit.
+- **Option B:** A CI step copies `CHANGELOG.md` content into `docs/changelog.md` before the Jekyll build.
+
+Option A is simpler and avoids CI complexity. The changelog is updated infrequently (on releases) and the duplication is manageable.
+
+#### 10.5.9 AI Statement (`ai.md`)
+
+**Layout:** `page`  
+**Section label:** `Transparency`  
+**Title:** Built with AI collaboration
+
+Content carried directly from the original AI section, using the `.ai-card` component for the statement block. Includes the external reference link to `daplin.org/ai-collaboration.html`.
+
+### 10.6 Layouts
+
+#### 10.6.1 `default.html`
+
+The base layout. Every page uses this (directly or via inheritance). Structure:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>{% include head.html %}</head>
+<body>
+  {% include nav.html %}
+  {{ content }}
+  {% include footer.html %}
+  <script>/* accordion toggle function, if any cmd-blocks are on the page */</script>
+</body>
+</html>
+```
+
+#### 10.6.2 `landing.html`
+
+Extends `default.html`. Used only by `index.md`. Wraps content in the hero + marketing section structure:
+
+```html
+---
+layout: default
+---
+{% include hero.html %}
+<section id="why">
+  <div class="container">
+    {{ content }}
+  </div>
+</section>
+```
+
+The hero include reads `site.version`, `site.description`, and `site.tagline` from `_config.yml` for the tag, subtitle, and promise text. The Markdown content in `index.md` provides the "Why Pixe" cards and pipeline section.
+
+#### 10.6.3 `page.html`
+
+Extends `default.html`. Used by all inner pages. Adds the section label, page title, and prose container:
+
+```html
+---
+layout: default
+---
+<section>
+  <div class="container">
+    {% if page.section_label %}
+      <div class="section-label">{{ page.section_label }}</div>
+    {% endif %}
+    <h2>{{ page.title }}</h2>
+    {{ content }}
+  </div>
+</section>
+```
+
+Pages set `section_label` and `title` in their front matter:
+
+```yaml
+---
+layout: page
+title: Commands
+section_label: Reference
+---
+```
+
+### 10.7 Includes
+
+| Include | Purpose | Used By |
+|---|---|---|
+| `head.html` | `<meta>` tags, `<title>`, CSS `<link>` to `assets/css/main.css` | `default.html` |
+| `nav.html` | Sticky top nav bar. Iterates `site.data.navigation` for links. Highlights current page via `page.url` comparison. Hardcodes brand link and GitHub button. | `default.html` |
+| `footer.html` | Footer with brand, links (GitHub, Issues, License, AI), copyright | `default.html` |
+| `hero.html` | Hero section with version tag, title, subtitle, promise, CTA buttons | `landing.html` |
+| `pipeline.html` | Pipeline step visualization (discover → ... → complete) | `index.md`, `how-it-works.md` |
+| `format-grid.html` | Supported file types grid (JPEG, HEIC, MP4, DNG, NEF, CR2, CR3, PEF, ARW) | `how-it-works.md` |
+
+### 10.8 Interactive Components
+
+The command accordion (`.cmd-block` expand/collapse) from the original site is preserved on the Commands page. The toggle is powered by a minimal inline `<script>` (same as the original):
+
+```javascript
+function toggle(header) {
+  const block = header.closest('.cmd-block');
+  block.classList.toggle('open');
+}
+```
+
+This is the only JavaScript on the site. No build tools, no npm, no bundler.
+
+### 10.9 Migration from Single-File Site
+
+The original `docs/index.html` is removed and replaced by the Jekyll site structure. The migration is a content decomposition — all text, code examples, and visual components from the original are distributed across the new pages and theme files. No content is lost; content is only reorganized and, in the case of the Technical and Adding Formats pages, newly authored.
+
+**What happens to the original file:**
+- `docs/index.html` is deleted from the repository.
+- Its CSS becomes the SCSS partials in `_sass/`.
+- Its HTML structure becomes the layouts and includes in `_layouts/` and `_includes/`.
+- Its content becomes the Markdown files in `docs/`.
+- Its JavaScript (the accordion toggle) moves to the `default.html` layout.
+
+### 10.10 Deployment
+
+The site is deployed via GitHub Pages using Jekyll's built-in processing. Configuration:
+
+- **Source:** `docs/` directory on the default branch
+- **Base URL:** `https://cwlls.github.io/pixe-go/`
+- **Build:** GitHub Pages' built-in Jekyll (no GitHub Actions workflow needed for the basic case)
+- **CNAME:** None (standard GitHub Pages URL)
+
+No `Gemfile` is strictly required for GitHub Pages' built-in Jekyll, but one may be added for local development (`bundle exec jekyll serve`):
+
+```ruby
+source "https://rubygems.org"
+gem "jekyll", "~> 4.3"
+gem "kramdown-parser-gfm"
+```
+
+---
+
+## 11. Open Questions & Future Considerations
 
 These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
@@ -2270,3 +2732,4 @@ These items are explicitly **out of scope** for the current build but are acknow
 13. ~~**`.pixeignore` file**~~ — **Promoted to Section 4.11.** No longer a future consideration.
 14. **Extended XMP fields** — The current XMP sidecar writes only Copyright and CameraOwner. Future work could add additional fields (keywords, captions, GPS coordinates, star ratings) to the `MetadataTags` struct and XMP template.
 15. **Split-brain network dedup (multi-machine NAS)** — When two machines run `pixe sort` against the same NAS `dirB`, each with its own local `~/.pixe/databases/<slug>.db`, there is no shared state for dedup. Both may write the same file to the primary archive without detecting the collision. A filesystem-level locking strategy using `O_EXCL` temp file creation could address this — the OS guarantees atomicity of `O_EXCL` even over modern SMB/NFS. Deferred until the multi-machine NAS workflow is actively used.
+16. ~~**Documentation site**~~ — **Promoted to Section 10.** No longer a future consideration.
