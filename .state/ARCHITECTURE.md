@@ -31,6 +31,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **CR3 Parsing** | ISOBMFF parser (reuses HEIC/MP4 approach) | Canon RAW X container; box-based EXIF and JPEG preview extraction |
 | **Hashing** | `crypto/sha1` (default), `crypto/sha256`, others via `crypto` stdlib | Configurable algorithm, SHA-1 default for filename brevity |
 | **Persistence** | SQLite database (CGo-free: `modernc.org/sqlite`) | Cumulative registry, concurrent-safe, queryable; see Section 8 |
+| **Glob Matching** | `bmatcuk/doublestar/v4` | `**` recursive globs, `{alt}` alternatives; superset of `filepath.Match`; see Section 4.11 |
 
 ---
 
@@ -289,8 +290,11 @@ Patterns from the CLI flag and config file are **merged** (additive). The hardco
 
 - Patterns are matched against the **filename only** (not the full path) for files in the top-level directory.
 - When `--recursive` is enabled, patterns are matched against the **relative path from `dirA`** as well as the filename. This allows patterns like `subfolder/*.tmp` or `**/Thumbs.db`.
-- Matching uses Go's `filepath.Match` semantics (supports `*`, `?`, `[...]` character classes, but not `**` recursive glob — `**` support may be added via `doublestar` library if needed).
-- Directories themselves are never ignored — only files within them. (A future enhancement could support directory-level ignore patterns for recursive mode.)
+- Matching uses `bmatcuk/doublestar/v4` semantics, which is a superset of `filepath.Match` and adds `**` recursive globs, `{alt1,alt2}` alternatives, and character classes.
+- Patterns ending with `/` match **directories only** and cause the entire directory tree to be skipped.
+- `.pixeignore` files placed in source directories are loaded automatically and their patterns scoped to that directory subtree.
+
+> **Full specification:** See Section 4.11 for the complete implementation details of the enhanced ignore system.
 
 ### 4.5 Output Naming Convention
 

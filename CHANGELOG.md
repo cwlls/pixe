@@ -4,6 +4,15 @@
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Enhanced ignore system** with three new capabilities:
+  - **Recursive glob support** — `--ignore "**/*.txt"` now excludes `.txt` files at any depth. Uses `bmatcuk/doublestar/v4` library for glob matching.
+  - **Directory-level ignore patterns** — Patterns ending with `/` (e.g., `--ignore "node_modules/"`) skip entire directories without descending. Patterns ending with `/**` also trigger directory skipping.
+  - **`.pixeignore` files** — A `.pixeignore` file placed in the source directory (or any subdirectory) is loaded automatically. Patterns in it are scoped to that directory and its descendants. Format: one pattern per line, `#` comments, blank lines ignored. Negation (`!`) is NOT supported. The `.pixeignore` file itself is always invisible to the pipeline (hardcoded ignore, like `.pixe_ledger.json`).
+
 ## [1.7.0] - 2026-03-11
 
 - **Features**:

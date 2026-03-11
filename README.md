@@ -114,12 +114,49 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | `-w, --workers` | Number of concurrent workers (default: auto-detect) |
 | `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
 | `-r, --recursive` | Recursively process subdirectories of `--source` |
-| `--ignore` | Glob pattern for files to exclude (repeatable, e.g. `--ignore "*.txt"`) |
+| `--ignore` | Glob pattern for files to exclude (repeatable; see [Ignore Patterns](#ignore-patterns) below) |
 | `--skip-duplicates` | Skip copying duplicate files instead of copying to `duplicates/` |
 | `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
 | `--camera-owner` | Camera owner string to inject |
 | `--dry-run` | Preview operations without copying |
 | `--db-path` | Explicit path to the SQLite archive database |
+
+#### Ignore Patterns
+
+The `--ignore` flag supports three pattern types:
+
+1. **Simple glob patterns** — `--ignore "*.txt"` excludes `.txt` files in the source directory.
+
+2. **Recursive globs** — `--ignore "**/*.txt"` excludes `.txt` files at any depth. Use `**` to match across directory boundaries.
+
+3. **Directory patterns** — Patterns ending with `/` skip entire directories without descending:
+   ```bash
+   pixe sort --source /path/to/photos --dest /archive --ignore "node_modules/" --ignore "cache/"
+   ```
+   Patterns ending with `/**` also trigger directory skipping (e.g., `--ignore "temp/**"`).
+
+4. **`.pixeignore` files** — Place a `.pixeignore` file in the source directory (or any subdirectory) to define patterns scoped to that location and its descendants:
+   ```
+   # .pixeignore in /path/to/photos
+   *.tmp
+   **/*.bak
+   cache/
+   .DS_Store
+   ```
+   Format: one pattern per line, `#` comments, blank lines ignored. Negation (`!`) is not supported. The `.pixeignore` file itself is always invisible to the pipeline.
+
+**Examples:**
+```bash
+# Exclude all .txt files at any depth
+pixe sort --source /photos --dest /archive --ignore "**/*.txt"
+
+# Exclude multiple patterns
+pixe sort --source /photos --dest /archive --ignore "*.tmp" --ignore "cache/" --ignore "**/*.bak"
+
+# Use .pixeignore file (no CLI flags needed)
+# Create /photos/.pixeignore with patterns, then:
+pixe sort --source /photos --dest /archive
+```
 
 ### `pixe verify`
 
