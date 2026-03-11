@@ -4,7 +4,7 @@
 
 ---
 
-## [Unreleased] - In Development
+## [v1.6.1] - 2026-03-11
 
 - **Features**:
   - `--source` flag is now optional for both `pixe sort` and `pixe status` commands, defaulting to the current working directory when omitted. Explicit `--source` still overrides the default.

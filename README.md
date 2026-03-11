@@ -100,6 +100,10 @@ make build
 Sort media files from a source directory into an organized archive:
 
 ```bash
+# source defaults to current directory
+pixe sort --dest /path/to/archive [options]
+
+# or with an explicit source
 pixe sort --source /path/to/photos --dest /path/to/archive [options]
 ```
 
@@ -181,6 +185,10 @@ All subcommands accept `--json` for machine-readable output.
 Report the sorting status of a source directory by comparing files on disk against the `.pixe_ledger.json` left by prior `pixe sort` runs. No archive database or destination directory is required — it works entirely from the source directory.
 
 ```bash
+# source defaults to current directory
+pixe status [options]
+
+# or with an explicit source
 pixe status --source /path/to/photos [options]
 ```
 
