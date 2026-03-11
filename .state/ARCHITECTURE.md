@@ -195,15 +195,15 @@ Each file passes through these stages, tracked in the archive database:
 
 ```
 pending → extracted → hashed → copied → verified → tagged → complete
-                                  ↓         ↓         ↓
-                                failed   mismatch   tag_failed
+                                   ↓         ↓         ↓
+                                 failed   mismatch   tag_failed
 ```
 
 1. **Pending** — File discovered in `dirA`, not yet processed.
 2. **Extracted** — Filetype module has read the file, extracted the capture date, and identified the hashable data region.
 3. **Hashed** — Checksum computed over the media payload (data only, excluding metadata).
-4. **Copied** — File written to its destination path in `dirB`.
-5. **Verified** — Destination file re-read and checksum recomputed; matches the source hash.
+4. **Copied** — File written to a temporary file (`.<filename>.pixe-tmp`) in the destination directory within `dirB`. The file does not yet exist at its canonical path. See Section 4.10 for the atomic copy design.
+5. **Verified** — Temporary file re-read and checksum recomputed; matches the source hash. On success, the temp file is atomically renamed to its canonical destination path. On mismatch, the temp file is deleted (the source in `dirA` is untouched and the file can be reprocessed). See Section 4.10.
 6. **Tagged** — Optional metadata persisted to the destination. The pipeline queries the handler's `MetadataSupport()` capability to determine the strategy:
    - **`MetadataEmbed`** → Tags written directly into the destination file (e.g., JPEG EXIF).
    - **`MetadataSidecar`** → XMP sidecar file written alongside the destination file (e.g., `*.arw.xmp`).
@@ -241,7 +241,7 @@ ERR  <source_filename> -> <reason>
 
 **Duplicate reasons:**
 
-- `matches <dest_rel>` — The file's content checksum matches an already-archived file. The `<dest_rel>` is the relative path within `dirB` of the existing copy. The duplicate is still physically copied to `duplicates/<run_timestamp>/...` for user review, and the `DUPE` line confirms this routing.
+- `matches <dest_rel>` — The file's content checksum matches an already-archived file. The `<dest_rel>` is the relative path within `dirB` of the existing copy. By default, the duplicate is still physically copied to `duplicates/<run_timestamp>/...` for user review, and the `DUPE` line confirms this routing. When `--skip-duplicates` is active, no copy occurs — the `DUPE` line is emitted and the file is recorded in the database and ledger, but no bytes are written to `dirB`. See Section 4.6.
 
 **Error reasons:**
 
@@ -315,7 +315,11 @@ YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 
 ### 4.6 Duplicate Handling
 
-When a file's checksum matches an already-processed file (same data payload):
+When a file's checksum matches an already-processed file (same data payload), the behavior depends on the `--skip-duplicates` flag.
+
+#### Default Behavior (copy duplicates)
+
+Without `--skip-duplicates`, the duplicate is physically copied to a quarantine directory:
 
 ```
 <dirB>/duplicates/<run_timestamp>/<YYYY>/<MM>-<Mon>/<filename>
@@ -324,6 +328,21 @@ When a file's checksum matches an already-processed file (same data payload):
 - `<run_timestamp>`: ISO-ish format of the Pixe invocation time (e.g., `20260306_103000`).
 - The subdirectory structure mirrors the normal import layout, as if `duplicates/<run_timestamp>/` were the root of `dirB`. The month directory uses the same `<MM>-<Mon>` format as the primary archive.
 - This preserves the duplicate for user review without polluting the primary archive.
+
+#### Skip Duplicates Mode (`--skip-duplicates`)
+
+When `--skip-duplicates` is active, the pipeline skips the copy entirely for files whose checksum matches an already-archived file. No bytes are written to `dirB`. This eliminates the I/O cost of copying files that are already in the archive — particularly valuable for re-import workflows where a large percentage of source files are already archived.
+
+**What happens:**
+
+1. The file is still fully processed through the extract and hash stages (the checksum must be computed to determine it is a duplicate).
+2. The coordinator's pre-copy dedup check identifies the match.
+3. The copy, verify, and tag stages are skipped entirely.
+4. A `DUPE` line is emitted to stdout: `DUPE IMG_0042.jpg -> matches 2022/02-Feb/20220202...jpg`
+5. A database row is recorded with `status = 'duplicate'`, `is_duplicate = 1`, the computed checksum, and `dest_path`/`dest_rel` left NULL (no file was written).
+6. A ledger entry is appended with `status: "duplicate"`, `checksum`, and `matches` fields, but no `destination` field (consistent with `omitempty` — absence of `destination` signals no physical copy was made).
+
+**Safety rationale:** The default remains "copy duplicates" because the safety-first principle says: when in doubt, preserve the file somewhere. Users who know they want to skip can explicitly opt in. The source files in `dirA` are never modified regardless of this flag — if a skipped duplicate needs to be recovered, it can always be re-imported by running without `--skip-duplicates`.
 
 ### 4.7 Date Fallback Chain
 
@@ -465,6 +484,46 @@ Regardless of recursion depth, a **single ledger** is written at the root of `di
 
 The ignore list (Section 4.4) applies at every level of the directory tree. Patterns are matched against both the **filename** and the **relative path from `dirA`**. The hardcoded `.pixe_ledger.json` ignore matches by filename, so a ledger file at any depth (should one exist from a prior run targeting a subdirectory) is ignored.
 
+### 4.10 Atomic Copy via Temp File
+
+Pixe uses an **atomic copy pattern** to ensure that a file at its canonical path in `dirB` is always complete and verified. No partial or unverified files ever appear at canonical archive paths.
+
+#### Write Flow
+
+1. **Copy to temp file.** The source file is streamed to `<dest_dir>/.<filename>.pixe-tmp` using `os.O_CREATE|os.O_TRUNC`. The temp file lives in the same directory as the final destination to guarantee that `os.Rename` is an atomic same-filesystem operation.
+2. **Verify the temp file.** The temp file is re-read through the handler's `HashableReader` and the checksum is recomputed. The result is compared against the source hash computed during the hashing stage.
+3. **On verification success:** The temp file is atomically renamed to the canonical destination path via `os.Rename`. The rename is atomic on all supported filesystems (local, NFS, SMB) when source and destination are in the same directory.
+4. **On verification failure:** The temp file is **deleted** immediately. The source file in `dirA` is untouched and can always be reprocessed. The DB row is updated to `status = 'mismatch'` with the error details. Stdout emits `ERR` with the mismatch information.
+
+#### Temp File Naming
+
+The temp file name follows the pattern `.<original_filename>.pixe-tmp`:
+
+```
+.<YYYYMMDD_HHMMSS_CHECKSUM.ext>.pixe-tmp
+```
+
+Example: A file destined for `2021/12-Dec/20211225_062223_7d97e98f...jpg` is first written to `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp`.
+
+The leading dot makes temp files hidden on Unix systems. The `.pixe-tmp` suffix makes them unambiguously identifiable as Pixe artifacts, distinct from any media file.
+
+#### Interrupted Run Behavior
+
+If the process is killed mid-copy or mid-verify, the temp file is left on disk. This is safe because:
+
+- The canonical destination path **never exists** in a partial state. Any file at a canonical path has passed verification.
+- The DB row for the interrupted file will be in a non-terminal state (`hashed` or earlier — the `copied` status is not set until the temp file is written, and `verified` is not set until after the rename).
+- On **`pixe resume`**, the file is reprocessed. The new copy overwrites the orphaned temp file (using `O_CREATE|O_TRUNC`, not `O_EXCL`) and proceeds normally. The orphan is self-healing.
+- Over time, if orphaned temp files accumulate without a resume, a future `pixe clean` command can scan for and remove them (see Section 10).
+
+#### Interaction with Cross-Process Dedup
+
+The atomic copy pattern interacts cleanly with the existing cross-process dedup race handling (Section 8.5). When a race is detected at `CompleteFileWithDedupCheck`, the file has already been renamed to its canonical path (it passed verification). The race handler relocates it to `duplicates/` via `os.Rename` as before — this is still a same-filesystem atomic rename.
+
+#### Tagging After Rename
+
+Metadata tagging (Section 4.8) occurs **after** the rename to the canonical path. The file is verified and in its final location when tags are written. This preserves the existing behavior where the checksum reflects the original data, not the tagged version. If tagging fails, the file remains at its canonical path with `status = 'tag_failed'`.
+
 ---
 
 ## 5. Global Constraints
@@ -472,7 +531,7 @@ The ignore list (Section 4.4) applies at every level of the directory tree. Patt
 > [!IMPORTANT]
 > ### 5.1 Operational Safety
 > - **`dirA` is read-only.** Pixe never modifies, renames, moves, or deletes source files. The sole exception is writing a `.pixe_ledger.json` file into `dirA` to record what was processed.
-> - **Copy-then-verify.** Every file is copied to `dirB`, then the destination is independently re-read and re-hashed to confirm integrity.
+> - **Atomic copy-then-verify.** Every file is first written to a temporary file (`.<filename>.pixe-tmp`) in the destination directory, then independently re-read and re-hashed. Only after verification passes is the temp file atomically renamed to its canonical path. A file at its canonical location in `dirB` is always verified. See Section 4.10.
 > - **Database-backed resumability.** A SQLite database tracks per-file state across all runs. Interrupted runs resume from the last committed state. Each file completion is committed individually for crash safety.
 > - **Streaming ledger in `dirA`.** A `.pixe_ledger.json` (JSONL format) is streamed to the source directory as files are processed. The header line includes a `run_id` linking back to the archive database. Each file entry is appended as an independent JSON line the moment the coordinator finalizes its result. An interrupted run leaves a partial but valid JSONL file — every line written before interruption is a complete, parseable JSON object.
 > - **No silent outcomes.** Every discovered file produces exactly one line of stdout output (`COPY`, `SKIP`, `DUPE`, or `ERR`) and a corresponding ledger entry. Hash mismatches, copy failures, unrecognized files, duplicates, and skipped files are never silent. Pixe never exits without accounting for every file it saw.
@@ -487,7 +546,7 @@ The ignore list (Section 4.4) applies at every level of the directory tree. Patt
 > ### 5.3 Concurrency Model
 > - Pixe uses a **worker pool** pattern for parallel file processing.
 > - Worker count is **configurable** via `--workers` flag (default: sensible auto-detect based on `runtime.NumCPU()`).
-> - Workers handle the full pipeline per file: extract → hash → copy → verify → tag.
+> - Workers handle the full pipeline per file: extract → hash → copy (to temp file) → verify → rename → tag.
 > - A **coordinator goroutine** manages database writes, deduplication queries, ledger appends, and progress reporting. The coordinator is the **sole writer** to both the archive database and the JSONL ledger file — workers never write to either directly.
 > - `dirA` and `dirB` may reside on **different filesystems** (local, NAS, SMB). Pixe always uses copy (never `os.Rename` across filesystems).
 > - **Cross-process concurrency:** Multiple `pixe sort` processes may target the same `dirB` from different sources. SQLite WAL mode permits concurrent reads with serialized writes. Each process operates within its own `run_id` context. Write contention is handled via `SQLITE_BUSY` retry with exponential backoff.
@@ -760,6 +819,7 @@ Primary operation. Discovers files in `dirA`, processes them through the pipelin
 | `--camera-owner` | | (none) | CameraOwner freetext string |
 | `--dry-run` | | `false` | Preview operations without copying |
 | `--recursive` | `-r` | `false` | Recursively process subdirectories of `--source` |
+| `--skip-duplicates` | | `false` | Skip copying files whose checksum matches an already-archived file. Emits `DUPE` on stdout and records in DB/ledger, but writes no bytes to `dirB`. See Section 4.6. |
 | `--ignore` | | (none) | Glob pattern for files to ignore. Repeatable: each `--ignore` adds one pattern. Merged with patterns from config file. |
 
 #### `pixe verify`
@@ -815,6 +875,7 @@ workers: 8
 copyright: "Copyright {{.Year}} My Family, all rights reserved"
 camera_owner: "Wells Family"
 recursive: false
+skip_duplicates: false
 ignore:
   - "*.txt"
   - ".DS_Store"
@@ -1314,10 +1375,10 @@ Each file completion is committed in its own transaction. This provides the same
 When two simultaneous runs discover the same file (identical checksum) from different sources:
 
 1. Both processes query `SELECT ... WHERE checksum = ?` — both see "not yet imported."
-2. Both copy the file to `dirB`.
-3. The first to commit its INSERT wins. The second process, when it commits, detects the conflict (the checksum now exists with `status = 'complete'`) and retroactively routes its copy to `duplicates/`.
+2. Both copy the file to a temp file in `dirB`, verify it, and rename to the canonical path.
+3. The first to commit its INSERT wins. The second process, when it commits, detects the conflict (the checksum now exists with `status = 'complete'`) and retroactively routes its copy to `duplicates/` via `os.Rename`.
 
-This is handled at the application level after commit, not via database constraints, since the duplicate file has already been physically written. The result is safe and correct — no data loss, duplicates are properly categorized.
+This is handled at the application level after commit, not via database constraints, since the duplicate file has already been physically written and verified. The result is safe and correct — no data loss, duplicates are properly categorized. The atomic copy pattern (Section 4.10) ensures that the file at the canonical path was verified before the rename, so the race handler is always relocating a known-good file.
 
 ### 8.6 Database Lifecycle
 
@@ -1372,9 +1433,12 @@ The ledger uses the [JSONL format](https://jsonlines.org/): every line is an ind
 {"path":"IMG_0001.jpg","status":"copy","checksum":"7d97e98f8af710c7e7fe703abc8f639e0ee507c4","destination":"2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg","verified_at":"2026-03-06T10:30:03Z"}
 {"path":"IMG_0002.jpg","status":"skip","reason":"previously imported"}
 {"path":"vacation/IMG_0042.jpg","status":"duplicate","checksum":"447d3060abc123...","destination":"duplicates/20260306_103000/2022/02-Feb/20220202_123101_447d3060...jpg","matches":"2022/02-Feb/20220202_123101_447d3060...jpg"}
+{"path":"vacation/IMG_0099.jpg","status":"duplicate","checksum":"9f8e7d6c5b4a...","matches":"2024/07-Jul/20240715_143022_9f8e7d6c...jpg"}
 {"path":"notes.txt","status":"skip","reason":"unsupported format: .txt"}
 {"path":"corrupt.jpg","status":"error","reason":"EXIF parse failed: truncated IFD at offset 0x1A"}
 ```
+
+> **Note:** The two `duplicate` entries above illustrate the difference between default and `--skip-duplicates` modes. `IMG_0042.jpg` was copied to `duplicates/` (has a `destination`). `IMG_0099.jpg` was skipped (no `destination`, only `matches`). Both are valid `duplicate` entries — the presence or absence of `destination` distinguishes them.
 
 #### Header Object (Line 1)
 
@@ -1399,7 +1463,7 @@ Each file entry is a self-contained JSON object. Entries are appended one at a t
 | `path` | Always | Relative path from `dirA`. Top-level files are just the filename; recursive files include the subdirectory prefix (e.g., `vacation/IMG_0042.jpg`). |
 | `status` | Always | One of: `copy`, `skip`, `duplicate`, `error`. Corresponds to the stdout verbs `COPY`, `SKIP`, `DUPE`, `ERR`. |
 | `checksum` | `copy`, `duplicate` | Hex-encoded content hash. Present when the file was hashed (even if it was then identified as a duplicate). |
-| `destination` | `copy`, `duplicate` | Relative path within `dirB` where the file was written. For duplicates, this is the path under `duplicates/`. |
+| `destination` | `copy`, `duplicate` (when copied) | Relative path within `dirB` where the file was written. For copied duplicates, this is the path under `duplicates/`. Absent when `--skip-duplicates` is active (no file was written). |
 | `verified_at` | `copy` | ISO 8601 UTC timestamp of successful verification. |
 | `matches` | `duplicate` | Relative path within `dirB` of the existing file this duplicate matches. |
 | `reason` | `skip`, `error` | Human-readable explanation of why the file was skipped or why processing failed. Same text shown on stdout. |
@@ -1475,6 +1539,8 @@ dirB (organized destination)
 
 > **Note:** XMP sidecar files (`.xmp`) only appear when the user has configured `--copyright` and/or `--camera-owner`. If no metadata tags are configured, no sidecars are generated and the layout is identical to the pre-sidecar design.
 
+> **Note:** During active copy operations, temporary files with the pattern `.<filename>.pixe-tmp` may be visible in destination directories (e.g., `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp`). These are transient artifacts of the atomic copy process (Section 4.10) and are renamed to their canonical paths upon successful verification. Orphaned temp files from interrupted runs are self-healing on `pixe resume` and can be cleaned manually or via a future `pixe clean` command (Section 10).
+
 ---
 
 ## 9. CLI Additions
@@ -1485,9 +1551,10 @@ dirB (organized destination)
 |---|---|---|---|---|---|
 | `pixe sort` | `--db-path` | | (auto-detected) | `db_path` | Explicit path to the SQLite database file. Overrides all automatic location logic. |
 | `pixe sort` | `--recursive` | `-r` | `false` | `recursive` | Recursively process subdirectories of `--source`. Default is top-level only. |
+| `pixe sort` | `--skip-duplicates` | | `false` | `skip_duplicates` | Skip copying files whose checksum matches an already-archived file. Emits `DUPE` on stdout and records in DB/ledger, but writes no bytes to `dirB`. Default is to copy duplicates to `duplicates/<run_timestamp>/...` for user review. See Section 4.6. |
 | `pixe sort` | `--ignore` | | (none) | `ignore` (list) | Glob pattern for files to ignore. Repeatable on CLI; list in config. Merged additively. `.pixe_ledger.json` is always ignored (hardcoded). |
 
-All flags are supported via config file and environment variable (e.g., `PIXE_RECURSIVE`, `PIXE_IGNORE`). The `--ignore` flag can appear multiple times on the command line, each specifying one glob pattern. In the config file, `ignore` is a YAML list.
+All flags are supported via config file and environment variable (e.g., `PIXE_RECURSIVE`, `PIXE_SKIP_DUPLICATES`, `PIXE_IGNORE`). The `--ignore` flag can appear multiple times on the command line, each specifying one glob pattern. In the config file, `ignore` is a YAML list.
 
 ### 9.2 Updated `pixe resume`
 
@@ -1507,9 +1574,10 @@ These items are explicitly **out of scope** for the current build but are acknow
 6. **Cloud storage targets** — `dirB` on S3, GCS, etc.
 7. **GPS/location-based organization** — Subdirectories by location in addition to date.
 8. ~~**`pixe query` CLI command**~~ — **Promoted to Section 7.3.** No longer a future consideration.
-9. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
+9. **`pixe clean` command** — A maintenance subcommand with two responsibilities: (a) **orphaned temp file cleanup** — scan `dirB` for `*.pixe-tmp` files left behind by interrupted runs and remove them, reporting what was deleted; (b) **database compaction** — run `VACUUM` on the archive SQLite database to reclaim space in long-lived archives with many runs. These are combined into a single command because both are housekeeping operations that a user would run periodically on an established archive. The temp file scanner would use a simple `filepath.Walk` with a suffix match on `.pixe-tmp`. The `VACUUM` operation requires exclusive database access (no concurrent `pixe sort` running).
 10. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
 11. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
 12. **Directory-level ignore patterns** — In recursive mode, allow ignoring entire subdirectories (e.g., `--ignore ".git/"` to skip `.git` trees). Currently only files are subject to ignore matching.
 13. **`.pixeignore` file** — A `.gitignore`-style file in `dirA` that specifies ignore patterns, complementing the CLI flag and config file. Lower priority than the other configuration sources.
 14. **Extended XMP fields** — The current XMP sidecar writes only Copyright and CameraOwner. Future work could add additional fields (keywords, captions, GPS coordinates, star ratings) to the `MetadataTags` struct and XMP template.
+15. **Split-brain network dedup (multi-machine NAS)** — When two machines run `pixe sort` against the same NAS `dirB`, each with its own local `~/.pixe/databases/<slug>.db`, there is no shared state for dedup. Both may write the same file to the primary archive without detecting the collision. A filesystem-level locking strategy using `O_EXCL` temp file creation could address this — the OS guarantees atomicity of `O_EXCL` even over modern SMB/NFS. Deferred until the multi-machine NAS workflow is actively used.
