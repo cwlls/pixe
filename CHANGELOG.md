@@ -4,6 +4,17 @@
 
 ---
 
+## [v1.6.2] - 2026-03-11
+
+- **Improvements**:
+  - RAW file hashing strategy changed from embedded JPEG preview to raw sensor data for improved data integrity. JPEG previews are unstable (software tools like Lightroom can regenerate them, causing false-negative deduplication) and ambiguous (burst shots can produce identical previews for different exposures). Sensor data is the immutable ground truth.
+  - `internal/handler/tiffraw/tiffraw.go`: `HashableReader` now navigates the TIFF IFD chain to locate the sensor data IFD (identified by non-JPEG compression type: `1`=uncompressed, `7`=lossless JPEG, `34713`=NEF compressed, etc.). Uses a `multiSectionReader` to stream all strips/tiles as a single contiguous byte sequence. Falls back to full-file hash if no sensor data IFD is found. Affects: DNG, NEF, CR2, PEF, ARW.
+  - `internal/handler/cr3/cr3.go`: `HashableReader` now navigates ISOBMFF `moov → trak → mdia → minf → stbl` to find chunk offsets (`stco`/`co64`) and sample sizes (`stsz`) for the primary image track (largest total sample size). Falls back to the full `mdat` box contents if track parsing fails. Affects: CR3.
+  - Performance note: Hashing sensor data reads more bytes than hashing the JPEG preview (20–80 MB vs 1–5 MB per file). This trade-off is accepted: data integrity is Pixe's first principle, and RAW file users expect processing overhead proportional to file size.
+
+- **Test Coverage**:
+  - Tests updated with new fixtures covering: sensor data extraction, preference over JPEG preview, multi-strip concatenation, tiled layout, JPEG-only fallback, no-mdat nil return, mdat fallback.
+
 ## [v1.6.1] - 2026-03-11
 
 - **Features**:
