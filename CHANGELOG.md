@@ -4,6 +4,18 @@
 
 ---
 
+## [Unreleased] - In Development
+
+- **Features (In Progress)**:
+  - Metadata capability framework: `MetadataCapability` type and `MetadataSupport()` interface method added to `FileTypeHandler`.
+  - Handler metadata declarations: JPEG declares `MetadataEmbed`; HEIC, MP4, CR3, and all TIFF-based RAW formats (DNG, NEF, CR2, PEF, ARW) declare `MetadataSidecar`.
+  - Hybrid tagging strategy: pipeline will route metadata writes based on handler capability — embedded EXIF for JPEG, XMP sidecars for RAW and video formats.
+  - XMP sidecar package (`internal/xmp/`) — in development. Will generate Adobe-compatible XMP sidecar files for formats that cannot safely embed metadata.
+
+- **Improvements**:
+  - Clarified `WriteMetadataTags` contract: only called for `MetadataEmbed` handlers. Sidecar/none handlers implement as no-op for interface compliance.
+  - MP4 handler: removed lengthy udta atom comment; simplified to clean no-op matching tiffraw and HEIC pattern.
+
 ## [v1.2.0] - 2026-03-11
 
 - **Features**:

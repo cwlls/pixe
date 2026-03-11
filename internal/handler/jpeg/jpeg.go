@@ -147,6 +147,11 @@ func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(payload)), nil
 }
 
+// MetadataSupport declares that JPEG supports safe in-file EXIF writing.
+func (h *Handler) MetadataSupport() domain.MetadataCapability {
+	return domain.MetadataEmbed
+}
+
 // WriteMetadataTags injects Copyright and CameraOwner EXIF tags into the
 // destination JPEG file. It is a no-op when tags.IsEmpty() is true.
 // The file is rewritten in-place using go-jpeg-image-structure.

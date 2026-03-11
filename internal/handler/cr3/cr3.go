@@ -171,8 +171,15 @@ func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
 	return &sectionReadCloser{Reader: sr, Closer: f}, nil
 }
 
-// WriteMetadataTags is a no-op for CR3.
-// CR3 metadata write not supported in pure Go.
+// MetadataSupport declares that CR3 uses XMP sidecar files.
+// CR3 metadata write is not supported in pure Go.
+func (h *Handler) MetadataSupport() domain.MetadataCapability {
+	return domain.MetadataSidecar
+}
+
+// WriteMetadataTags is a no-op retained for interface compliance.
+// The pipeline checks MetadataSupport() and routes to XMP sidecar
+// generation instead of calling this method.
 func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
 }

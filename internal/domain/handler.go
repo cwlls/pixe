@@ -41,6 +41,23 @@ func (t MetadataTags) IsEmpty() bool {
 	return t.Copyright == "" && t.CameraOwner == ""
 }
 
+// MetadataCapability declares how a handler supports metadata tagging.
+type MetadataCapability int
+
+const (
+	// MetadataNone indicates the format cannot receive metadata at all.
+	// The pipeline skips tagging entirely for this handler.
+	MetadataNone MetadataCapability = iota
+
+	// MetadataEmbed indicates the format supports safe in-file metadata writing.
+	// The pipeline calls WriteMetadataTags to inject tags directly into the file.
+	MetadataEmbed
+
+	// MetadataSidecar indicates the format cannot safely embed metadata.
+	// The pipeline writes an XMP sidecar file alongside the destination copy.
+	MetadataSidecar
+)
+
 // FileTypeHandler is the contract every filetype module must implement.
 // The core engine is format-agnostic and interacts with all media files
 // exclusively through this interface.
@@ -77,9 +94,14 @@ type FileTypeHandler interface {
 	// holds an open file and document that the caller must close it.
 	HashableReader(filePath string) (io.ReadCloser, error)
 
-	// WriteMetadataTags injects optional metadata tags (Copyright,
-	// CameraOwner) into the destination file. Called only after copy and
-	// verify succeed. Must be a no-op when tags.IsEmpty() is true.
+	// MetadataSupport declares this handler's metadata tagging capability.
+	// The pipeline uses this to decide between embedded writes, XMP sidecar
+	// generation, or skipping tagging entirely.
+	MetadataSupport() MetadataCapability
+
+	// WriteMetadataTags injects metadata tags directly into the file.
+	// Only called when MetadataSupport() returns MetadataEmbed.
+	// Must be a no-op when tags.IsEmpty() is true.
 	WriteMetadataTags(filePath string, tags MetadataTags) error
 
 	// Extensions returns the lowercase file extensions this handler claims,

@@ -143,11 +143,16 @@ func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
 	return f, nil
 }
 
-// WriteMetadataTags is a no-op for HEIC pending a pure-Go HEIC EXIF write
-// library. Files are copied and verified correctly; tags are not injected.
-func (h *Handler) WriteMetadataTags(filePath string, tags domain.MetadataTags) error {
-	// No-op: HEIC EXIF write not yet supported in pure Go.
-	// This will be implemented when a suitable library is available.
+// MetadataSupport declares that HEIC uses XMP sidecar files.
+// HEIC EXIF write is not yet supported in pure Go.
+func (h *Handler) MetadataSupport() domain.MetadataCapability {
+	return domain.MetadataSidecar
+}
+
+// WriteMetadataTags is a no-op retained for interface compliance.
+// The pipeline checks MetadataSupport() and routes to XMP sidecar
+// generation instead of calling this method.
+func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
 }
 

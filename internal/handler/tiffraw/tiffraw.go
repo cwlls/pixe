@@ -138,9 +138,16 @@ func (b *Base) HashableReader(filePath string) (io.ReadCloser, error) {
 	return &sectionReadCloser{Reader: sr, Closer: f}, nil
 }
 
-// WriteMetadataTags is a no-op for TIFF-based RAW formats.
-// RAW metadata write not supported in pure Go — writing into proprietary
-// containers risks corruption of archival originals.
+// MetadataSupport declares that TIFF-based RAW formats use XMP sidecar
+// files for metadata tagging. Writing into proprietary RAW containers
+// risks corruption of archival originals.
+func (b *Base) MetadataSupport() domain.MetadataCapability {
+	return domain.MetadataSidecar
+}
+
+// WriteMetadataTags is a no-op retained for interface compliance.
+// The pipeline checks MetadataSupport() and routes to XMP sidecar
+// generation instead of calling this method.
 func (b *Base) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
 }

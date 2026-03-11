@@ -164,15 +164,16 @@ func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-// WriteMetadataTags writes ©cpy (Copyright) and ©own (CameraOwner) into the
-// udta metadata atom of the MP4 file. It is a no-op when tags.IsEmpty().
-//
-// Implementation note: writing arbitrary udta atoms requires rebuilding the
-// moov box. For now this is a no-op stub — the file is copied and verified
-// correctly; tags are not injected. Full implementation deferred to a future
-// enhancement once a stable pure-Go MP4 mux/write path is established.
-func (h *Handler) WriteMetadataTags(filePath string, tags domain.MetadataTags) error {
-	// No-op: MP4 metadata write not yet implemented.
+// MetadataSupport declares that MP4/MOV uses XMP sidecar files.
+// Embedded udta atom writing may be added in a future enhancement.
+func (h *Handler) MetadataSupport() domain.MetadataCapability {
+	return domain.MetadataSidecar
+}
+
+// WriteMetadataTags is a no-op retained for interface compliance.
+// The pipeline checks MetadataSupport() and routes to XMP sidecar
+// generation instead of calling this method.
+func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
 }
 
