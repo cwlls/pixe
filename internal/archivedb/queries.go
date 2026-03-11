@@ -585,3 +585,25 @@ func scanInventoryEntry(rows *sql.Rows) (*InventoryEntry, error) {
 
 	return &e, nil
 }
+
+// Vacuum rebuilds the database file, reclaiming space from deleted rows
+// and reducing fragmentation. Requires exclusive access — no concurrent
+// readers or writers should be active.
+func (db *DB) Vacuum() error {
+	_, err := db.conn.Exec("VACUUM")
+	if err != nil {
+		return fmt.Errorf("archivedb: vacuum: %w", err)
+	}
+	return nil
+}
+
+// HasActiveRuns returns true if any run has status = 'running'.
+// Used by pixe clean to guard against vacuuming while a sort is in progress.
+func (db *DB) HasActiveRuns() (bool, error) {
+	var count int
+	err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'running'`).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("archivedb: check active runs: %w", err)
+	}
+	return count > 0, nil
+}

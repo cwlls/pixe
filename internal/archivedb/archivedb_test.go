@@ -2442,3 +2442,136 @@ func TestDuplicatePairs_handlesNullDestRel(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// HasActiveRuns and Vacuum tests (pixe clean)
+// ---------------------------------------------------------------------------
+
+// TestHasActiveRuns_noRuns verifies false is returned when the runs table is empty.
+func TestHasActiveRuns_noRuns(t *testing.T) {
+	db := openTestDB(t)
+	active, err := db.HasActiveRuns()
+	if err != nil {
+		t.Fatalf("HasActiveRuns: %v", err)
+	}
+	if active {
+		t.Error("HasActiveRuns = true, want false (no runs)")
+	}
+}
+
+// TestHasActiveRuns_completedOnly verifies false when all runs are completed.
+func TestHasActiveRuns_completedOnly(t *testing.T) {
+	db := openTestDB(t)
+	r := makeTestRun("har-completed")
+	if err := db.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	if err := db.CompleteRun("har-completed", time.Now().UTC()); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+
+	active, err := db.HasActiveRuns()
+	if err != nil {
+		t.Fatalf("HasActiveRuns: %v", err)
+	}
+	if active {
+		t.Error("HasActiveRuns = true, want false (only completed runs)")
+	}
+}
+
+// TestHasActiveRuns_withRunning verifies true when a run has status 'running'.
+func TestHasActiveRuns_withRunning(t *testing.T) {
+	db := openTestDB(t)
+	r := makeTestRun("har-running")
+	if err := db.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	// InsertRun sets status='running' by default.
+
+	active, err := db.HasActiveRuns()
+	if err != nil {
+		t.Fatalf("HasActiveRuns: %v", err)
+	}
+	if !active {
+		t.Error("HasActiveRuns = false, want true (one running run)")
+	}
+}
+
+// TestHasActiveRuns_mixedStatuses verifies true when runs have mixed statuses
+// including at least one 'running'.
+func TestHasActiveRuns_mixedStatuses(t *testing.T) {
+	db := openTestDB(t)
+
+	runs := []*Run{
+		makeTestRun("har-mix-1"),
+		makeTestRun("har-mix-2"),
+		makeTestRun("har-mix-3"),
+	}
+	for _, r := range runs {
+		if err := db.InsertRun(r); err != nil {
+			t.Fatalf("InsertRun %s: %v", r.ID, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	if err := db.CompleteRun("har-mix-1", now); err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	if err := db.InterruptRun("har-mix-2", now); err != nil {
+		t.Fatalf("InterruptRun: %v", err)
+	}
+	// har-mix-3 stays 'running'.
+
+	active, err := db.HasActiveRuns()
+	if err != nil {
+		t.Fatalf("HasActiveRuns: %v", err)
+	}
+	if !active {
+		t.Error("HasActiveRuns = false, want true (har-mix-3 is running)")
+	}
+}
+
+// TestVacuum_emptyDB verifies that VACUUM succeeds on a fresh database.
+func TestVacuum_emptyDB(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.Vacuum(); err != nil {
+		t.Fatalf("Vacuum on empty DB: %v", err)
+	}
+}
+
+// TestVacuum_afterInserts verifies that VACUUM succeeds after inserting and
+// deleting rows, and that the database remains functional afterward.
+func TestVacuum_afterInserts(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "vacuum-run")
+
+	// Insert 50 files.
+	for i := 0; i < 50; i++ {
+		_, err := db.InsertFile(&FileRecord{
+			RunID:      "vacuum-run",
+			SourcePath: fmt.Sprintf("/src/photo_%03d.jpg", i),
+		})
+		if err != nil {
+			t.Fatalf("InsertFile %d: %v", i, err)
+		}
+	}
+
+	// Delete some rows directly to create free space.
+	if _, err := db.conn.Exec(`DELETE FROM files WHERE id > 25`); err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+
+	// VACUUM should succeed.
+	if err := db.Vacuum(); err != nil {
+		t.Fatalf("Vacuum: %v", err)
+	}
+
+	// Database should still be functional.
+	files, err := db.GetFilesByRun("vacuum-run")
+	if err != nil {
+		t.Fatalf("GetFilesByRun after VACUUM: %v", err)
+	}
+	if len(files) != 25 {
+		t.Errorf("GetFilesByRun returned %d files after VACUUM, want 25", len(files))
+	}
+}

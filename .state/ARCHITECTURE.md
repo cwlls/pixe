@@ -2007,12 +2007,12 @@ The `resume` command now locates the database via the same discovery chain (flag
 These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
 1. **Source sidecar association** (`.aae`, existing `.xmp`) — When sorting from `dirA`, should Pixe detect and carry along sidecar files that already exist alongside source media files? Currently, only Pixe-generated XMP sidecars (written to `dirB` during tagging) are handled. Pre-existing sidecars in `dirA` are treated as unrecognized files.
-2. **CRW format** (legacy Canon pre-2004) — Excluded from current RAW support due to its obsolete proprietary format and lack of pure-Go library support. Could be revisited if demand arises.
+2. ~~**CRW format** (legacy Canon pre-2004) — Excluded from current RAW support due to its obsolete proprietary format and lack of pure-Go library support. Could be revisited if demand arises.~~ no longer under consideration
 3. **MP4/MOV embedded metadata writing** — MP4 currently uses `MetadataSidecar`. A future enhancement could implement `udta/©cpy` and `udta/©own` atom writing in pure Go and promote MP4 to `MetadataEmbed`, eliminating the sidecar for video files.
 4. **HEIC embedded metadata writing** — HEIC currently uses `MetadataSidecar`. If a reliable pure-Go HEIC EXIF writer becomes available, HEIC could be promoted to `MetadataEmbed`. The `MetadataCapability` enum makes this a one-line change per handler.
 5. **Web UI / TUI** — Progress visualization beyond CLI output.
 6. **Cloud storage targets** — `dirB` on S3, GCS, etc.
-7. **GPS/location-based organization** — Subdirectories by location in addition to date.
+7. ~~**GPS/location-based organization** — Subdirectories by location in addition to date.~~ no longer under consideration
 8. ~~**`pixe query` CLI command**~~ — **Promoted to Section 7.3.** No longer a future consideration.
 9. ~~**`pixe clean` command**~~ — **Promoted to Section 7.5.** No longer a future consideration.
 10. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
