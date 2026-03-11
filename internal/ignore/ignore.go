@@ -14,28 +14,40 @@
 
 // Package ignore provides glob-based file ignore matching for Pixe discovery.
 // It encapsulates both the hardcoded ledger-file exclusion and any
-// user-configured patterns supplied via --ignore flags.
+// user-configured patterns supplied via --ignore flags or .pixeignore files.
+//
+// Pattern matching uses github.com/bmatcuk/doublestar/v4, which is a superset
+// of filepath.Match and adds support for ** recursive globs, {alt1,alt2}
+// alternatives, and character classes. All existing single-level patterns
+// (*.txt, .DS_Store, subdir/*.tmp) continue to work identically.
+//
+// Patterns ending with "/" are directory-only patterns and are ignored by
+// Match; they are handled exclusively by MatchDir.
 package ignore
 
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
-// ledgerFilename is the hardcoded filename that is always ignored, at any
-// directory depth. It is the only file Pixe writes into the source directory.
-const ledgerFilename = ".pixe_ledger.json"
+// hardcoded filenames that are always ignored at any directory depth.
+const (
+	ledgerFilename     = ".pixe_ledger.json"
+	pixeignoreFilename = ".pixeignore"
+)
 
-// Matcher holds compiled ignore patterns and provides a Match method.
-// The zero value is valid and matches only the hardcoded ledger file.
+// Matcher holds compiled ignore patterns and provides Match and MatchDir
+// methods. The zero value is valid and matches only the hardcoded filenames.
 type Matcher struct {
-	patterns []string // deduplicated, trimmed user-configured glob patterns
+	global []string // deduplicated, trimmed user-configured glob patterns
 }
 
 // New creates a Matcher from user-configured glob patterns.
 // Patterns are deduplicated and whitespace-trimmed; empty strings are dropped.
-// The hardcoded ledger ignore (.pixe_ledger.json) is always active and does
-// not need to be included in patterns.
+// The hardcoded ignores (.pixe_ledger.json, .pixeignore) are always active and
+// do not need to be included in patterns.
 func New(patterns []string) *Matcher {
 	seen := make(map[string]bool, len(patterns))
 	var clean []string
@@ -46,7 +58,7 @@ func New(patterns []string) *Matcher {
 			clean = append(clean, p)
 		}
 	}
-	return &Matcher{patterns: clean}
+	return &Matcher{global: clean}
 }
 
 // Match reports whether the file should be ignored.
@@ -55,24 +67,35 @@ func New(patterns []string) *Matcher {
 // relPath is the path relative to dirA (e.g. "vacation/IMG_0001.jpg").
 // For top-level files relPath == filename.
 //
-// The hardcoded ledger ignore is checked first (by filename equality).
+// The hardcoded ignores are checked first (by filename equality).
 // Then each user pattern is matched against both the filename and the
-// relPath using filepath.Match semantics, enabling patterns such as
-// "subdir/*.tmp" to match nested files.
+// relPath using doublestar semantics, enabling patterns such as
+// "subdir/*.tmp" and "**/*.tmp" to match nested files.
+//
+// Patterns ending with "/" are directory-only and are skipped by Match;
+// use MatchDir for directory-level ignore checks.
 func (m *Matcher) Match(filename, relPath string) bool {
-	// Hardcoded: always ignore the ledger file at any depth.
-	if filename == ledgerFilename {
+	// Hardcoded: always ignore these files at any depth.
+	if filename == ledgerFilename || filename == pixeignoreFilename {
 		return true
 	}
 
-	for _, pattern := range m.patterns {
+	// Normalize to forward slashes for doublestar (which uses path semantics).
+	slashName := filepath.ToSlash(filename)
+	slashRel := filepath.ToSlash(relPath)
+
+	for _, pattern := range m.global {
+		// Skip directory-only patterns — those are handled by MatchDir.
+		if strings.HasSuffix(pattern, "/") {
+			continue
+		}
 		// Match against the base filename.
-		if matched, _ := filepath.Match(pattern, filename); matched {
+		if matched, _ := doublestar.Match(pattern, slashName); matched {
 			return true
 		}
-		// Match against the relative path (enables "subdir/*.tmp" patterns).
-		if relPath != filename {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
+		// Match against the relative path (enables "subdir/*.tmp" and "**/*.tmp").
+		if slashRel != slashName {
+			if matched, _ := doublestar.Match(pattern, slashRel); matched {
 				return true
 			}
 		}

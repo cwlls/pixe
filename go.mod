@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/abema/go-mp4 v1.4.1
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/dsoprea/go-exif/v3 v3.0.1
 	github.com/dsoprea/go-heic-exif-extractor v0.0.0-20210512044107-62067e44c235
 	github.com/dsoprea/go-jpeg-image-structure/v2 v2.0.0-20221012074422-4f3f7e934102
@@ -17,7 +18,6 @@ require (
 )
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/dsoprea/go-exif/v2 v2.0.0-20200520183328-015129a9efd5 // indirect
 	github.com/dsoprea/go-iptc v0.0.0-20200609062250-162ae6b44feb // indirect
 	github.com/dsoprea/go-logging v0.0.0-20200710184922-b02d349568dd // indirect

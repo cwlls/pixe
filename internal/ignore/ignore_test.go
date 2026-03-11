@@ -101,8 +101,8 @@ func TestMatcher_deduplication(t *testing.T) {
 		t.Error("expected deduplicated *.txt to still match notes.txt")
 	}
 	// Internal pattern slice should have length 1.
-	if len(m.patterns) != 1 {
-		t.Errorf("expected 1 deduplicated pattern, got %d", len(m.patterns))
+	if len(m.global) != 1 {
+		t.Errorf("expected 1 deduplicated pattern, got %d", len(m.global))
 	}
 }
 
@@ -117,8 +117,8 @@ func TestMatcher_whitespacePatternsTrimmed(t *testing.T) {
 		t.Error("expected trimmed *.jpg to match photo.jpg")
 	}
 	// The whitespace-only pattern should have been dropped.
-	if len(m.patterns) != 2 {
-		t.Errorf("expected 2 patterns after trimming, got %d", len(m.patterns))
+	if len(m.global) != 2 {
+		t.Errorf("expected 2 patterns after trimming, got %d", len(m.global))
 	}
 }
 

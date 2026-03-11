@@ -8,7 +8,7 @@
 | #  | Task | Priority | Agent | Status | Depends On | Notes |
 |:---|:-----|:---------|:------|:-------|:-----------|:------|
 | 1  | Add `doublestar` dependency | High | Code | [x] complete | — | `go get github.com/bmatcuk/doublestar/v4` |
-| 2  | Refactor `Matcher` to use `doublestar.Match` | High | Code | Pending | 1 | Drop-in replacement for `filepath.Match`; add slash normalization |
+| 2  | Refactor `Matcher` to use `doublestar.Match` | High | Code | [x] complete | 1 | Drop-in replacement for `filepath.Match`; add slash normalization |
 | 3  | Add `MatchDir` method | High | Code | Pending | 2 | Trailing-slash semantics for directory-level skipping |
 | 4  | Add `.pixeignore` loading + scope stack | High | Code | Pending | 3 | `PushScope` / `PopScope`; parse file format; hardcode `.pixeignore` ignore |
 | 5  | Update `discovery.Walk` for directory ignoring | High | Code | Pending | 3 | Call `MatchDir` in the directory handling block |
