@@ -46,6 +46,7 @@ func (s *stubHandler) Extensions() []string                                { ret
 func (s *stubHandler) MagicBytes() []domain.MagicSignature                 { return nil }
 func (s *stubHandler) Detect(string) (bool, error)                         { return true, nil }
 func (s *stubHandler) ExtractDate(string) (time.Time, error)               { return time.Time{}, nil }
+func (s *stubHandler) MetadataSupport() domain.MetadataCapability          { return domain.MetadataNone }
 func (s *stubHandler) WriteMetadataTags(string, domain.MetadataTags) error { return nil }
 func (s *stubHandler) HashableReader(filePath string) (io.ReadCloser, error) {
 	f, err := os.Open(filePath)

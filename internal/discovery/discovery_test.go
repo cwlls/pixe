@@ -39,6 +39,7 @@ func (m *mockHandler) MagicBytes() []domain.MagicSignature                   { r
 func (m *mockHandler) Detect(filePath string) (bool, error)                  { return true, nil }
 func (m *mockHandler) ExtractDate(filePath string) (time.Time, error)        { return time.Time{}, nil }
 func (m *mockHandler) HashableReader(filePath string) (io.ReadCloser, error) { return nil, nil }
+func (m *mockHandler) MetadataSupport() domain.MetadataCapability            { return domain.MetadataNone }
 func (m *mockHandler) WriteMetadataTags(filePath string, tags domain.MetadataTags) error {
 	return nil
 }

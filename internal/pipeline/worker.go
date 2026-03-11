@@ -29,6 +29,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/domain"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
+	"github.com/cwlls/pixe-go/internal/tagging"
 )
 
 // syncWriter wraps an io.Writer with a mutex so multiple goroutines can
@@ -509,7 +510,7 @@ func runWorker(ctx context.Context, id int,
 			// --- Tag ---
 			tags := resolveTags(opts.Config, captureDate)
 			if !tags.IsEmpty() {
-				if err := item.df.Handler.WriteMetadataTags(assign.absDest, tags); err != nil {
+				if err := tagging.Apply(assign.absDest, item.df.Handler, tags); err != nil {
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tag_failed", archivedb.WithError(err.Error()))
 					}

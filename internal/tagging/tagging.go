@@ -21,6 +21,13 @@
 //	currently exposed is {{.Year}}, which expands to the 4-digit capture year.
 //	Example: "Copyright {{.Year}} My Family, all rights reserved"
 //	→ "Copyright 2021 My Family, all rights reserved"
+//
+// Dispatch strategy:
+//
+//	Apply checks handler.MetadataSupport() and routes accordingly:
+//	  MetadataEmbed   → handler.WriteMetadataTags (in-file EXIF/atoms)
+//	  MetadataSidecar → xmp.WriteSidecar (XMP sidecar file)
+//	  MetadataNone    → no-op
 package tagging
 
 import (
@@ -30,6 +37,7 @@ import (
 	"time"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/xmp"
 )
 
 // copyrightData is the template execution context.
@@ -56,15 +64,29 @@ func RenderCopyright(tmplStr string, date time.Time) string {
 	return buf.String()
 }
 
-// Apply injects tags into the file at destPath via handler.WriteMetadataTags.
-// It is a no-op when tags.IsEmpty() is true, returning nil immediately without
-// opening the file.
+// Apply persists metadata tags for the file at destPath. The strategy
+// depends on the handler's declared MetadataSupport capability:
+//
+//   - MetadataEmbed:   calls handler.WriteMetadataTags (in-file EXIF/atoms)
+//   - MetadataSidecar: writes an XMP sidecar via xmp.WriteSidecar
+//   - MetadataNone:    no-op, returns nil
+//
+// Returns nil immediately when tags.IsEmpty().
 func Apply(destPath string, handler domain.FileTypeHandler, tags domain.MetadataTags) error {
 	if tags.IsEmpty() {
 		return nil
 	}
-	if err := handler.WriteMetadataTags(destPath, tags); err != nil {
-		return fmt.Errorf("tagging: write metadata tags to %q: %w", destPath, err)
+	switch handler.MetadataSupport() {
+	case domain.MetadataEmbed:
+		if err := handler.WriteMetadataTags(destPath, tags); err != nil {
+			return fmt.Errorf("tagging: embed metadata in %q: %w", destPath, err)
+		}
+	case domain.MetadataSidecar:
+		if err := xmp.WriteSidecar(destPath, tags); err != nil {
+			return fmt.Errorf("tagging: write sidecar for %q: %w", destPath, err)
+		}
+	case domain.MetadataNone:
+		// No tagging for this format.
 	}
 	return nil
 }

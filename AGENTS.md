@@ -163,8 +163,9 @@ internal/
   migrate/              Legacy JSON manifest → SQLite migration
   pathbuilder/          Destination path construction (date-based, locale-aware)
   pipeline/             Sort orchestrator (sequential + concurrent)
-  tagging/              EXIF metadata tag injection
+  tagging/              Metadata tag injection (dispatch via handler capability)
   verify/               Post-sort verification
+  xmp/                  XMP sidecar file generation (Adobe-compatible)
 ```
 
 ## Key Architectural Rules

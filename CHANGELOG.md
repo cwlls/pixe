@@ -7,14 +7,36 @@
 ## [Unreleased] - In Development
 
 - **Features (In Progress)**:
+  - Handler metadata tests: `MetadataSupport()` tests added to all handler test files (Task 9 pending).
+  - Pipeline integration test: end-to-end test for sidecar written for RAW, embedded for JPEG (Task 12 pending).
+  - Full test suite validation: `make check && make test-all` (Task 13 pending).
+
+## [v1.3.0] - 2026-03-11
+
+- **Features**:
   - Metadata capability framework: `MetadataCapability` type and `MetadataSupport()` interface method added to `FileTypeHandler`.
   - Handler metadata declarations: JPEG declares `MetadataEmbed`; HEIC, MP4, CR3, and all TIFF-based RAW formats (DNG, NEF, CR2, PEF, ARW) declare `MetadataSidecar`.
-  - Hybrid tagging strategy: pipeline will route metadata writes based on handler capability — embedded EXIF for JPEG, XMP sidecars for RAW and video formats.
-  - XMP sidecar package (`internal/xmp/`) — in development. Will generate Adobe-compatible XMP sidecar files for formats that cannot safely embed metadata.
+  - XMP sidecar package (`internal/xmp/`): generates Adobe-compatible XMP sidecar files for formats that cannot safely embed metadata.
+    - `SidecarPath(mediaPath)` — returns the `.xmp` sidecar path (Adobe convention).
+    - `WriteSidecar(mediaPath, tags)` — renders and atomically writes XMP packet with conditional namespace declarations.
+    - Pure Go implementation using `text/template`; no external dependencies.
+  - Hybrid tagging strategy: pipeline routes metadata writes based on handler capability.
+    - `MetadataEmbed` → calls `handler.WriteMetadataTags` (in-file EXIF/atoms).
+    - `MetadataSidecar` → writes XMP sidecar via `xmp.WriteSidecar`.
+    - `MetadataNone` → no-op, skips tagging entirely.
+  - Updated `internal/tagging/tagging.go`: `Apply()` function now dispatches via `handler.MetadataSupport()`.
+  - Updated `internal/pipeline/pipeline.go`: sequential sort path now uses `tagging.Apply()` for routing.
+  - Updated `internal/pipeline/worker.go`: concurrent worker path now uses `tagging.Apply()` for routing.
 
 - **Improvements**:
   - Clarified `WriteMetadataTags` contract: only called for `MetadataEmbed` handlers. Sidecar/none handlers implement as no-op for interface compliance.
   - MP4 handler: removed lengthy udta atom comment; simplified to clean no-op matching tiffraw and HEIC pattern.
+  - Mock handlers in tests updated with `MetadataSupport()` method for compilation.
+
+- **Test Coverage**:
+  - `internal/copy/copy_test.go`: added `MetadataSupport()` to `stubHandler`.
+  - `internal/discovery/discovery_test.go`: added `MetadataSupport()` to `mockHandler`.
+  - `internal/tagging/tagging_test.go`: expanded test suite to cover all three dispatch branches (embed, sidecar, none).
 
 ## [v1.2.0] - 2026-03-11
 

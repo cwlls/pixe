@@ -40,6 +40,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/ignore"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
+	"github.com/cwlls/pixe-go/internal/tagging"
 )
 
 // SortOptions holds the resolved runtime options for a sort run.
@@ -387,7 +388,7 @@ func processFile(
 	// --- Tag (optional) ---
 	tags := resolveTags(cfg, captureDate)
 	if !tags.IsEmpty() {
-		if err := df.Handler.WriteMetadataTags(absDest, tags); err != nil {
+		if err := tagging.Apply(absDest, df.Handler, tags); err != nil {
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "tag_failed", archivedb.WithError(err.Error()))
 			}
