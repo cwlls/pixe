@@ -176,6 +176,61 @@ All subcommands accept `--json` for machine-readable output.
 | `--db-path` | Explicit path to the SQLite archive database |
 | `--json` | Emit JSON output instead of a table |
 
+### `pixe status`
+
+Report the sorting status of a source directory by comparing files on disk against the `.pixe_ledger.json` left by prior `pixe sort` runs. No archive database or destination directory is required — it works entirely from the source directory.
+
+```bash
+pixe status --source /path/to/photos [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-s, --source` | Source directory to inspect (required) |
+| `-r, --recursive` | Recursively inspect subdirectories (default: false) |
+| `--ignore` | Glob pattern for files to exclude (repeatable) |
+| `--json` | Emit JSON output instead of human-readable listing |
+
+**How it works:**
+
+1. Walks the source directory using the same handler registry as `pixe sort`
+2. Loads the `.pixe_ledger.json` ledger file from the source directory
+3. Classifies every file into one of five categories:
+   - **SORTED** — ledger entry with `status: "copy"`; shows destination path
+   - **DUPLICATE** — ledger entry with `status: "duplicate"`; shows the original it matched
+   - **ERRORED** — ledger entry with `status: "error"`; shows the error reason
+   - **UNSORTED** — no ledger entry (or `status: "skip"`); needs sorting
+   - **UNRECOGNIZED** — no handler claims this file type (e.g. `.txt`)
+4. Outputs a sectioned listing with a summary line
+
+**Example output (human-readable):**
+
+```
+Source: /Users/wells/photos
+Ledger: run a1b2c3d4, 2026-03-06T10:30:00Z (recursive: no)
+
+SORTED (247 files)
+  IMG_0001.jpg  → 2021/12-Dec/20211225_062223_7d97e98f...jpg
+  IMG_0002.jpg  → 2022/02-Feb/20220202_123101_447d3060...jpg
+
+DUPLICATE (3 files)
+  IMG_0042.jpg  → matches 2022/02-Feb/20220202_123101_447d3060...jpg
+
+ERRORED (1 file)
+  corrupt.jpg   → EXIF parse failed: truncated IFD at offset 0x1A
+
+UNSORTED (12 files)
+  IMG_5001.jpg
+  vacation/IMG_6001.jpg
+
+UNRECOGNIZED (2 files)
+  notes.txt     → unsupported format: .txt
+
+265 total | 247 sorted | 3 duplicates | 1 errored | 12 unsorted | 2 unrecognized
+```
+
+Exit code `0` always on success (unsorted files are not an error condition).
+
 ## Configuration File
 
 Pixe reads configuration from `.pixe.yaml` in the current directory, home directory, or `$XDG_CONFIG_HOME/pixe`. Configuration is merged with CLI flags — CLI flags take precedence.

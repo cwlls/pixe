@@ -8,6 +8,21 @@
 
 - No pending tasks.
 
+## [v1.6.0] - 2026-03-11
+
+- **Features**:
+  - `pixe status` command: source-oriented, read-only command that reports the sorting status of a source directory by comparing files on disk against the `.pixe_ledger.json` left by prior `pixe sort` runs. No archive database or destination directory required.
+    - Walks the source directory using the same handler registry as `pixe sort`.
+    - Loads the `.pixe_ledger.json` ledger file from the source directory.
+    - Classifies every file into one of five categories: SORTED (ledger entry with `status: "copy"`), DUPLICATE (ledger entry with `status: "duplicate"`), ERRORED (ledger entry with `status: "error"`), UNSORTED (no ledger entry or `status: "skip"`), UNRECOGNIZED (no handler claims this file type).
+    - Outputs a sectioned listing with a summary line.
+    - Flags: `--source` / `-s` (required), `--recursive` / `-r` (default: false), `--ignore` (repeatable), `--json` (emit JSON output).
+    - Exit code 0 always on success (unsorted files are not an error condition).
+
+- **Test Coverage**:
+  - Unit tests added: 13 tests in `cmd/status_test.go`.
+  - Integration tests added: 4 tests in `internal/integration/status_test.go`.
+
 ## [v1.5.0] - 2026-03-11
 
 - **Features**:
