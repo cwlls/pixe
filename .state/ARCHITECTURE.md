@@ -530,6 +530,251 @@ The atomic copy pattern interacts cleanly with the existing cross-process dedup 
 
 Metadata tagging (Section 4.8) occurs **after** the rename to the canonical path. The file is verified and in its final location when tags are written. This preserves the existing behavior where the checksum reflects the original data, not the tagged version. If tagging fails, the file remains at its canonical path with `status = 'tag_failed'`.
 
+### 4.11 Enhanced Ignore System (`.gitignore`-Style)
+
+Pixe's ignore system is enhanced with three capabilities that together bring it to `.gitignore`-level expressiveness: `**` recursive glob support via the `doublestar` library, directory-level ignore patterns via trailing-slash convention, and `.pixeignore` files that travel with the source directory.
+
+#### 4.11.1 Pattern Matching: `doublestar` Library
+
+The `filepath.Match` function used by the current `Matcher` does not support `**` recursive globs or `{alt1,alt2}` alternatives. Pixe replaces it with `bmatcuk/doublestar/v4`, a well-established Go library (MIT, v4 stable, 690+ importers, zero dependencies) that provides a drop-in replacement with full `**` support.
+
+**Dependency addition:**
+
+```
+go get github.com/bmatcuk/doublestar/v4
+```
+
+**Matching function replacement:**
+
+| Before | After |
+|---|---|
+| `filepath.Match(pattern, name)` | `doublestar.Match(pattern, name)` |
+
+The `doublestar.Match` function uses forward slashes as path separators (matching Go's `path` package convention). Since Pixe's `relPath` values use `filepath.Separator`, patterns and paths are normalized to forward slashes before matching via `filepath.ToSlash()`.
+
+**New pattern capabilities:**
+
+| Pattern | Matches | Example |
+|---|---|---|
+| `**/*.tmp` | All `.tmp` files at any depth | `a/b/c/scratch.tmp` |
+| `**/Thumbs.db` | `Thumbs.db` at any depth | `vacation/Thumbs.db` |
+| `backups/**` | All files under `backups/` | `backups/old/photo.jpg` |
+| `a/**/b` | `b` under `a/` at any depth | `a/x/y/b` |
+| `*.{txt,log}` | Files with `.txt` or `.log` extension | `notes.txt`, `app.log` |
+| `[Tt]humbs.db` | Case-variant matches | `Thumbs.db`, `thumbs.db` |
+
+All existing patterns (`*.txt`, `.DS_Store`, `subdir/*.tmp`) continue to work identically — `doublestar.Match` is a superset of `filepath.Match`.
+
+#### 4.11.2 Directory-Level Ignore Patterns
+
+Following `.gitignore` convention, a pattern ending with `/` matches only directories, not files. When a directory matches, the walk skips it entirely — `filepath.SkipDir` is returned, avoiding the I/O cost of descending into the ignored tree.
+
+**Trailing-slash semantics:**
+
+| Pattern | Matches | Does NOT match |
+|---|---|---|
+| `node_modules/` | Directory named `node_modules` (and all contents) | A file named `node_modules` |
+| `.git/` | Directory named `.git` (and all contents) | A file named `.git` |
+| `**/cache/` | Directory named `cache` at any depth | A file named `cache` |
+| `backups/old/` | Directory `old` under `backups/` | A file `backups/old` |
+
+**Without trailing slash**, a pattern matches both files and directories (existing behavior):
+
+| Pattern | Matches |
+|---|---|
+| `node_modules` | Both a file and a directory named `node_modules` |
+| `*.tmp` | Files named `*.tmp` at the current level |
+
+**Implementation in `Matcher`:** The `Matcher` struct gains a new method `MatchDir(dirname, relDirPath string) bool` that is called by `discovery.Walk` when encountering a directory entry. This method:
+
+1. Iterates over all patterns.
+2. For patterns ending with `/`, strips the trailing slash and matches the directory name/path against the remainder using `doublestar.Match`.
+3. For patterns containing `**` without a trailing slash, checks whether the pattern would match all contents of the directory (e.g., `backups/**` implies skipping the `backups/` directory).
+4. Returns `true` if the directory should be skipped.
+
+The existing `Match(filename, relPath string) bool` method continues to handle file-level matching. It ignores patterns ending with `/` (those are directory-only).
+
+**Integration with `discovery.Walk`:** The directory handling block in `Walk` (currently lines 73-83) is updated:
+
+```go
+// --- Directory handling ---
+if d.IsDir() {
+    if path == dirA {
+        return nil // always enter the root
+    }
+    if strings.HasPrefix(name, ".") {
+        return filepath.SkipDir // always skip dot-directories
+    }
+    if !opts.Recursive {
+        return filepath.SkipDir // non-recursive: skip all subdirs
+    }
+    // NEW: check user-configured directory ignore patterns.
+    if opts.Ignore != nil {
+        relDir, _ := filepath.Rel(dirA, path)
+        if opts.Ignore.MatchDir(name, relDir) {
+            return filepath.SkipDir
+        }
+    }
+    return nil // recursive: descend
+}
+```
+
+**Interaction with hardcoded dot-directory skip:** The existing hardcoded `strings.HasPrefix(name, ".")` check runs *before* the user ignore check. This means dot-directories like `.git/` are already skipped regardless of user patterns. The user pattern `".git/"` would be redundant but harmless. The hardcoded check is retained for safety — it predates the ignore system and should remain as a belt-and-suspenders guarantee.
+
+#### 4.11.3 `.pixeignore` File
+
+A `.pixeignore` file placed in a source directory specifies ignore patterns that travel with the photos. This is analogous to `.gitignore` — patterns are scoped to the directory containing the file and its subdirectories.
+
+**File format:**
+
+```
+# Lines starting with # are comments.
+# Blank lines are ignored.
+# Patterns follow the same syntax as --ignore flags.
+
+*.txt
+*.log
+.DS_Store
+Thumbs.db
+node_modules/
+**/cache/
+backups/**
+```
+
+- One pattern per line.
+- Lines starting with `#` are comments.
+- Blank lines are separators (ignored).
+- Leading and trailing whitespace is trimmed.
+- Patterns use the same `doublestar` syntax as `--ignore` flags, including `**`, `{alt}`, character classes, and trailing-slash directory matching.
+
+**Negation patterns (`!`) are NOT supported.** `.gitignore` supports `!` prefix to re-include previously excluded files. Pixe omits this feature for simplicity — the ignore system is additive only. All patterns from all sources are merged into a single exclusion set. If a file matches any pattern from any source, it is ignored. This avoids the complexity of ordered pattern precedence across multiple sources.
+
+**Nested `.pixeignore` files:** Following `.gitignore` convention, `.pixeignore` files in subdirectories of `dirA` are respected during recursive walks. Each `.pixeignore` file applies to files in its directory and all descendant directories. Patterns in a nested `.pixeignore` are relative to the directory containing that file.
+
+**Loading strategy:** `.pixeignore` files are discovered and loaded lazily during `discovery.Walk`. When the walk enters a directory, it checks for a `.pixeignore` file and, if found, parses it and pushes its patterns onto a stack. When the walk leaves the directory, the patterns are popped. This mirrors Git's approach and avoids pre-scanning the entire tree.
+
+**Implementation approach:** The `Matcher` struct is extended to support a stack of pattern scopes:
+
+```go
+type patternScope struct {
+    basePath string   // relative path from dirA to the directory containing .pixeignore
+    patterns []string // patterns from this .pixeignore file
+}
+
+type Matcher struct {
+    global []string        // patterns from CLI flags, config file, hardcoded
+    scopes []patternScope  // stack of .pixeignore scopes (pushed/popped during walk)
+}
+```
+
+When matching a file at `relPath`, the matcher checks:
+1. All `global` patterns (against both filename and relPath, as today).
+2. All active `scopes` — for each scope, the file's path relative to the scope's `basePath` is computed, and the scope's patterns are matched against that relative path.
+
+**Priority chain (all additive — no overrides, no negation):**
+
+| Priority | Source | Scope |
+|---|---|---|
+| 1 (always active) | Hardcoded: `.pixe_ledger.json`, `.pixeignore` | Filename match at any depth |
+| 2 (if file exists) | `.pixeignore` in `dirA` and subdirectories | Relative to containing directory |
+| 3 (if configured) | Config file `ignore:` list (`.pixe.yaml`) | Global — all files |
+| 4 (if specified) | CLI `--ignore` flags | Global — all files |
+
+All sources are **merged additively**. A file is ignored if it matches any pattern from any source. There is no override mechanism — a pattern cannot "un-ignore" a file excluded by another source.
+
+**Auto-ignored files:** The `.pixeignore` file itself is added to the hardcoded ignore list alongside `.pixe_ledger.json`. This prevents `.pixeignore` from appearing as "unrecognized" in `pixe status` output or being processed by the sort pipeline.
+
+```go
+const (
+    ledgerFilename    = ".pixe_ledger.json"
+    pixeignoreFilename = ".pixeignore"
+)
+```
+
+Both are matched by filename at any depth (same as the existing ledger ignore).
+
+#### 4.11.4 Updated `Matcher` API
+
+The `Matcher` struct in `internal/ignore/` is updated with the following API:
+
+```go
+// New creates a Matcher from global patterns (CLI flags + config file).
+// The hardcoded ignores (.pixe_ledger.json, .pixeignore) are always active.
+func New(patterns []string) *Matcher
+
+// Match reports whether a file should be ignored.
+// filename is the base name; relPath is the path relative to dirA.
+func (m *Matcher) Match(filename, relPath string) bool
+
+// MatchDir reports whether a directory should be skipped entirely.
+// dirname is the base name; relDirPath is the path relative to dirA.
+func (m *Matcher) MatchDir(dirname, relDirPath string) bool
+
+// PushScope loads a .pixeignore file and pushes its patterns onto the scope stack.
+// basePath is the relative path from dirA to the directory containing the file.
+// Returns true if a .pixeignore file was found and loaded.
+func (m *Matcher) PushScope(basePath string, pixeignorePath string) bool
+
+// PopScope removes the most recently pushed scope from the stack.
+func (m *Matcher) PopScope()
+```
+
+**Thread safety:** The `Matcher` is used by a single goroutine (the `discovery.Walk` caller). The scope stack is not accessed concurrently. No mutex is needed.
+
+#### 4.11.5 Updated Section References
+
+- **Section 4.4 (Ignore List):** The description of matching behavior is superseded by this section. Section 4.4 remains as the conceptual introduction; this section (4.11) provides the full implementation specification.
+- **Section 2 (Technical Stack):** Add `bmatcuk/doublestar/v4` to the dependency table.
+- **Section 4.9 (Recursive Source Processing):** The ignore pattern behavior in recursive mode now includes `.pixeignore` scoping and directory-level skipping.
+
+#### 4.11.6 Examples
+
+**Config file (`.pixe.yaml`):**
+
+```yaml
+ignore:
+  - "*.txt"
+  - "*.log"
+  - ".DS_Store"
+  - "Thumbs.db"
+  - "node_modules/"
+  - "**/cache/"
+```
+
+**CLI:**
+
+```bash
+pixe sort --dest ./archive --ignore "*.txt" --ignore "node_modules/" --ignore "**/cache/"
+```
+
+**`.pixeignore` file in `dirA`:**
+
+```
+# OS junk
+.DS_Store
+Thumbs.db
+*.aae
+
+# Build artifacts
+node_modules/
+dist/
+*.tmp
+
+# Deep patterns
+**/cache/
+**/.thumbnails/
+```
+
+**`.pixeignore` file in `dirA/raw-exports/`:**
+
+```
+# Ignore Lightroom preview caches in this subtree
+Previews.lrdata/
+*.lrprev
+```
+
+**Combined effect:** When running `pixe sort --source ./photos --dest ./archive --recursive`, patterns from all sources are merged. A file at `photos/raw-exports/Previews.lrdata/thumb.lrprev` would be ignored by both the nested `.pixeignore` patterns (`Previews.lrdata/` and `*.lrprev`).
+
 ---
 
 ## 5. Global Constraints
@@ -2016,8 +2261,8 @@ These items are explicitly **out of scope** for the current build but are acknow
 8. ~~**`pixe query` CLI command**~~ — **Promoted to Section 7.3.** No longer a future consideration.
 9. ~~**`pixe clean` command**~~ — **Promoted to Section 7.5.** No longer a future consideration.
 10. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
-11. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
-12. **Directory-level ignore patterns** — In recursive mode, allow ignoring entire subdirectories (e.g., `--ignore ".git/"` to skip `.git` trees). Currently only files are subject to ignore matching.
-13. **`.pixeignore` file** — A `.gitignore`-style file in `dirA` that specifies ignore patterns, complementing the CLI flag and config file. Lower priority than the other configuration sources.
+11. ~~**`**` recursive glob support in ignore patterns**~~ — **Promoted to Section 4.11.** No longer a future consideration.
+12. ~~**Directory-level ignore patterns**~~ — **Promoted to Section 4.11.** No longer a future consideration.
+13. ~~**`.pixeignore` file**~~ — **Promoted to Section 4.11.** No longer a future consideration.
 14. **Extended XMP fields** — The current XMP sidecar writes only Copyright and CameraOwner. Future work could add additional fields (keywords, captions, GPS coordinates, star ratings) to the `MetadataTags` struct and XMP template.
 15. **Split-brain network dedup (multi-machine NAS)** — When two machines run `pixe sort` against the same NAS `dirB`, each with its own local `~/.pixe/databases/<slug>.db`, there is no shared state for dedup. Both may write the same file to the primary archive without detecting the collision. A filesystem-level locking strategy using `O_EXCL` temp file creation could address this — the OS guarantees atomicity of `O_EXCL` even over modern SMB/NFS. Deferred until the multi-machine NAS workflow is actively used.
