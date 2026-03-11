@@ -6,7 +6,21 @@
 
 ## [Unreleased] - In Development
 
-- No pending tasks. All work from v1.3.0 is complete and validated.
+- No pending tasks.
+
+## [v1.4.0] - 2026-03-11
+
+- **Features**:
+  - `pixe query` command group: read-only interrogation of the archive SQLite database via 7 subcommands.
+    - `pixe query runs` — list all sort runs with file counts, ordered by start time.
+    - `pixe query run <id>` — show metadata and file list for a single run; supports short-prefix ID matching.
+    - `pixe query duplicates` — list all duplicate files; `--pairs` flag shows each duplicate alongside its original.
+    - `pixe query errors` — list all files in error states (`failed`, `mismatch`, `tag_failed`) across all runs.
+    - `pixe query skipped` — list all skipped files with skip reasons.
+    - `pixe query files` — filter archive files by capture date range (`--from`/`--to`), import date range (`--imported-from`/`--imported-to`), or source directory (`--source`).
+    - `pixe query inventory` — list all canonical (complete, non-duplicate) files in the archive.
+  - All `pixe query` subcommands support `--json` for machine-readable output (envelope: `query`, `dir`, `results`, `summary`).
+  - New `archivedb` methods: `OpenReadOnly`, `AllSkipped`, `GetRunByPrefix`, `ArchiveStats`.
 
 ## [v1.3.0] - 2026-03-11
 

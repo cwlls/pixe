@@ -145,6 +145,34 @@ pixe resume --dir /path/to/archive
 
 Finds the most recent interrupted run in the archive database and re-sorts from the source directory. Files already marked complete are skipped automatically.
 
+### `pixe query`
+
+Query the archive database without modifying any files:
+
+```bash
+pixe query <subcommand> --dir /path/to/archive [--json]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `runs` | List all sort runs with file counts |
+| `run <id>` | Show metadata and file list for a single run (supports short prefix) |
+| `duplicates` | List all duplicate files (`--pairs` to show originals) |
+| `errors` | List all files in error states across all runs |
+| `skipped` | List all skipped files with skip reasons |
+| `files` | Filter files by `--from`/`--to` (capture date), `--imported-from`/`--imported-to` (import date), or `--source` |
+| `inventory` | List all canonical archive files (complete, non-duplicate) |
+
+All subcommands accept `--json` for machine-readable output.
+
+**Persistent flags** (inherited by all subcommands):
+
+| Flag | Description |
+|------|-------------|
+| `-d, --dir` | Archive directory containing the database (required) |
+| `--db-path` | Explicit path to the SQLite archive database |
+| `--json` | Emit JSON output instead of a table |
+
 ## Configuration File
 
 Pixe reads configuration from `.pixe.yaml` in the current directory, home directory, or `$XDG_CONFIG_HOME/pixe`. Configuration is merged with CLI flags — CLI flags take precedence.
