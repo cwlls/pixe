@@ -4,14 +4,14 @@
 
 | #  | Task | Priority | Agent | Status | Depends On | Notes |
 |:---|:-----|:---------|:------|:-------|:-----------|:------|
-| 1  | Create `cmd/status.go` — Cobra command skeleton with flag binding | high | @developer | [ ] pending | — | Flags: `--source`/`-s`, `--recursive`/`-r`, `--ignore`, `--json` |
-| 2  | Implement status classification logic in `runStatus` | high | @developer | [ ] pending | 1 | Walk → load ledger → classify into 5 categories |
-| 3  | Implement human-readable output formatter | high | @developer | [ ] pending | 2 | Sectioned listing with summary line per §7.4.4 |
-| 4  | Implement JSON output formatter | medium | @developer | [ ] pending | 2 | Single JSON object per §7.4.5 |
-| 5  | Write unit tests for `cmd/status.go` | high | @developer | [ ] pending | 3, 4 | Cover: no ledger, all sorted, mixed, no files, recursive |
-| 6  | Write integration test for `pixe status` | medium | @tester | [ ] pending | 5 | End-to-end: sort then status, verify output |
-| 7  | Run `make check` — ensure lint, vet, and all tests pass | high | @developer | [ ] pending | 5 | Gate before commit |
-| 8  | Commit all changes | medium | @committer | [ ] pending | 7 | Architecture + implementation |
+| 1  | Create `cmd/status.go` — Cobra command skeleton with flag binding | high | @developer | [x] complete | — | Flags: `--source`/`-s`, `--recursive`/`-r`, `--ignore`, `--json` |
+| 2  | Implement status classification logic in `runStatus` | high | @developer | [x] complete | 1 | Walk → load ledger → classify into 5 categories |
+| 3  | Implement human-readable output formatter | high | @developer | [x] complete | 2 | Sectioned listing with summary line per §7.4.4 |
+| 4  | Implement JSON output formatter | medium | @developer | [x] complete | 2 | Single JSON object per §7.4.5 |
+| 5  | Write unit tests for `cmd/status.go` | high | @developer | [x] complete | 3, 4 | Cover: no ledger, all sorted, mixed, no files, recursive |
+| 6  | Write integration test for `pixe status` | medium | @tester | [x] complete | 5 | End-to-end: sort then status, verify output |
+| 7  | Run `make check` — ensure lint, vet, and all tests pass | high | @developer | [x] complete | 5 | Gate before commit |
+| 8  | Commit all changes | medium | @committer | [~] in-process | 7 | Architecture + implementation |
 
 ---
 
