@@ -1,0 +1,43 @@
+// ── Footer ─────────────────────────────────────────────────────────
+
+footer {
+  padding: 2.5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.footer-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.footer-brand {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  color: var(--text-faint);
+}
+
+.footer-links {
+  display: flex;
+  gap: 1rem;
+  list-style: none;
+
+  a {
+    font-size: 0.8rem;
+    color: var(--text-faint);
+
+    &:hover {
+      color: var(--text-dim);
+    }
+  }
+}
+
+.footer-spacer {
+  flex: 1;
+}
+
+.footer-copy {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}

@@ -1,0 +1,61 @@
+// ── Terminal Output Colors ─────────────────────────────────────────
+
+.term-prompt  { color: var(--text-faint); }
+.term-cmd     { color: var(--text); }
+.term-copy    { color: var(--green); }
+.term-skip    { color: var(--text-dim); }
+.term-dupe    { color: var(--accent); }
+.term-err     { color: var(--red); }
+.term-done    { color: var(--text-dim); }
+.term-comment { color: var(--text-faint); font-style: italic; }
+
+// ── Pre Label ──────────────────────────────────────────────────────
+
+.pre-label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.3rem;
+}
+
+// ── Rouge Syntax Highlighting ──────────────────────────────────────
+// Custom dark theme matching the terminal styling from the original site.
+// Rouge class reference: https://github.com/rouge-ruby/rouge/wiki/List-of-tokens
+
+.highlight {
+  background: #0a0a0a;
+  border-radius: var(--radius);
+
+  // Comment
+  .c, .c1, .cm, .cs, .cp { color: #555; font-style: italic; }
+
+  // String
+  .s, .s1, .s2, .sb, .sc, .sd, .se, .sh, .si, .sx, .sr, .ss { color: #4a9e6e; }
+
+  // Keyword
+  .k, .kc, .kd, .kn, .kp, .kr, .kt { color: #b5a642; }
+
+  // Name / Function / Variable
+  .n, .na, .nb, .nc, .nd, .ne, .nf, .ni, .nl, .nn, .no, .nt, .nv,
+  .vc, .vg, .vi { color: #e8e8e8; }
+
+  // Number
+  .m, .mb, .mf, .mh, .mi, .mo, .mx { color: #b5a642; }
+
+  // Operator
+  .o, .ow { color: #888; }
+
+  // Punctuation
+  .p { color: #888; }
+
+  // Error
+  .err { color: #c0554a; }
+
+  // Generic output / prompt
+  .go { color: #888; }
+  .gp { color: #555; }
+  .gs { color: #e8e8e8; font-weight: bold; }
+  .ge { color: #e8e8e8; font-style: italic; }
+}

@@ -1,0 +1,43 @@
+// ── Flag Tables ────────────────────────────────────────────────────
+
+.flag-table-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.flag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    vertical-align: top;
+
+    &:first-child {
+      font-family: var(--mono);
+      color: var(--accent);
+      white-space: nowrap;
+      font-size: 0.78rem;
+    }
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+}

@@ -4,22 +4,22 @@
 
 | #  | Task | Priority | Agent | Status | Depends On | Notes |
 |:---|:-----|:---------|:------|:-------|:-----------|:------|
-| 1  | Jekyll scaffolding: `_config.yml`, `_data/navigation.yml`, `Gemfile` | high | @developer | [ ] pending | — | Foundation — everything else depends on this |
-| 2  | SCSS theme: `_sass/` partials + `assets/css/main.scss` entry point | high | @developer | [ ] pending | 1 | Extract all CSS from original `index.html` into 12 SCSS partials |
-| 3  | Layouts: `default.html`, `landing.html`, `page.html` | high | @developer | [ ] pending | 1 | Three layouts per Section 10.6 |
-| 4  | Includes: `head.html`, `nav.html`, `footer.html` | high | @developer | [ ] pending | 1, 2 | Shared structural includes used by all pages |
-| 5  | Includes: `hero.html`, `pipeline.html`, `format-grid.html` | high | @developer | [ ] pending | 2 | Reusable content components extracted from original HTML |
-| 6  | Homepage: `index.md` | high | @developer | [ ] pending | 3, 4, 5 | Landing layout with hero, condensed "why", pipeline, quick start |
-| 7  | Install page: `install.md` | medium | @developer | [ ] pending | 3, 4 | Installation methods + quick start examples |
-| 8  | Commands page: `commands.md` | medium | @developer | [ ] pending | 3, 4 | Full command reference with accordion components and flag tables |
-| 9  | How It Works page: `how-it-works.md` | medium | @developer | [ ] pending | 3, 4, 5 | Pipeline, output format, naming, date fallback, file types grid |
-| 10 | Technical Benefits page: `technical.md` | medium | @developer | [ ] pending | 3, 4 | New content: engineering principles and design values |
-| 11 | Contributing page: `contributing.md` | medium | @developer | [ ] pending | 3, 4 | Contributing guide with 5-step flow |
-| 12 | Adding Formats page: `adding-formats.md` | medium | @developer | [ ] pending | 3, 4 | New content: developer guide for FileTypeHandler |
-| 13 | Changelog page: `changelog.md` | low | @developer | [ ] pending | 3, 4 | Mirror of root CHANGELOG.md |
-| 14 | AI Statement page: `ai.md` | low | @developer | [ ] pending | 3, 4 | AI collaboration statement with `.ai-card` component |
-| 15 | Remove original `docs/index.html` | low | @developer | [ ] pending | 6 | Delete after homepage is in place |
-| 16 | Local build verification | high | @tester | [ ] pending | 1–15 | `bundle exec jekyll build` succeeds with no errors |
+| 1  | Jekyll scaffolding: `_config.yml`, `_data/navigation.yml`, `Gemfile` | high | @developer | [x] complete | — | Foundation — everything else depends on this |
+| 2  | SCSS theme: `_sass/` partials + `assets/css/main.scss` entry point | high | @developer | [x] complete | 1 | Extract all CSS from original `index.html` into 12 SCSS partials |
+| 3  | Layouts: `default.html`, `landing.html`, `page.html` | high | @developer | [x] complete | 1 | Three layouts per Section 10.6 |
+| 4  | Includes: `head.html`, `nav.html`, `footer.html` | high | @developer | [x] complete | 1, 2 | Shared structural includes used by all pages |
+| 5  | Includes: `hero.html`, `pipeline.html`, `format-grid.html` | high | @developer | [x] complete | 2 | Reusable content components extracted from original HTML |
+| 6  | Homepage: `index.md` | high | @developer | [x] complete | 3, 4, 5 | Landing layout with hero, condensed "why", pipeline, quick start |
+| 7  | Install page: `install.md` | medium | @developer | [x] complete | 3, 4 | Installation methods + quick start examples |
+| 8  | Commands page: `commands.md` | medium | @developer | [x] complete | 3, 4 | Full command reference with accordion components and flag tables |
+| 9  | How It Works page: `how-it-works.md` | medium | @developer | [x] complete | 3, 4, 5 | Pipeline, output format, naming, date fallback, file types grid |
+| 10 | Technical Benefits page: `technical.md` | medium | @developer | [x] complete | 3, 4 | New content: engineering principles and design values |
+| 11 | Contributing page: `contributing.md` | medium | @developer | [x] complete | 3, 4 | Contributing guide with 5-step flow |
+| 12 | Adding Formats page: `adding-formats.md` | medium | @developer | [x] complete | 3, 4 | New content: developer guide for FileTypeHandler |
+| 13 | Changelog page: `changelog.md` | low | @developer | [x] complete | 3, 4 | Mirror of root CHANGELOG.md |
+| 14 | AI Statement page: `ai.md` | low | @developer | [x] complete | 3, 4 | AI collaboration statement with `.ai-card` component |
+| 15 | Remove original `docs/index.html` | low | @developer | [x] complete | 6 | Delete after homepage is in place |
+| 16 | Local build verification | high | @tester | [x] complete | 1–15 | `bundle exec jekyll build` succeeds with no errors |
 
 ---
 

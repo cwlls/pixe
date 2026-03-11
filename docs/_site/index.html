@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pixe — Safe, Deterministic Photo Sorting — Pixe</title>
+<meta name="description" content="Safe, deterministic photo and video sorting">
+<link rel="stylesheet" href="/pixe-go/assets/css/main.css">
+</head>
+<body>
+  <nav>
+  <a class="nav-brand" href="/pixe-go/">pixe</a>
+  <ul class="nav-links">
+    
+      <li>
+        <a href="/pixe-go/install/">
+          Install
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/commands/">
+          Commands
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/how-it-works/">
+          How It Works
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/technical/">
+          Technical
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/contributing/">
+          Contributing
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/changelog/">
+          Changelog
+        </a>
+      </li>
+    
+  </ul>
+  <div class="nav-spacer"></div>
+  <a class="nav-gh" href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub ↗</a>
+</nav>
+
+  <section id="hero">
+  <div class="container">
+    <div class="hero-tag">v1.8.0 · Apache 2.0</div>
+    <h1 class="hero-title">pixe</h1>
+    <p class="hero-sub">Safe, deterministic photo and video sorting.</p>
+    <p class="hero-promise">Your originals are never touched. Every copy is verified before it counts. Interrupted runs resume exactly where they left off.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/pixe-go/install/">Get Started</a>
+      <a class="btn btn-ghost" href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="container">
+    <div class="section-label">Purpose</div>
+    <h2>The problem with photo libraries</h2>
+    <p class="intro-text">You've got thousands of photos on your phone, a camera SD card, an old hard drive, maybe a USB stick from a vacation years ago. They pile up in folders with names like <code>IMG_4821.jpg</code>, duplicated across devices, with no consistent organization. Every tool that promises to fix this either modifies your originals, locks you into a subscription, or leaves you wondering whether it actually worked.</p>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="problem-q">What if the sort crashes halfway through?</div>
+        <span class="tag-ok">Covered</span>
+        <p class="problem-a">Pixe tracks every file in a SQLite database as it goes. Interrupted runs resume automatically — already-processed files are skipped.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-q">How do I know the copy actually worked?</div>
+        <span class="tag-ok">Covered</span>
+        <p class="problem-a">Every file is hashed before and after copying. Only when the hashes match does Pixe consider the copy complete. Mismatches are flagged, never silently ignored.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-q">What if the same photo appears twice?</div>
+        <span class="tag-ok">Covered</span>
+        <p class="problem-a">Duplicate detection is checksum-based, not name-based. The same image under different filenames is still caught. Duplicates go to a separate folder, or can be skipped entirely.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-q">Will Pixe touch my original files?</div>
+        <span class="tag-ok">Never</span>
+        <p class="problem-a">Source files are strictly read-only. Pixe copies to a destination directory — it never modifies, moves, or renames anything in your source folder.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-q">Will my archive look the same next year?</div>
+        <span class="tag-ok">Yes</span>
+        <p class="problem-a">Output is deterministic. The same photo always produces the same filename and directory path. Re-running Pixe on the same source produces the same archive.</p>
+      </div>
+      <div class="problem-card">
+        <div class="problem-q">Do I need exiftool or ffmpeg installed?</div>
+        <span class="tag-ok">No</span>
+        <p class="problem-a">Pixe is a single binary with no runtime dependencies. All EXIF parsing, RAW decoding, and metadata handling is pure Go — nothing to install separately.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="container">
+    <div class="section-label">Internals</div>
+    <h2>How it works</h2>
+    <p class="dim">Every file passes through a linear pipeline. If any stage fails, the file is flagged and the pipeline continues with the next file — nothing is silently skipped.</p>
+
+    <div class="pipeline">
+  <span class="pipeline-step active">discover</span>
+  <span class="pipeline-arrow">→</span>
+  <span class="pipeline-step">extract</span>
+  <span class="pipeline-arrow">→</span>
+  <span class="pipeline-step">hash</span>
+  <span class="pipeline-arrow">→</span>
+  <span class="pipeline-step">copy</span>
+  <span class="pipeline-arrow">→</span>
+  <span class="pipeline-step">verify</span>
+  <span class="pipeline-arrow">→</span>
+  <span class="pipeline-step">tag</span>
+  <span class="pipeline-arrow">→</span>
+  <span class="pipeline-step">complete</span>
+</div>
+
+
+    <p class="dim" style="font-size:0.85rem;">
+      <strong style="color:var(--text)">Discover</strong> — walk source, classify by type &nbsp;·&nbsp;
+      <strong style="color:var(--text)">Extract</strong> — read capture date from metadata &nbsp;·&nbsp;
+      <strong style="color:var(--text)">Hash</strong> — checksum the media payload &nbsp;·&nbsp;
+      <strong style="color:var(--text)">Copy</strong> — write to temp file in destination &nbsp;·&nbsp;
+      <strong style="color:var(--text)">Verify</strong> — re-hash destination, confirm match &nbsp;·&nbsp;
+      <strong style="color:var(--text)">Tag</strong> — optionally inject copyright metadata &nbsp;·&nbsp;
+      <strong style="color:var(--text)">Complete</strong> — atomically rename temp → canonical path
+    </p>
+
+    <p class="dim mt2" style="font-size:0.875rem;">→ <a href="/pixe-go/how-it-works/">Read the full internals breakdown</a></p>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="container">
+    <div class="section-label">Quick Start</div>
+    <h2>Up and running in minutes</h2>
+
+    <div class="pre-label">Install</div>
+    <pre><span class="term-prompt">$</span> <span class="term-cmd">go install github.com/cwlls/pixe-go@latest</span></pre>
+
+    <div class="pre-label">Sort your photos</div>
+    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive</span>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --source ~/Photos --dest ~/Archive --recursive</span></pre>
+
+    <div class="pre-label">Example output</div>
+    <pre><span class="term-copy">COPY</span> IMG_0001.jpg -&gt; 2021/12-Dec/20211225_062223_abc123ef.jpg
+<span class="term-skip">SKIP</span> IMG_0002.jpg -&gt; previously imported
+<span class="term-dupe">DUPE</span> IMG_0003.jpg -&gt; matches 2021/12-Dec/20211225_062223_abc123ef.jpg
+<span class="term-err">ERR </span> corrupt.jpg  -&gt; extract date: no EXIF data
+
+<span class="term-done">Done. processed=4 duplicates=1 skipped=1 errors=1</span></pre>
+
+    <div class="hero-actions mt2">
+      <a class="btn btn-primary" href="/pixe-go/install/">Installation guide</a>
+      <a class="btn btn-ghost" href="/pixe-go/commands/">All commands →</a>
+    </div>
+  </div>
+</section>
+
+
+  <footer>
+  <div class="container">
+    <div class="footer-inner">
+      <span class="footer-brand">pixe</span>
+      <ul class="footer-links">
+        <li><a href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/issues" target="_blank" rel="noopener">Issues</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a></li>
+        <li><a href="/pixe-go/ai/">AI collaboration</a></li>
+      </ul>
+      <div class="footer-spacer"></div>
+      <span class="footer-copy">© 2026 Chris Wells</span>
+    </div>
+  </div>
+</footer>
+
+  <script>
+    function toggle(header) {
+      const block = header.closest('.cmd-block');
+      block.classList.toggle('open');
+    }
+  </script>
+</body>
+</html>

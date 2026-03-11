@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adding a new file format — Pixe</title>
+<meta name="description" content="Safe, deterministic photo and video sorting">
+<link rel="stylesheet" href="/pixe-go/assets/css/main.css">
+</head>
+<body>
+  <nav>
+  <a class="nav-brand" href="/pixe-go/">pixe</a>
+  <ul class="nav-links">
+    
+      <li>
+        <a href="/pixe-go/install/">
+          Install
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/commands/">
+          Commands
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/how-it-works/">
+          How It Works
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/technical/">
+          Technical
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/contributing/">
+          Contributing
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/changelog/">
+          Changelog
+        </a>
+      </li>
+    
+  </ul>
+  <div class="nav-spacer"></div>
+  <a class="nav-gh" href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub ↗</a>
+</nav>
+
+  <section>
+  <div class="container">
+    
+      <div class="section-label">Developer Guide</div>
+    
+    <h2>Adding a new file format</h2>
+    <p>Pixe’s format support is modular. Each format is an isolated package under <code class="language-bash highlighter-rouge">internal/handler/</code>. The core pipeline is format-agnostic — it processes files through the <code class="language-bash highlighter-rouge">FileTypeHandler</code> interface without knowing anything about JPEG, HEIC, or RAW internals. Adding a new format means implementing that interface and registering the handler in the CLI commands. The pipeline itself requires no changes.</p>
+
+<hr />
+
+<h3 id="the-filetypehandler-interface">The <code class="language-bash highlighter-rouge">FileTypeHandler</code> interface</h3>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">// MetadataCapability declares how a handler supports metadata tagging.</span>
+<span class="k">type</span> <span class="n">MetadataCapability</span> <span class="kt">int</span>
+
+<span class="k">const</span> <span class="p">(</span>
+    <span class="n">MetadataNone</span>    <span class="n">MetadataCapability</span> <span class="o">=</span> <span class="no">iota</span> <span class="c">// skip tagging entirely</span>
+    <span class="n">MetadataEmbed</span>                             <span class="c">// write tags directly into the file</span>
+    <span class="n">MetadataSidecar</span>                           <span class="c">// write an XMP sidecar file alongside</span>
+<span class="p">)</span>
+
+<span class="k">type</span> <span class="n">FileTypeHandler</span> <span class="k">interface</span> <span class="p">{</span>
+    <span class="c">// Detect returns true if this handler can process the given file.</span>
+    <span class="c">// Detection is magic-byte verified after initial extension-based assumption.</span>
+    <span class="n">Detect</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">bool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+
+    <span class="c">// ExtractDate returns the capture date/time from the file's metadata.</span>
+    <span class="c">// Implementations define their own fallback chain per the global policy.</span>
+    <span class="n">ExtractDate</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">Time</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+
+    <span class="c">// HashableReader returns an io.Reader over the media payload only,</span>
+    <span class="c">// excluding metadata. The core engine hashes this stream.</span>
+    <span class="n">HashableReader</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="n">io</span><span class="o">.</span><span class="n">Reader</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+
+    <span class="c">// MetadataSupport declares this handler's metadata tagging capability.</span>
+    <span class="n">MetadataSupport</span><span class="p">()</span> <span class="n">MetadataCapability</span>
+
+    <span class="c">// WriteMetadataTags injects metadata tags directly into the file.</span>
+    <span class="c">// Only called when MetadataSupport() returns MetadataEmbed.</span>
+    <span class="c">// Must be a no-op when tags.IsEmpty() is true.</span>
+    <span class="n">WriteMetadataTags</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">,</span> <span class="n">tags</span> <span class="n">MetadataTags</span><span class="p">)</span> <span class="kt">error</span>
+
+    <span class="c">// Extensions returns the lowercase file extensions this handler claims.</span>
+    <span class="n">Extensions</span><span class="p">()</span> <span class="p">[]</span><span class="kt">string</span>
+
+    <span class="c">// MagicBytes returns the byte signatures used to verify file type.</span>
+    <span class="n">MagicBytes</span><span class="p">()</span> <span class="p">[]</span><span class="n">MagicSignature</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Method-by-method:</strong></p>
+
+<ul>
+  <li><strong><code class="language-bash highlighter-rouge">Extensions<span class="o">()</span></code></strong> — Return the lowercase extensions your format uses (e.g., <code class="language-bash highlighter-rouge"><span class="o">[]</span>string<span class="o">{</span><span class="s2">".webp"</span><span class="o">}</span></code>). Used for the fast-path extension check before magic-byte verification.</li>
+  <li><strong><code class="language-bash highlighter-rouge">MagicBytes<span class="o">()</span></code></strong> — Return the byte signatures at known offsets that uniquely identify your format. Used to confirm the file is actually what the extension claims.</li>
+  <li><strong><code class="language-bash highlighter-rouge">Detect<span class="o">()</span></code></strong> — Check the extension, then verify magic bytes. Return <code class="language-bash highlighter-rouge"><span class="nb">true</span></code> if this handler should process the file.</li>
+  <li><strong><code class="language-bash highlighter-rouge">ExtractDate<span class="o">()</span></code></strong> — Parse the file’s metadata to find the capture date. Apply the fallback chain: <code class="language-bash highlighter-rouge">DateTimeOriginal</code> → <code class="language-bash highlighter-rouge">CreateDate</code> → February 20, 1902.</li>
+  <li><strong><code class="language-bash highlighter-rouge">HashableReader<span class="o">()</span></code></strong> — Return a reader over the media payload only — the pixel data, sensor data, or video frames — not the metadata wrapper. This is what gets checksummed for deduplication and integrity verification.</li>
+  <li><strong><code class="language-bash highlighter-rouge">MetadataSupport<span class="o">()</span></code></strong> — Declare your capability. Use <code class="language-bash highlighter-rouge">MetadataEmbed</code> only if you can safely write tags directly into the file format. Use <code class="language-bash highlighter-rouge">MetadataSidecar</code> for most formats — the pipeline will write an XMP sidecar alongside the destination copy. Use <code class="language-bash highlighter-rouge">MetadataNone</code> if metadata association is meaningless for this format.</li>
+  <li><strong><code class="language-bash highlighter-rouge">WriteMetadataTags<span class="o">()</span></code></strong> — Implement in-file tag writing for <code class="language-bash highlighter-rouge">MetadataEmbed</code> handlers. For <code class="language-bash highlighter-rouge">MetadataSidecar</code> and <code class="language-bash highlighter-rouge">MetadataNone</code> handlers, implement as a no-op that returns <code class="language-bash highlighter-rouge">nil</code> (required for interface compliance, but never called by the pipeline).</li>
+</ul>
+
+<hr />
+
+<h3 id="step-by-step-walkthrough">Step-by-step walkthrough</h3>
+
+<p>Using WEBP as a hypothetical example.</p>
+
+<p><strong>1. Create the package</strong></p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>internal/handler/webp/
+├── webp.go
+└── webp_test.go
+</code></pre></div></div>
+
+<p><strong>2. Define the handler struct and constructor</strong></p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">// Copyright 2026 Chris Wells &lt;chris@rhza.org&gt;</span>
+<span class="c">//</span>
+<span class="c">// Licensed under the Apache License, Version 2.0 (the "License");</span>
+<span class="c">// ...</span>
+
+<span class="c">// Package webp implements FileTypeHandler for WebP images.</span>
+<span class="k">package</span> <span class="n">webp</span>
+
+<span class="k">import</span> <span class="p">(</span>
+    <span class="s">"io"</span>
+    <span class="s">"time"</span>
+
+    <span class="s">"github.com/cwlls/pixe-go/internal/domain"</span>
+<span class="p">)</span>
+
+<span class="c">// Handler processes WebP image files.</span>
+<span class="k">type</span> <span class="n">Handler</span> <span class="k">struct</span><span class="p">{}</span>
+
+<span class="c">// New returns a new WebP handler.</span>
+<span class="k">func</span> <span class="n">New</span><span class="p">()</span> <span class="o">*</span><span class="n">Handler</span> <span class="p">{</span> <span class="k">return</span> <span class="o">&amp;</span><span class="n">Handler</span><span class="p">{}</span> <span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>3. Implement <code class="language-bash highlighter-rouge">Extensions<span class="o">()</span></code> and <code class="language-bash highlighter-rouge">MagicBytes<span class="o">()</span></code></strong></p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">Extensions</span><span class="p">()</span> <span class="p">[]</span><span class="kt">string</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">".webp"</span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">MagicBytes</span><span class="p">()</span> <span class="p">[]</span><span class="n">domain</span><span class="o">.</span><span class="n">MagicSignature</span> <span class="p">{</span>
+    <span class="c">// WebP: RIFF at offset 0, WEBP at offset 8</span>
+    <span class="k">return</span> <span class="p">[]</span><span class="n">domain</span><span class="o">.</span><span class="n">MagicSignature</span><span class="p">{</span>
+        <span class="p">{</span><span class="n">Offset</span><span class="o">:</span> <span class="m">0</span><span class="p">,</span> <span class="n">Bytes</span><span class="o">:</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">(</span><span class="s">"RIFF"</span><span class="p">)},</span>
+        <span class="p">{</span><span class="n">Offset</span><span class="o">:</span> <span class="m">8</span><span class="p">,</span> <span class="n">Bytes</span><span class="o">:</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">(</span><span class="s">"WEBP"</span><span class="p">)},</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>4. Implement <code class="language-bash highlighter-rouge">Detect<span class="o">()</span></code></strong></p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">Detect</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">bool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c">// Extension check is handled by the registry before Detect is called.</span>
+    <span class="c">// Here we verify the magic bytes.</span>
+    <span class="n">f</span><span class="p">,</span> <span class="n">err</span> <span class="o">:=</span> <span class="n">os</span><span class="o">.</span><span class="n">Open</span><span class="p">(</span><span class="n">filePath</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">err</span> <span class="o">!=</span> <span class="no">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="no">false</span><span class="p">,</span> <span class="n">fmt</span><span class="o">.</span><span class="n">Errorf</span><span class="p">(</span><span class="s">"webp: detect: %w"</span><span class="p">,</span> <span class="n">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">defer</span> <span class="n">f</span><span class="o">.</span><span class="n">Close</span><span class="p">()</span>
+
+    <span class="n">buf</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="m">12</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_</span><span class="p">,</span> <span class="n">err</span> <span class="o">:=</span> <span class="n">io</span><span class="o">.</span><span class="n">ReadFull</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">buf</span><span class="p">);</span> <span class="n">err</span> <span class="o">!=</span> <span class="no">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="no">false</span><span class="p">,</span> <span class="no">nil</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kt">string</span><span class="p">(</span><span class="n">buf</span><span class="p">[</span><span class="m">0</span><span class="o">:</span><span class="m">4</span><span class="p">])</span> <span class="o">==</span> <span class="s">"RIFF"</span> <span class="o">&amp;&amp;</span> <span class="kt">string</span><span class="p">(</span><span class="n">buf</span><span class="p">[</span><span class="m">8</span><span class="o">:</span><span class="m">12</span><span class="p">])</span> <span class="o">==</span> <span class="s">"WEBP"</span><span class="p">,</span> <span class="no">nil</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>5. Implement <code class="language-bash highlighter-rouge">ExtractDate<span class="o">()</span></code></strong></p>
+
+<p>Parse EXIF from the WEBP container (WEBP embeds EXIF in an <code class="language-bash highlighter-rouge">EXIF</code> chunk). Apply the standard fallback chain:</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">ExtractDate</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">Time</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c">// ... parse EXIF from WEBP EXIF chunk ...</span>
+    <span class="c">// Apply fallback chain: DateTimeOriginal → CreateDate → Ansel Adams date</span>
+    <span class="n">fallback</span> <span class="o">:=</span> <span class="n">time</span><span class="o">.</span><span class="n">Date</span><span class="p">(</span><span class="m">1902</span><span class="p">,</span> <span class="m">2</span><span class="p">,</span> <span class="m">20</span><span class="p">,</span> <span class="m">0</span><span class="p">,</span> <span class="m">0</span><span class="p">,</span> <span class="m">0</span><span class="p">,</span> <span class="m">0</span><span class="p">,</span> <span class="n">time</span><span class="o">.</span><span class="n">UTC</span><span class="p">)</span>
+    <span class="c">// return parsed date, or fallback if no EXIF found</span>
+    <span class="k">return</span> <span class="n">fallback</span><span class="p">,</span> <span class="no">nil</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>6. Implement <code class="language-bash highlighter-rouge">HashableReader<span class="o">()</span></code></strong></p>
+
+<p>Return a reader over the VP8/VP8L/VP8X image data payload, excluding the RIFF/WEBP header and EXIF chunk:</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">HashableReader</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="n">io</span><span class="o">.</span><span class="n">Reader</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c">// ... locate and return reader over image data payload ...</span>
+    <span class="c">// If payload cannot be isolated, fall back to full file</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">Open</span><span class="p">(</span><span class="n">filePath</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>7. Implement <code class="language-bash highlighter-rouge">MetadataSupport<span class="o">()</span></code> and <code class="language-bash highlighter-rouge">WriteMetadataTags<span class="o">()</span></code></strong></p>
+
+<p>For a new format, default to <code class="language-bash highlighter-rouge">MetadataSidecar</code> — the pipeline will write an XMP sidecar alongside the destination copy:</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">MetadataSupport</span><span class="p">()</span> <span class="n">domain</span><span class="o">.</span><span class="n">MetadataCapability</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="n">domain</span><span class="o">.</span><span class="n">MetadataSidecar</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">WriteMetadataTags</span><span class="p">(</span><span class="n">_</span> <span class="kt">string</span><span class="p">,</span> <span class="n">_</span> <span class="n">domain</span><span class="o">.</span><span class="n">MetadataTags</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="c">// Never called — pipeline checks MetadataSupport() first.</span>
+    <span class="k">return</span> <span class="no">nil</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>8. Register in CLI commands</strong></p>
+
+<p>Add <code class="language-bash highlighter-rouge">reg.Register<span class="o">(</span>webphandler.New<span class="o">())</span></code> to the handler registry in all four command files:</p>
+
+<ul>
+  <li><code class="language-bash highlighter-rouge">cmd/sort.go</code></li>
+  <li><code class="language-bash highlighter-rouge">cmd/verify.go</code></li>
+  <li><code class="language-bash highlighter-rouge">cmd/resume.go</code></li>
+  <li><code class="language-bash highlighter-rouge">cmd/status.go</code></li>
+</ul>
+
+<hr />
+
+<h3 id="tiff-based-raw-shortcut">TIFF-based RAW shortcut</h3>
+
+<p>If your format is TIFF-based (DNG, NEF, CR2, PEF, ARW all are), embed <code class="language-bash highlighter-rouge">tiffraw.Base</code> instead of implementing <code class="language-bash highlighter-rouge">ExtractDate</code>, <code class="language-bash highlighter-rouge">HashableReader</code>, and <code class="language-bash highlighter-rouge">WriteMetadataTags</code> from scratch. The base provides the shared TIFF IFD traversal logic. You only need to supply <code class="language-bash highlighter-rouge">Extensions<span class="o">()</span></code>, <code class="language-bash highlighter-rouge">MagicBytes<span class="o">()</span></code>, and <code class="language-bash highlighter-rouge">Detect<span class="o">()</span></code>:</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">package</span> <span class="n">myfmt</span>
+
+<span class="k">import</span> <span class="s">"github.com/cwlls/pixe-go/internal/handler/tiffraw"</span>
+
+<span class="k">type</span> <span class="n">Handler</span> <span class="k">struct</span><span class="p">{</span> <span class="n">tiffraw</span><span class="o">.</span><span class="n">Base</span> <span class="p">}</span>
+
+<span class="k">func</span> <span class="n">New</span><span class="p">()</span> <span class="o">*</span><span class="n">Handler</span> <span class="p">{</span> <span class="k">return</span> <span class="o">&amp;</span><span class="n">Handler</span><span class="p">{}</span> <span class="p">}</span>
+
+<span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">Extensions</span><span class="p">()</span> <span class="p">[]</span><span class="kt">string</span> <span class="p">{</span> <span class="k">return</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">".myfmt"</span><span class="p">}</span> <span class="p">}</span>
+
+<span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">MagicBytes</span><span class="p">()</span> <span class="p">[]</span><span class="n">domain</span><span class="o">.</span><span class="n">MagicSignature</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="p">[]</span><span class="n">domain</span><span class="o">.</span><span class="n">MagicSignature</span><span class="p">{</span>
+        <span class="p">{</span><span class="n">Offset</span><span class="o">:</span> <span class="m">0</span><span class="p">,</span> <span class="n">Bytes</span><span class="o">:</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">{</span><span class="m">0x49</span><span class="p">,</span> <span class="m">0x49</span><span class="p">,</span> <span class="m">0x2A</span><span class="p">,</span> <span class="m">0x00</span><span class="p">}},</span> <span class="c">// TIFF LE</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="k">func</span> <span class="p">(</span><span class="n">h</span> <span class="o">*</span><span class="n">Handler</span><span class="p">)</span> <span class="n">Detect</span><span class="p">(</span><span class="n">filePath</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">bool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c">// ... extension + magic byte check ...</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Reference the existing DNG, NEF, CR2, PEF, or ARW handlers in <code class="language-bash highlighter-rouge">internal/handler/</code> as templates — they are each ~50 lines.</p>
+
+<hr />
+
+<h3 id="testing-conventions">Testing conventions</h3>
+
+<ul>
+  <li><strong>No testify.</strong> Use stdlib <code class="language-bash highlighter-rouge">testing</code> only. <code class="language-bash highlighter-rouge">t.Fatal</code>, <code class="language-bash highlighter-rouge">t.Errorf</code>, <code class="language-bash highlighter-rouge">t.Helper</code>.</li>
+  <li><strong><code class="language-bash highlighter-rouge">t.TempDir<span class="o">()</span></code></strong> for all filesystem tests — auto-cleaned after the test.</li>
+  <li><strong><code class="language-bash highlighter-rouge">t.Helper<span class="o">()</span></code></strong> on all helper functions.</li>
+  <li><strong><code class="language-bash highlighter-rouge"><span class="nt">-race</span></code> always.</strong> The Makefile sets this; run <code class="language-bash highlighter-rouge">go <span class="nb">test</span> <span class="nt">-race</span> ./internal/handler/webp/...</code>.</li>
+  <li><strong>Test names:</strong> <code class="language-bash highlighter-rouge">TestHandler_methodOrBehavior</code> (e.g., <code class="language-bash highlighter-rouge">TestHandler_detectValidWebP</code>, <code class="language-bash highlighter-rouge">TestHandler_extractDateFallback</code>).</li>
+  <li><strong>Fixture files</strong> in <code class="language-bash highlighter-rouge">testdata/</code> — small, minimal files that exercise the specific code path.</li>
+  <li><strong>Table-driven tests</strong> for multiple input cases using anonymous struct slices with <code class="language-bash highlighter-rouge">want</code>/<code class="language-bash highlighter-rouge">got</code> pattern.</li>
+</ul>
+
+  </div>
+</section>
+
+  <footer>
+  <div class="container">
+    <div class="footer-inner">
+      <span class="footer-brand">pixe</span>
+      <ul class="footer-links">
+        <li><a href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/issues" target="_blank" rel="noopener">Issues</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a></li>
+        <li><a href="/pixe-go/ai/">AI collaboration</a></li>
+      </ul>
+      <div class="footer-spacer"></div>
+      <span class="footer-copy">© 2026 Chris Wells</span>
+    </div>
+  </div>
+</footer>
+
+  <script>
+    function toggle(header) {
+      const block = header.closest('.cmd-block');
+      block.classList.toggle('open');
+    }
+  </script>
+</body>
+</html>

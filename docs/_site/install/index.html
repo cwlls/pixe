@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Get started in minutes — Pixe</title>
+<meta name="description" content="Safe, deterministic photo and video sorting">
+<link rel="stylesheet" href="/pixe-go/assets/css/main.css">
+</head>
+<body>
+  <nav>
+  <a class="nav-brand" href="/pixe-go/">pixe</a>
+  <ul class="nav-links">
+    
+      <li>
+        <a href="/pixe-go/install/" class="active">
+          Install
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/commands/">
+          Commands
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/how-it-works/">
+          How It Works
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/technical/">
+          Technical
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/contributing/">
+          Contributing
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/changelog/">
+          Changelog
+        </a>
+      </li>
+    
+  </ul>
+  <div class="nav-spacer"></div>
+  <a class="nav-gh" href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub ↗</a>
+</nav>
+
+  <section>
+  <div class="container">
+    
+      <div class="section-label">Installation</div>
+    
+    <h2>Get started in minutes</h2>
+    <h3 id="install-via-go">Install via Go</h3>
+
+<p>The fastest way to install Pixe. Requires Go 1.21 or later.</p>
+
+<div class="pre-label">Requires Go 1.21+</div>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go <span class="nb">install </span>github.com/cwlls/pixe-go@latest
+</code></pre></div></div>
+
+<h3 id="build-from-source">Build from source</h3>
+
+<div class="pre-label">Clone and build</div>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone https://github.com/cwlls/pixe-go.git
+<span class="nb">cd </span>pixe-go
+make build
+</code></pre></div></div>
+
+<p>The <code class="language-bash highlighter-rouge">make build</code> command uses GoReleaser to produce a production binary at <code class="language-bash highlighter-rouge">./pixe</code>. Run <code class="language-bash highlighter-rouge">make build-debug</code> to build with debug symbols for use with <code class="language-bash highlighter-rouge">dlv</code>.</p>
+
+<h3 id="quick-start">Quick start</h3>
+
+<div class="pre-label">Sort photos from the current directory</div>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pixe <span class="nb">sort</span> <span class="nt">--dest</span> ~/Archive
+</code></pre></div></div>
+
+<div class="pre-label">Specify a source and recurse into subdirectories</div>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pixe <span class="nb">sort</span> <span class="nt">--source</span> ~/Downloads/Photos <span class="nt">--dest</span> ~/Archive <span class="nt">--recursive</span>
+</code></pre></div></div>
+
+<div class="pre-label">Check the sort status of files in the current directory</div>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pixe status
+</code></pre></div></div>
+
+<div class="pre-label">Verify archive integrity (re-hashes every file)</div>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>pixe verify <span class="nt">--dir</span> ~/Archive
+</code></pre></div></div>
+
+<div class="callout">
+  <strong>Tip:</strong> Run <code>pixe sort --dry-run</code> first to preview exactly what would happen — no files are copied.
+</div>
+
+<hr />
+
+<p>→ <a href="/commands/">See the full command reference</a></p>
+
+  </div>
+</section>
+
+  <footer>
+  <div class="container">
+    <div class="footer-inner">
+      <span class="footer-brand">pixe</span>
+      <ul class="footer-links">
+        <li><a href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/issues" target="_blank" rel="noopener">Issues</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a></li>
+        <li><a href="/pixe-go/ai/">AI collaboration</a></li>
+      </ul>
+      <div class="footer-spacer"></div>
+      <span class="footer-copy">© 2026 Chris Wells</span>
+    </div>
+  </div>
+</footer>
+
+  <script>
+    function toggle(header) {
+      const block = header.closest('.cmd-block');
+      block.classList.toggle('open');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Contributing to Pixe — Pixe</title>
+<meta name="description" content="Safe, deterministic photo and video sorting">
+<link rel="stylesheet" href="/pixe-go/assets/css/main.css">
+</head>
+<body>
+  <nav>
+  <a class="nav-brand" href="/pixe-go/">pixe</a>
+  <ul class="nav-links">
+    
+      <li>
+        <a href="/pixe-go/install/">
+          Install
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/commands/">
+          Commands
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/how-it-works/">
+          How It Works
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/technical/">
+          Technical
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/contributing/" class="active">
+          Contributing
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/changelog/">
+          Changelog
+        </a>
+      </li>
+    
+  </ul>
+  <div class="nav-spacer"></div>
+  <a class="nav-gh" href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub ↗</a>
+</nav>
+
+  <section>
+  <div class="container">
+    
+      <div class="section-label">Open Source</div>
+    
+    <h2>Contributing to Pixe</h2>
+    <p>Pixe is open source under the Apache 2.0 license. Contributions are welcome — bug reports, new format handlers, feature ideas, and documentation improvements.</p>
+
+<p>New file format support is particularly straightforward: each format is an isolated package that implements the <code class="language-bash highlighter-rouge">FileTypeHandler</code> interface. The core pipeline requires no changes. See the <a href="/adding-formats/">Adding a new format</a> guide for a step-by-step walkthrough.</p>
+
+<div class="contribute-steps">
+  <div class="step">
+    <span class="step-num">01</span>
+    <div class="step-text"><strong>Open an issue first</strong> for anything beyond a small bug fix. Alignment before implementation prevents wasted effort on both sides. Describe what you want to build and why.</div>
+  </div>
+  <div class="step">
+    <span class="step-num">02</span>
+    <div class="step-text"><strong>Clone and build:</strong>
+      <pre style="margin-top:0.5rem;"><span class="term-prompt">$</span> <span class="term-cmd">git clone https://github.com/cwlls/pixe-go.git</span>
+<span class="term-prompt">$</span> <span class="term-cmd">cd pixe-go &amp;&amp; make build</span></pre>
+    </div>
+  </div>
+  <div class="step">
+    <span class="step-num">03</span>
+    <div class="step-text"><strong>Run the test suite</strong> before and after your changes:
+      <pre style="margin-top:0.5rem;"><span class="term-prompt">$</span> <span class="term-cmd">make check</span>        <span class="term-comment"># fmt + vet + unit tests (fast gate)</span>
+<span class="term-prompt">$</span> <span class="term-cmd">make test-all</span>     <span class="term-comment"># includes integration tests</span>
+<span class="term-prompt">$</span> <span class="term-cmd">make lint</span>         <span class="term-comment"># golangci-lint</span></pre>
+    </div>
+  </div>
+  <div class="step">
+    <span class="step-num">04</span>
+    <div class="step-text"><strong>Follow the conventions:</strong> Apache 2.0 header on every <code>.go</code> file, stdlib-only test assertions (no testify), three import groups (stdlib / external / internal), <code>-race</code> always on. See <code>AGENTS.md</code> in the repo for the full style guide.</div>
+  </div>
+  <div class="step">
+    <span class="step-num">05</span>
+    <div class="step-text"><strong>Submit a pull request</strong> on GitHub. CI runs formatting checks, vet, lint, and the full test suite on every PR.</div>
+  </div>
+</div>
+
+<p>→ <a href="https://github.com/cwlls/pixe-go/issues" target="_blank" rel="noopener">Open an issue on GitHub</a></p>
+
+  </div>
+</section>
+
+  <footer>
+  <div class="container">
+    <div class="footer-inner">
+      <span class="footer-brand">pixe</span>
+      <ul class="footer-links">
+        <li><a href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/issues" target="_blank" rel="noopener">Issues</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a></li>
+        <li><a href="/pixe-go/ai/">AI collaboration</a></li>
+      </ul>
+      <div class="footer-spacer"></div>
+      <span class="footer-copy">© 2026 Chris Wells</span>
+    </div>
+  </div>
+</footer>
+
+  <script>
+    function toggle(header) {
+      const block = header.closest('.cmd-block');
+      block.classList.toggle('open');
+    }
+  </script>
+</body>
+</html>

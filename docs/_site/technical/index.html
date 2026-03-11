@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Why Pixe is built this way — Pixe</title>
+<meta name="description" content="Safe, deterministic photo and video sorting">
+<link rel="stylesheet" href="/pixe-go/assets/css/main.css">
+</head>
+<body>
+  <nav>
+  <a class="nav-brand" href="/pixe-go/">pixe</a>
+  <ul class="nav-links">
+    
+      <li>
+        <a href="/pixe-go/install/">
+          Install
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/commands/">
+          Commands
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/how-it-works/">
+          How It Works
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/technical/" class="active">
+          Technical
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/contributing/">
+          Contributing
+        </a>
+      </li>
+    
+      <li>
+        <a href="/pixe-go/changelog/">
+          Changelog
+        </a>
+      </li>
+    
+  </ul>
+  <div class="nav-spacer"></div>
+  <a class="nav-gh" href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub ↗</a>
+</nav>
+
+  <section>
+  <div class="container">
+    
+      <div class="section-label">Design</div>
+    
+    <h2>Why Pixe is built this way</h2>
+    <p>Pixe makes specific engineering choices that distinguish it from other photo sorting tools. This page explains those choices and why they matter for a tool whose job is to handle irreplaceable media.</p>
+
+<hr />
+
+<h3 id="source-files-are-never-touched">Source files are never touched</h3>
+
+<p>Pixe treats the source directory as strictly read-only. It never modifies, renames, moves, or deletes files in your source folder. The only thing it writes there is a <code class="language-bash highlighter-rouge">.pixe_ledger.json</code> receipt — a record of what it saw and what it did.</p>
+
+<p>This constraint is non-negotiable. Family photos, RAW files from a shoot, archival scans — these are irreplaceable. A tool that modifies originals as part of its workflow introduces risk that simply should not exist. Even a metadata write to the wrong byte offset can corrupt a file. Pixe eliminates that risk entirely by never touching the source.</p>
+
+<hr />
+
+<h3 id="copy-then-verify">Copy-then-verify</h3>
+
+<p>Every file Pixe copies goes through a two-phase integrity check. First, the file is written to a temporary location in the destination. Then it is independently re-read and re-hashed. Only when the checksum of the destination matches the checksum of the source does Pixe consider the copy complete — and only then does it rename the temp file to its canonical path.</p>
+
+<p>This matters because storage hardware is not perfectly reliable. USB drives drop bytes. NAS connections hiccup mid-transfer. Disks develop bad sectors that the filesystem silently accepts. A checksum on both sides catches what the OS won’t tell you. If there’s a mismatch, the temp file is deleted, the source is untouched, and the file is flagged for retry. A file at its canonical path in the archive is always verified.</p>
+
+<hr />
+
+<h3 id="deterministic-output">Deterministic output</h3>
+
+<p>Given the same input files and the same configuration, Pixe always produces the same archive structure. The same photo always maps to the same filename and the same directory path. Re-running Pixe on the same source produces the same archive.</p>
+
+<p>This property enables confidence in several workflows: you can re-run Pixe on a source you’ve already sorted and know that already-imported files will be skipped and nothing will be duplicated. You can merge archives from different sources and reason about what will happen. You can verify an archive years later by re-running with the same algorithm and comparing checksums. Determinism is what makes a tool trustworthy over time.</p>
+
+<hr />
+
+<h3 id="no-external-dependencies">No external dependencies</h3>
+
+<p>Pixe is a single binary. There is no exiftool to install, no ffmpeg, no ImageMagick, no Python runtime. All EXIF parsing, RAW container decoding, video metadata extraction, and file hashing is implemented in pure Go and compiled into the binary.</p>
+
+<p>This matters for long-term archival. A tool that depends on a chain of external software is a tool that may stop working when one of those dependencies changes its behavior, drops a flag, or becomes unavailable. Pixe’s dependency surface is: the binary, and the files you give it. That’s it. Install it once, run it in ten years, and it will behave identically.</p>
+
+<hr />
+
+<h3 id="crash-safe-by-design">Crash-safe by design</h3>
+
+<p>Pixe is designed to survive interruption at any point without data loss or corruption.</p>
+
+<p>Each file’s completion is committed individually to the SQLite database. If the process is killed mid-run, at most one in-flight file is lost — every file committed before the interruption is safe. The JSONL ledger in the source directory is streamed line-by-line as files are processed, so an interrupted run leaves a valid (if incomplete) receipt. Temp files in the destination are left on disk but are harmless — they don’t interfere with subsequent runs and can be cleaned with <code class="language-bash highlighter-rouge">pixe clean</code>.</p>
+
+<p>Sorting 50,000 photos takes hours. Power failures happen. Laptops sleep. <code class="language-bash highlighter-rouge">pixe resume</code> picks up exactly where the last run left off.</p>
+
+<hr />
+
+<h3 id="content-based-deduplication">Content-based deduplication</h3>
+
+<p>Pixe identifies duplicates by checksum of the media payload — the actual pixel data or sensor data — not by filename, path, or metadata. This means:</p>
+
+<p><code class="language-bash highlighter-rouge">IMG_0001.jpg</code> from your phone and <code class="language-bash highlighter-rouge">IMG_0001.jpg</code> from your partner’s phone are correctly identified as different files, even though they have the same name. The same photo renamed to <code class="language-bash highlighter-rouge">vacation_sunset.jpg</code> is correctly identified as a duplicate of the original, even though the name is different. A RAW file whose embedded JPEG preview was regenerated by Lightroom is still correctly identified as the same file, because the sensor data — the ground truth — hasn’t changed.</p>
+
+<p>Filenames are meaningless for identity. Content is truth.</p>
+
+  </div>
+</section>
+
+  <footer>
+  <div class="container">
+    <div class="footer-inner">
+      <span class="footer-brand">pixe</span>
+      <ul class="footer-links">
+        <li><a href="https://github.com/cwlls/pixe-go" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/issues" target="_blank" rel="noopener">Issues</a></li>
+        <li><a href="https://github.com/cwlls/pixe-go/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a></li>
+        <li><a href="/pixe-go/ai/">AI collaboration</a></li>
+      </ul>
+      <div class="footer-spacer"></div>
+      <span class="footer-copy">© 2026 Chris Wells</span>
+    </div>
+  </div>
+</footer>
+
+  <script>
+    function toggle(header) {
+      const block = header.closest('.cmd-block');
+      block.classList.toggle('open');
+    }
+  </script>
+</body>
+</html>
