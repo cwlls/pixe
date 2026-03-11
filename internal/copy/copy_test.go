@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,8 +29,8 @@ import (
 
 // --- helpers ---
 
-// writeSource creates a temp file with the given content and returns its path.
-func writeSource(t *testing.T, dir string, name string, content []byte) string {
+// writeSource creates a file with the given content and returns its path.
+func writeSource(t *testing.T, dir, name string, content []byte) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, content, 0o644); err != nil {
@@ -63,26 +64,112 @@ func sha1Hasher(t *testing.T) *hash.Hasher {
 	return h
 }
 
+// computeChecksum returns the SHA-1 hex digest of content.
+func computeChecksum(t *testing.T, content []byte) string {
+	t.Helper()
+	h := sha1Hasher(t)
+	sum, err := h.Sum(bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("computeChecksum: %v", err)
+	}
+	return sum
+}
+
+// --- TempPath tests ---
+
+func TestTempPath_format(t *testing.T) {
+	cases := []struct {
+		dest string
+		want string
+	}{
+		{
+			dest: "/archive/2021/12-Dec/20211225_062223_abc123.jpg",
+			want: "/archive/2021/12-Dec/.20211225_062223_abc123.jpg.pixe-tmp",
+		},
+		{
+			dest: "relative/path/photo.jpg",
+			want: "relative/path/.photo.jpg.pixe-tmp",
+		},
+		{
+			dest: "/flat/photo.cr3",
+			want: "/flat/.photo.cr3.pixe-tmp",
+		},
+	}
+
+	for _, tc := range cases {
+		got := TempPath(tc.dest)
+		if got != tc.want {
+			t.Errorf("TempPath(%q) = %q, want %q", tc.dest, got, tc.want)
+		}
+	}
+}
+
+func TestTempPath_leadingDotAndSuffix(t *testing.T) {
+	dest := "/some/dir/myfile.jpg"
+	tmp := TempPath(dest)
+
+	base := filepath.Base(tmp)
+	if !strings.HasPrefix(base, ".") {
+		t.Errorf("TempPath base %q should start with '.'", base)
+	}
+	if !strings.HasSuffix(base, ".pixe-tmp") {
+		t.Errorf("TempPath base %q should end with '.pixe-tmp'", base)
+	}
+	if filepath.Dir(tmp) != filepath.Dir(dest) {
+		t.Errorf("TempPath dir %q != dest dir %q — must be same dir for atomic rename",
+			filepath.Dir(tmp), filepath.Dir(dest))
+	}
+}
+
 // --- Execute tests ---
 
-func TestExecute_copiesContent(t *testing.T) {
+func TestExecute_writesToTempFile(t *testing.T) {
 	src := t.TempDir()
 	dst := t.TempDir()
 
-	content := []byte("pixe copy engine test content")
+	content := []byte("pixe atomic copy test")
 	srcFile := writeSource(t, src, "photo.jpg", content)
 	destFile := filepath.Join(dst, "photo.jpg")
 
-	if err := Execute(srcFile, destFile); err != nil {
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	got, err := os.ReadFile(destFile)
+	// Temp file must exist at the expected path.
+	wantTmp := TempPath(destFile)
+	if tmpPath != wantTmp {
+		t.Errorf("Execute returned tmpPath %q, want %q", tmpPath, wantTmp)
+	}
+	if _, err := os.Stat(tmpPath); err != nil {
+		t.Errorf("temp file not found at %q: %v", tmpPath, err)
+	}
+
+	// Final destination must NOT exist yet.
+	if _, err := os.Stat(destFile); err == nil {
+		t.Errorf("final destination %q should not exist before Promote", destFile)
+	}
+}
+
+func TestExecute_tempFileContent(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	content := []byte("content integrity check")
+	srcFile := writeSource(t, src, "photo.jpg", content)
+	destFile := filepath.Join(dst, "photo.jpg")
+
+	tmpPath, err := Execute(srcFile, destFile)
 	if err != nil {
-		t.Fatalf("read dest: %v", err)
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got, err := os.ReadFile(tmpPath)
+	if err != nil {
+		t.Fatalf("read temp file: %v", err)
 	}
 	if !bytes.Equal(got, content) {
-		t.Errorf("destination content mismatch:\n  got  %q\n  want %q", got, content)
+		t.Errorf("temp file content mismatch:\n  got  %q\n  want %q", got, content)
 	}
 }
 
@@ -93,14 +180,15 @@ func TestExecute_createsParentDirectories(t *testing.T) {
 	content := []byte("nested dir test")
 	srcFile := writeSource(t, src, "photo.jpg", content)
 	// Destination is several levels deep — none of these directories exist yet.
-	destFile := filepath.Join(dst, "2021", "12", "photo.jpg")
+	destFile := filepath.Join(dst, "2021", "12-Dec", "photo.jpg")
 
-	if err := Execute(srcFile, destFile); err != nil {
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if _, err := os.Stat(destFile); err != nil {
-		t.Errorf("destination not found after Execute: %v", err)
+	if _, err := os.Stat(tmpPath); err != nil {
+		t.Errorf("temp file not found after Execute: %v", err)
 	}
 }
 
@@ -111,18 +199,17 @@ func TestExecute_setsPermissions(t *testing.T) {
 	srcFile := writeSource(t, src, "photo.jpg", []byte("perm test"))
 	destFile := filepath.Join(dst, "photo.jpg")
 
-	if err := Execute(srcFile, destFile); err != nil {
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	info, err := os.Stat(destFile)
+	info, err := os.Stat(tmpPath)
 	if err != nil {
-		t.Fatalf("stat dest: %v", err)
+		t.Fatalf("stat temp file: %v", err)
 	}
-	// Mask to permission bits only.
-	perm := info.Mode().Perm()
-	if perm != 0o644 {
-		t.Errorf("destination permissions = %o, want 0644", perm)
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("temp file permissions = %o, want 0644", perm)
 	}
 }
 
@@ -131,44 +218,43 @@ func TestExecute_preservesMtime(t *testing.T) {
 	dst := t.TempDir()
 
 	srcFile := writeSource(t, src, "photo.jpg", []byte("mtime test"))
-	// Set a known mtime on the source.
 	knownTime := time.Date(2021, 12, 25, 6, 22, 23, 0, time.UTC)
 	if err := os.Chtimes(srcFile, knownTime, knownTime); err != nil {
 		t.Fatalf("Chtimes: %v", err)
 	}
 
 	destFile := filepath.Join(dst, "photo.jpg")
-	if err := Execute(srcFile, destFile); err != nil {
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	info, err := os.Stat(destFile)
+	info, err := os.Stat(tmpPath)
 	if err != nil {
-		t.Fatalf("stat dest: %v", err)
+		t.Fatalf("stat temp file: %v", err)
 	}
-	// Allow 1-second tolerance for filesystem mtime precision.
 	diff := info.ModTime().UTC().Sub(knownTime)
 	if diff < -time.Second || diff > time.Second {
-		t.Errorf("destination mtime = %v, want ~%v (diff %v)", info.ModTime().UTC(), knownTime, diff)
+		t.Errorf("temp file mtime = %v, want ~%v (diff %v)", info.ModTime().UTC(), knownTime, diff)
 	}
 }
 
 func TestExecute_largeFile(t *testing.T) {
-	// Verify streaming works for a file larger than copyBufSize (32 KB).
 	src := t.TempDir()
 	dst := t.TempDir()
 
-	content := bytes.Repeat([]byte("abcdefghij"), 10_000) // 100 KB
+	content := bytes.Repeat([]byte("abcdefghij"), 10_000) // 100 KB > copyBufSize
 	srcFile := writeSource(t, src, "large.jpg", content)
 	destFile := filepath.Join(dst, "large.jpg")
 
-	if err := Execute(srcFile, destFile); err != nil {
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
 		t.Fatalf("Execute large file: %v", err)
 	}
 
-	got, err := os.ReadFile(destFile)
+	got, err := os.ReadFile(tmpPath)
 	if err != nil {
-		t.Fatalf("read dest: %v", err)
+		t.Fatalf("read temp file: %v", err)
 	}
 	if !bytes.Equal(got, content) {
 		t.Errorf("large file content mismatch (lengths: got %d, want %d)", len(got), len(content))
@@ -177,7 +263,7 @@ func TestExecute_largeFile(t *testing.T) {
 
 func TestExecute_missingSource(t *testing.T) {
 	dst := t.TempDir()
-	err := Execute("/nonexistent/path/photo.jpg", filepath.Join(dst, "photo.jpg"))
+	_, err := Execute("/nonexistent/path/photo.jpg", filepath.Join(dst, "photo.jpg"))
 	if err == nil {
 		t.Error("Execute with missing source should return error")
 	}
@@ -188,18 +274,12 @@ func TestExecute_missingSource(t *testing.T) {
 func TestVerify_success(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("verify success test")
-	destFile := writeSource(t, dir, "photo.jpg", content)
+	tmpFile := writeSource(t, dir, ".photo.jpg.pixe-tmp", content)
 
 	h := sha1Hasher(t)
-	handler := &stubHandler{}
+	expected := computeChecksum(t, content)
 
-	// Compute expected checksum.
-	expected, err := h.Sum(bytes.NewReader(content))
-	if err != nil {
-		t.Fatalf("compute expected: %v", err)
-	}
-
-	result := Verify(destFile, expected, handler, h)
+	result := Verify(tmpFile, expected, &stubHandler{}, h)
 	if !result.Success {
 		t.Errorf("Verify should succeed: %v", result.Error)
 	}
@@ -211,27 +291,20 @@ func TestVerify_success(t *testing.T) {
 	}
 }
 
-func TestVerify_mismatch_filePreserved(t *testing.T) {
+func TestVerify_mismatch(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("original content")
-	destFile := writeSource(t, dir, "photo.jpg", content)
+	tmpFile := writeSource(t, dir, ".photo.jpg.pixe-tmp", content)
 
 	h := sha1Hasher(t)
-	handler := &stubHandler{}
-
-	// Pass a wrong expected checksum.
 	wrongChecksum := "0000000000000000000000000000000000000000"
 
-	result := Verify(destFile, wrongChecksum, handler, h)
+	result := Verify(tmpFile, wrongChecksum, &stubHandler{}, h)
 	if result.Success {
 		t.Error("Verify should fail on checksum mismatch")
 	}
 	if result.Error == nil {
 		t.Error("Verify should return error on mismatch")
-	}
-	// Destination file must still exist (preserved for debugging).
-	if _, err := os.Stat(destFile); err != nil {
-		t.Errorf("destination file should be preserved on mismatch, got: %v", err)
 	}
 	// Actual checksum should be populated even on mismatch.
 	if result.Checksum == "" {
@@ -240,13 +313,15 @@ func TestVerify_mismatch_filePreserved(t *testing.T) {
 	if result.Checksum == wrongChecksum {
 		t.Error("Verify Checksum should be the actual hash, not the expected one")
 	}
+	// Verify itself does NOT delete the temp file — that is CleanupTempFile's job.
+	if _, err := os.Stat(tmpFile); err != nil {
+		t.Errorf("Verify should not delete temp file on mismatch: %v", err)
+	}
 }
 
-func TestVerify_missingDestination(t *testing.T) {
+func TestVerify_missingFile(t *testing.T) {
 	h := sha1Hasher(t)
-	handler := &stubHandler{}
-
-	result := Verify("/nonexistent/photo.jpg", "abc", handler, h)
+	result := Verify("/nonexistent/.photo.jpg.pixe-tmp", "abc", &stubHandler{}, h)
 	if result.Success {
 		t.Error("Verify on missing file should not succeed")
 	}
@@ -255,32 +330,163 @@ func TestVerify_missingDestination(t *testing.T) {
 	}
 }
 
-// TestExecuteAndVerify_roundtrip is an end-to-end test: copy a file then
-// verify it, asserting the full pipeline succeeds.
-func TestExecuteAndVerify_roundtrip(t *testing.T) {
+// --- Promote tests ---
+
+func TestPromote_atomicRename(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("promote test")
+	tmpFile := writeSource(t, dir, ".photo.jpg.pixe-tmp", content)
+	destFile := filepath.Join(dir, "photo.jpg")
+
+	if err := Promote(tmpFile, destFile); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Final destination must exist with correct content.
+	got, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("read dest after Promote: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("dest content after Promote mismatch")
+	}
+
+	// Temp file must no longer exist.
+	if _, err := os.Stat(tmpFile); err == nil {
+		t.Errorf("temp file %q should not exist after Promote", tmpFile)
+	}
+}
+
+func TestPromote_parentDirExists(t *testing.T) {
+	// Simulate the real case: Execute created the parent dir, temp file is there,
+	// Promote renames into the same dir.
+	dst := t.TempDir()
+	destDir := filepath.Join(dst, "2021", "12-Dec")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	destFile := filepath.Join(destDir, "20211225_062223_abc.jpg")
+	tmpFile := TempPath(destFile)
+
+	content := []byte("nested promote test")
+	if err := os.WriteFile(tmpFile, content, 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	if err := Promote(tmpFile, destFile); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	if _, err := os.Stat(destFile); err != nil {
+		t.Errorf("dest file not found after Promote: %v", err)
+	}
+}
+
+func TestPromote_missingTempFile(t *testing.T) {
+	dir := t.TempDir()
+	err := Promote(filepath.Join(dir, ".missing.pixe-tmp"), filepath.Join(dir, "dest.jpg"))
+	if err == nil {
+		t.Error("Promote with missing temp file should return error")
+	}
+}
+
+// --- CleanupTempFile tests ---
+
+func TestCleanupTempFile_removesFile(t *testing.T) {
+	dir := t.TempDir()
+	tmpFile := writeSource(t, dir, ".photo.jpg.pixe-tmp", []byte("cleanup test"))
+
+	CleanupTempFile(tmpFile)
+
+	if _, err := os.Stat(tmpFile); err == nil {
+		t.Errorf("temp file %q should have been removed by CleanupTempFile", tmpFile)
+	}
+}
+
+func TestCleanupTempFile_missingFile(t *testing.T) {
+	// CleanupTempFile must not panic or error on a missing file.
+	// (It swallows the error intentionally.)
+	CleanupTempFile("/nonexistent/.photo.jpg.pixe-tmp")
+}
+
+// --- Full atomic flow tests ---
+
+func TestAtomicFlow_success(t *testing.T) {
+	// Full flow: Execute → Verify (good checksum) → Promote → file at canonical path.
 	src := t.TempDir()
 	dst := t.TempDir()
 
-	content := []byte("end-to-end copy+verify test payload")
+	content := []byte("full atomic flow success")
 	srcFile := writeSource(t, src, "photo.jpg", content)
-	destFile := filepath.Join(dst, "2021", "12", "photo.jpg")
+	destFile := filepath.Join(dst, "2021", "12-Dec", "photo.jpg")
+	expected := computeChecksum(t, content)
 
-	// Step 1: copy.
-	if err := Execute(srcFile, destFile); err != nil {
+	// Step 1: Execute → temp file.
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	// Step 2: compute expected checksum from source.
-	h := sha1Hasher(t)
-	handler := &stubHandler{}
-	expected, err := h.Sum(bytes.NewReader(content))
-	if err != nil {
-		t.Fatalf("compute expected: %v", err)
+	// Step 2: Verify temp file.
+	result := Verify(tmpPath, expected, &stubHandler{}, sha1Hasher(t))
+	if !result.Success {
+		t.Fatalf("Verify: %v", result.Error)
 	}
 
-	// Step 3: verify.
-	result := Verify(destFile, expected, handler, h)
-	if !result.Success {
-		t.Fatalf("Verify after Execute failed: %v", result.Error)
+	// Step 3: Promote to canonical path.
+	if err := Promote(tmpPath, destFile); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Canonical path must exist with correct content.
+	got, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("read canonical dest: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("canonical dest content mismatch")
+	}
+
+	// Temp file must be gone.
+	if _, err := os.Stat(tmpPath); err == nil {
+		t.Errorf("temp file should not exist after Promote")
+	}
+}
+
+func TestAtomicFlow_mismatch_tempDeleted(t *testing.T) {
+	// Full flow: Execute → Verify (bad checksum) → CleanupTempFile → temp gone,
+	// canonical path never created.
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	content := []byte("full atomic flow mismatch")
+	srcFile := writeSource(t, src, "photo.jpg", content)
+	destFile := filepath.Join(dst, "photo.jpg")
+	wrongChecksum := "0000000000000000000000000000000000000000"
+
+	// Step 1: Execute → temp file.
+	tmpPath, err := Execute(srcFile, destFile)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Step 2: Verify with wrong checksum.
+	result := Verify(tmpPath, wrongChecksum, &stubHandler{}, sha1Hasher(t))
+	if result.Success {
+		t.Fatal("Verify should fail with wrong checksum")
+	}
+
+	// Step 3: CleanupTempFile.
+	CleanupTempFile(tmpPath)
+
+	// Temp file must be gone.
+	if _, err := os.Stat(tmpPath); err == nil {
+		t.Errorf("temp file should be deleted after CleanupTempFile")
+	}
+
+	// Canonical path must never have been created.
+	if _, err := os.Stat(destFile); err == nil {
+		t.Errorf("canonical dest %q should not exist after mismatch+cleanup", destFile)
 	}
 }

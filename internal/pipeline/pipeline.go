@@ -363,22 +363,35 @@ func processFile(
 		return nil, isDuplicate, nil
 	}
 
-	// --- Copy ---
-	if err := copypkg.Execute(df.Path, absDest); err != nil {
+	// --- Copy (atomic: write to temp file) ---
+	tmpPath, err := copypkg.Execute(df.Path, absDest)
+	if err != nil {
 		return nil, false, fmt.Errorf("copy: %w", err)
 	}
 	if db != nil {
+		// Record the intended final destination; the temp path is an
+		// implementation detail not tracked in the DB.
 		_ = db.UpdateFileStatus(fileID, "copied",
 			archivedb.WithDestination(absDest, relDest))
 	}
 
-	// --- Verify ---
-	vr := copypkg.Verify(absDest, checksum, df.Handler, opts.Hasher)
+	// --- Verify (hash the temp file) ---
+	vr := copypkg.Verify(tmpPath, checksum, df.Handler, opts.Hasher)
 	if !vr.Success {
+		copypkg.CleanupTempFile(tmpPath)
 		if db != nil {
 			_ = db.UpdateFileStatus(fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
 		}
 		return nil, false, fmt.Errorf("verify: %w", vr.Error)
+	}
+
+	// --- Promote (atomic rename temp → canonical path) ---
+	if err := copypkg.Promote(tmpPath, absDest); err != nil {
+		copypkg.CleanupTempFile(tmpPath)
+		if db != nil {
+			_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
+		}
+		return nil, false, fmt.Errorf("promote: %w", err)
 	}
 	verifiedAt := now()
 	if db != nil {

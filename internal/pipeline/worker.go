@@ -16,6 +16,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -479,8 +480,9 @@ func runWorker(ctx context.Context, id int,
 				continue
 			}
 
-			// --- Copy ---
-			if err := copypkg.Execute(item.df.Path, assign.absDest); err != nil {
+			// --- Copy (atomic: write to temp file) ---
+			tmpPath, err := copypkg.Execute(item.df.Path, assign.absDest)
+			if err != nil {
 				ferr := fmt.Errorf("copy: %w", err)
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
@@ -489,17 +491,45 @@ func runWorker(ctx context.Context, id int,
 				continue
 			}
 			if db != nil {
+				// Record the intended final destination; the temp path is an
+				// implementation detail not tracked in the DB.
 				_ = db.UpdateFileStatus(item.fileID, "copied",
 					archivedb.WithDestination(assign.absDest, assign.relDest))
 			}
 
-			// --- Verify ---
-			vr := copypkg.Verify(assign.absDest, checksum, item.df.Handler, opts.Hasher)
+			// --- Verify (hash the temp file) ---
+			vr := copypkg.Verify(tmpPath, checksum, item.df.Handler, opts.Hasher)
 			if !vr.Success {
+				copypkg.CleanupTempFile(tmpPath)
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
 				}
 				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: vr.Error}
+				continue
+			}
+
+			// --- Promote (atomic rename temp → canonical path) ---
+			if err := copypkg.Promote(tmpPath, assign.absDest); err != nil {
+				copypkg.CleanupTempFile(tmpPath)
+				// If the rename failed because the temp file no longer exists,
+				// another worker won the race to the same destination (same
+				// checksum, no-DB mode). Treat this as a duplicate rather than
+				// an error — the file is already at the canonical path.
+				if errors.Is(err, os.ErrNotExist) {
+					doneCh <- workerFinalResult{
+						df:          item.df,
+						fileID:      item.fileID,
+						checksum:    checksum,
+						relDest:     assign.relDest,
+						isDuplicate: true,
+					}
+					continue
+				}
+				ferr := fmt.Errorf("promote: %w", err)
+				if db != nil {
+					_ = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
+				}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr}
 				continue
 			}
 			verifiedAt := time.Now().UTC()
