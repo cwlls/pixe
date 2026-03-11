@@ -182,6 +182,16 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 	}
 }
 
+func TestHandler_MetadataSupport(t *testing.T) {
+	h := New()
+	got := h.MetadataSupport()
+	if got != domain.MetadataSidecar {
+		t.Errorf("MetadataSupport() = %v, want MetadataSidecar", got)
+	}
+}
+
+// TestHandler_WriteMetadataTags_noop verifies WriteMetadataTags is a no-op
+// retained for interface compliance. The pipeline no longer calls this directly.
 func TestHandler_WriteMetadataTags_noop(t *testing.T) {
 	dir := t.TempDir()
 	path := buildFakeHEIC(t, dir, "photo.heic")

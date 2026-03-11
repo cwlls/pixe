@@ -191,6 +191,14 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 	}
 }
 
+func TestHandler_MetadataSupport(t *testing.T) {
+	h := New()
+	got := h.MetadataSupport()
+	if got != domain.MetadataEmbed {
+		t.Errorf("MetadataSupport() = %v, want MetadataEmbed", got)
+	}
+}
+
 func TestHandler_WriteMetadataTags_noop_whenEmpty(t *testing.T) {
 	h := New()
 	dir := t.TempDir()

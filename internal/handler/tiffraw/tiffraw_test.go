@@ -26,7 +26,17 @@ import (
 	"github.com/cwlls/pixe-go/internal/domain" // for MetadataTags
 )
 
-// TestBase_WriteMetadataTags_noop verifies that WriteMetadataTags is a no-op.
+// TestBase_MetadataSupport verifies that tiffraw.Base declares MetadataSidecar.
+func TestBase_MetadataSupport(t *testing.T) {
+	b := &Base{}
+	got := b.MetadataSupport()
+	if got != domain.MetadataSidecar {
+		t.Errorf("MetadataSupport() = %v, want MetadataSidecar", got)
+	}
+}
+
+// TestBase_WriteMetadataTags_noop verifies that WriteMetadataTags is a no-op
+// retained for interface compliance. The pipeline no longer calls this directly.
 func TestBase_WriteMetadataTags_noop(t *testing.T) {
 	b := &Base{}
 	tags := domain.MetadataTags{Copyright: "test", CameraOwner: "test"}

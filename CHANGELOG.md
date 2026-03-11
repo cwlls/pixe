@@ -6,10 +6,7 @@
 
 ## [Unreleased] - In Development
 
-- **Features (In Progress)**:
-  - Handler metadata tests: `MetadataSupport()` tests added to all handler test files (Task 9 pending).
-  - Pipeline integration test: end-to-end test for sidecar written for RAW, embedded for JPEG (Task 12 pending).
-  - Full test suite validation: `make check && make test-all` (Task 13 pending).
+- No pending tasks. All work from v1.3.0 is complete and validated.
 
 ## [v1.3.0] - 2026-03-11
 
