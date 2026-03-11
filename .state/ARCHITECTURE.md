@@ -270,7 +270,7 @@ Additional ignore patterns are specified via CLI flag or config file, using stan
 **CLI flag:** `--ignore <glob>` (repeatable — each occurrence adds one pattern)
 
 ```bash
-pixe sort --source ./photos --dest ./archive --ignore "*.txt" --ignore ".DS_Store" --ignore "Thumbs.db"
+pixe sort --dest ./archive --ignore "*.txt" --ignore ".DS_Store" --ignore "Thumbs.db"
 ```
 
 **Config file (`.pixe.yaml`):**
@@ -436,15 +436,17 @@ By default, Pixe processes only the **top-level files** in `dirA`. Subdirectorie
 #### Default Behavior (non-recursive)
 
 ```bash
-pixe sort --source ./photos --dest ./archive
+pixe sort --dest ./archive                       # source defaults to cwd
+pixe sort --source ./photos --dest ./archive     # explicit source
 ```
 
-Only files directly inside `./photos/` are discovered. Subdirectories like `./photos/vacation/` are silently ignored.
+Only files directly inside the source directory are discovered. Subdirectories like `./photos/vacation/` are silently ignored.
 
 #### Recursive Behavior
 
 ```bash
-pixe sort --source ./photos --dest ./archive --recursive
+pixe sort --dest ./archive --recursive                    # source defaults to cwd
+pixe sort --source ./photos --dest ./archive --recursive  # explicit source
 ```
 
 All files in `./photos/` and all nested subdirectories (e.g., `./photos/vacation/IMG_0001.jpg`, `./photos/2024/trip/VID_0010.mp4`) are discovered and processed. The source directory structure has **no effect** on the destination structure — all files are organized into `dirB` by their capture date regardless of where they were found in the source tree.
@@ -463,10 +465,12 @@ When recursive mode is enabled, files are identified by their **relative path fr
 A common workflow is to first run Pixe non-recursively on a `dirA`, then later run it recursively on the same `dirA` to pick up files in subdirectories:
 
 ```bash
-# First run: processes only top-level files
+# First run: processes only top-level files (from cwd, or with explicit --source)
+pixe sort --dest ./archive
 pixe sort --source ./photos --dest ./archive
 
 # Later run: processes everything, skipping already-imported top-level files
+pixe sort --dest ./archive --recursive
 pixe sort --source ./photos --dest ./archive --recursive
 ```
 
@@ -801,20 +805,20 @@ Built with `spf13/cobra`. Configuration layered via `spf13/viper` (flags > confi
 ### 7.1 Commands
 
 ```
-pixe sort     --source <dirA> --dest <dirB> [options]
+pixe sort     [--source <dirA>] --dest <dirB> [options]
 pixe verify   --dir <dirB>
 pixe resume   --dir <dirB>
 pixe query    <subcommand> --dir <dirB> [options]
-pixe status   --source <dirA> [options]
+pixe status   [--source <dirA>] [options]
 pixe version
 ```
 
 #### `pixe sort`
-Primary operation. Discovers files in `dirA`, processes them through the pipeline, and writes organized output to `dirB`.
+Primary operation. Discovers files in `dirA`, processes them through the pipeline, and writes organized output to `dirB`. When `--source` is omitted, the current working directory is used as `dirA`.
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--source` | `-s` | (required) | Source directory (read-only) |
+| `--source` | `-s` | cwd | Source directory (read-only). Defaults to the current working directory; flag overrides. |
 | `--dest` | `-d` | (required) | Destination directory |
 | `--workers` | | auto | Number of concurrent workers |
 | `--algorithm` | | `sha1` | Hash algorithm (`sha1`, `sha256`, etc.) |
@@ -854,11 +858,11 @@ pixe v0.10.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)
 No flags. This command calls `fullVersion()` (package-private in `cmd`) and prints to stdout. The version variables are injected at build time via ldflags (see Section 3).
 
 #### `pixe status`
-Shows the sorting status of a source directory by comparing the files currently on disk against the ledger left by prior `pixe sort` runs. This is a **source-oriented** command — it answers "what in this folder still needs sorting?" without requiring access to any destination archive or database. See **Section 7.4** for full design details.
+Shows the sorting status of a source directory by comparing the files currently on disk against the ledger left by prior `pixe sort` runs. This is a **source-oriented** command — it answers "what in this folder still needs sorting?" without requiring access to any destination archive or database. When `--source` is omitted, the current working directory is inspected. See **Section 7.4** for full design details.
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--source` | `-s` | (required) | Source directory to inspect |
+| `--source` | `-s` | cwd | Source directory to inspect. Defaults to the current working directory; flag overrides. |
 | `--recursive` | `-r` | `false` | Recursively inspect subdirectories of `--source` |
 | `--ignore` | | (none) | Glob pattern for files to ignore. Repeatable. Merged with config file patterns. |
 | `--json` | | `false` | Emit output as JSON instead of human-readable table |
@@ -1231,7 +1235,7 @@ A shared output formatting helper (e.g., `queryOutput(results, summary, jsonFlag
 
 ### 7.4 Status Command
 
-`pixe status` is a **source-oriented, read-only** command that reports the sorting status of a source directory (`dirA`). It compares the files currently on disk against the JSONL ledger (`dirA/.pixe_ledger.json`) left by prior `pixe sort` runs, and produces a categorized listing of what has been sorted, what hasn't, and what Pixe can't handle.
+`pixe status` is a **source-oriented, read-only** command that reports the sorting status of a source directory (`dirA`). When `--source` is omitted, it defaults to the current working directory — the most natural invocation is simply `pixe status` from within a folder of photos. It compares the files currently on disk against the JSONL ledger (`dirA/.pixe_ledger.json`) left by prior `pixe sort` runs, and produces a categorized listing of what has been sorted, what hasn't, and what Pixe can't handle.
 
 #### 7.4.1 Core Concept: Ledger-Only, No Database Required
 
@@ -1409,7 +1413,7 @@ cmd/
 
 The command logic is self-contained in a single file. It:
 
-1. Reads flags from Viper (`source`, `recursive`, `ignore`, `json`).
+1. Reads flags from Viper (`source`, `recursive`, `ignore`, `json`). If `source` is empty, defaults to the current working directory (`os.Getwd()`).
 2. Builds the handler registry and ignore matcher.
 3. Calls `discovery.Walk()` to discover files on disk.
 4. Calls `manifest.LoadLedger()` to load the ledger.
