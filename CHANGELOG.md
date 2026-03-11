@@ -4,6 +4,25 @@
 
 ---
 
+## [1.7.0] - 2026-03-11
+
+- **Features**:
+  - `pixe clean` command: maintenance subcommand for archive hygiene with three responsibilities:
+    - **Orphaned temp file cleanup** — Scans the destination archive (dirB) for `.pixe-tmp` files left behind by interrupted sort runs and removes them.
+    - **Orphaned XMP sidecar cleanup** — Detects Pixe-generated `.xmp` sidecar files whose corresponding media file no longer exists (regex-gated to `^\d{8}_\d{6}_[0-9a-f]+\..+\.xmp$` to avoid removing user-created XMP files).
+    - **Database compaction** — Runs `VACUUM` on the archive SQLite database to reclaim space from long-lived archives with many runs. Includes an active-run safety guard that refuses to vacuum if a sort is currently in progress.
+  - Flags: `--dir, -d` (required), `--db-path` (explicit database path), `--dry-run` (preview without modifying), `--temp-only` (skip database compaction), `--vacuum-only` (skip file scanning). `--temp-only` and `--vacuum-only` are mutually exclusive.
+
+- **Files Added**:
+  - `cmd/clean.go` — Full Cobra command implementation
+  - `cmd/clean_test.go` — 13 unit tests
+  - `internal/integration/clean_test.go` — 4 integration tests
+
+- **Files Modified**:
+  - `internal/archivedb/queries.go` — Added `Vacuum()` and `HasActiveRuns()` methods
+  - `internal/archivedb/archivedb_test.go` — 6 unit tests for new DB methods
+  - `.state/ARCHITECTURE.md` — Section 7.5 design spec added
+
 ## [v1.6.2] - 2026-03-11
 
 - **Improvements**:

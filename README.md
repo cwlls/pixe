@@ -239,6 +239,28 @@ UNRECOGNIZED (2 files)
 
 Exit code `0` always on success (unsorted files are not an error condition).
 
+### `pixe clean`
+
+Perform maintenance on an archive: remove orphaned temp files, clean up orphaned XMP sidecars, and optionally compact the database.
+
+```bash
+pixe clean --dir /path/to/archive [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-d, --dir` | Destination archive directory to clean (required) |
+| `--db-path` | Explicit path to the SQLite archive database |
+| `--dry-run` | Preview what would be cleaned without modifying anything |
+| `--temp-only` | Only clean orphaned files, skip database compaction |
+| `--vacuum-only` | Only compact the database, skip file scanning |
+
+**What it cleans:**
+
+- **Orphaned temp files** — `.pixe-tmp` files left behind by interrupted sort runs
+- **Orphaned XMP sidecars** — Pixe-generated `.xmp` files whose corresponding media file no longer exists (regex-gated to avoid removing user-created XMP files)
+- **Database compaction** — Runs `VACUUM` to reclaim space from long-lived archives (skipped if a sort is currently in progress)
+
 ## Configuration File
 
 Pixe reads configuration from `.pixe.yaml` in the current directory, home directory, or `$XDG_CONFIG_HOME/pixe`. Configuration is merged with CLI flags — CLI flags take precedence.
