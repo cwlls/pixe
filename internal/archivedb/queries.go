@@ -52,6 +52,22 @@ type InventoryEntry struct {
 	CaptureDate *time.Time
 }
 
+// ArchiveStats holds aggregate statistics for the entire archive database.
+// Used to populate summary lines in pixe query output.
+type ArchiveStats struct {
+	TotalFiles      int
+	Complete        int        // complete AND is_duplicate = 0
+	Duplicates      int        // is_duplicate = 1
+	Failed          int        // status = 'failed'
+	Mismatches      int        // status = 'mismatch'
+	TagFailed       int        // status = 'tag_failed'
+	Skipped         int        // status = 'skipped'
+	TotalSize       int64      // SUM(file_size) across all files
+	RunCount        int        // total rows in runs table
+	EarliestCapture *time.Time // MIN(capture_date) across all files
+	LatestCapture   *time.Time // MAX(capture_date) across all files
+}
+
 // ListRuns returns all runs ordered by started_at descending, with file counts.
 func (db *DB) ListRuns() ([]*RunSummary, error) {
 	const q = `
@@ -278,6 +294,117 @@ func (db *DB) ArchiveInventory() ([]*InventoryEntry, error) {
 		return nil, fmt.Errorf("archivedb: archive inventory iterate: %w", err)
 	}
 	return entries, nil
+}
+
+// AllSkipped returns all files with status "skipped" across all runs.
+// Results are ordered by insertion order (id ASC).
+func (db *DB) AllSkipped() ([]*FileRecord, error) {
+	const q = `
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		       status, is_duplicate, capture_date, file_size,
+		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
+		       skip_reason
+		FROM files
+		WHERE status = 'skipped'
+		ORDER BY id`
+
+	rows, err := db.conn.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: all skipped: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanFileRows(rows)
+}
+
+// GetRunByPrefix returns all runs whose ID starts with the given prefix,
+// ordered by started_at descending. The caller is responsible for handling
+// the ambiguous-prefix case (len > 1) and the not-found case (len == 0).
+func (db *DB) GetRunByPrefix(prefix string) ([]*Run, error) {
+	const q = `
+		SELECT id, pixe_version, source, destination, algorithm, workers,
+		       recursive, started_at, finished_at, status
+		FROM runs
+		WHERE id LIKE ?
+		ORDER BY started_at DESC`
+
+	rows, err := db.conn.Query(q, prefix+"%")
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: get run by prefix: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var runs []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			runs = append(runs, r)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("archivedb: get run by prefix iterate: %w", err)
+	}
+	return runs, nil
+}
+
+// ArchiveStats returns aggregate statistics for the entire archive database.
+// It executes two queries: one for file-level aggregates and one for the run count.
+func (db *DB) ArchiveStats() (*ArchiveStats, error) {
+	const fileQ = `
+		SELECT
+		    COUNT(*),
+		    COALESCE(SUM(CASE WHEN status = 'complete' AND is_duplicate = 0 THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN status = 'mismatch' THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN status = 'tag_failed' THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0),
+		    COALESCE(SUM(file_size), 0),
+		    MIN(capture_date),
+		    MAX(capture_date)
+		FROM files`
+
+	var s ArchiveStats
+	var earliestStr, latestStr sql.NullString
+
+	if err := db.conn.QueryRow(fileQ).Scan(
+		&s.TotalFiles,
+		&s.Complete,
+		&s.Duplicates,
+		&s.Failed,
+		&s.Mismatches,
+		&s.TagFailed,
+		&s.Skipped,
+		&s.TotalSize,
+		&earliestStr,
+		&latestStr,
+	); err != nil {
+		return nil, fmt.Errorf("archivedb: archive stats file query: %w", err)
+	}
+
+	if earliestStr.Valid && earliestStr.String != "" {
+		t, err := time.Parse(time.RFC3339, earliestStr.String)
+		if err != nil {
+			return nil, fmt.Errorf("archivedb: archive stats parse earliest_capture: %w", err)
+		}
+		s.EarliestCapture = &t
+	}
+	if latestStr.Valid && latestStr.String != "" {
+		t, err := time.Parse(time.RFC3339, latestStr.String)
+		if err != nil {
+			return nil, fmt.Errorf("archivedb: archive stats parse latest_capture: %w", err)
+		}
+		s.LatestCapture = &t
+	}
+
+	if err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&s.RunCount); err != nil {
+		return nil, fmt.Errorf("archivedb: archive stats run count: %w", err)
+	}
+
+	return &s, nil
 }
 
 // CheckSourceProcessed returns true if a file with the given absolute source

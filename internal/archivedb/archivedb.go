@@ -71,6 +71,35 @@ func Open(path string) (*DB, error) {
 	return db, nil
 }
 
+// OpenReadOnly opens an existing archive database at the given path in
+// read-only mode. It does not create the file, create parent directories,
+// or apply schema migrations — the database must already exist.
+//
+// Use OpenReadOnly for commands that only query the database (e.g. pixe query).
+// The ?mode=ro DSN parameter enforces read-only access at the driver level so
+// that a bug in a query command cannot accidentally mutate the archive.
+func OpenReadOnly(path string) (*DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("archivedb: database not found: %s", path)
+	}
+
+	conn, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: open database read-only: %w", err)
+	}
+
+	conn.SetMaxOpenConns(1)
+
+	db := &DB{conn: conn, path: path}
+
+	if err := db.applyPragmas(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return db, nil
+}
+
 // Close closes the database connection.
 func (db *DB) Close() error {
 	return db.conn.Close()

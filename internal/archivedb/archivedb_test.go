@@ -1825,6 +1825,401 @@ func TestConcurrentReaders(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// OpenReadOnly tests (Task 1)
+// ---------------------------------------------------------------------------
+
+// TestOpenReadOnly_notFound verifies that OpenReadOnly returns an error
+// containing "database not found" when the path does not exist.
+func TestOpenReadOnly_notFound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nonexistent.db")
+	_, err := OpenReadOnly(path)
+	if err == nil {
+		t.Fatal("OpenReadOnly returned nil error, want error")
+	}
+	if !containsStr(err.Error(), "database not found") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "database not found")
+	}
+}
+
+// TestOpenReadOnly_success verifies that OpenReadOnly can open an existing
+// database and that read queries succeed.
+func TestOpenReadOnly_success(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "readonly.db")
+
+	// Create and populate the database using the normal read-write Open.
+	rw, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	r := makeTestRun("ro-run-1")
+	if err := rw.InsertRun(r); err != nil {
+		t.Fatalf("InsertRun: %v", err)
+	}
+	_ = rw.Close()
+
+	// Open read-only and verify reads work.
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+
+	summaries, err := ro.ListRuns()
+	if err != nil {
+		t.Fatalf("ListRuns on read-only DB: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Errorf("ListRuns returned %d summaries, want 1", len(summaries))
+	}
+	if summaries[0].ID != "ro-run-1" {
+		t.Errorf("summaries[0].ID = %q, want %q", summaries[0].ID, "ro-run-1")
+	}
+}
+
+// TestOpenReadOnly_rejectsWrites verifies that write operations fail on a
+// read-only connection.
+func TestOpenReadOnly_rejectsWrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "readonly_write.db")
+
+	// Create the database first.
+	rw, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	_ = rw.Close()
+
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { _ = ro.Close() })
+
+	// Attempt a write — must fail.
+	err = ro.InsertRun(makeTestRun("should-fail"))
+	if err == nil {
+		t.Error("InsertRun on read-only DB returned nil error, want error")
+	}
+}
+
+// containsStr is a test helper that checks whether s contains substr.
+func containsStr(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr ||
+		func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}())
+}
+
+// ---------------------------------------------------------------------------
+// AllSkipped, GetRunByPrefix, ArchiveStats tests (Task 1)
+// ---------------------------------------------------------------------------
+
+// TestAllSkipped verifies that only status='skipped' files are returned.
+func TestAllSkipped(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "skip-run")
+
+	// Insert 2 skipped files and 1 complete file.
+	for i, src := range []string{"/src/skip1.txt", "/src/skip2.aae"} {
+		id, err := db.InsertFile(&FileRecord{RunID: "skip-run", SourcePath: src})
+		if err != nil {
+			t.Fatalf("InsertFile skip%d: %v", i, err)
+		}
+		reason := "unsupported format: .txt"
+		if i == 1 {
+			reason = "unsupported format: .aae"
+		}
+		if err := db.UpdateFileStatus(id, "skipped", WithSkipReason(reason)); err != nil {
+			t.Fatalf("UpdateFileStatus skipped%d: %v", i, err)
+		}
+	}
+	// Insert a complete file that must NOT appear in AllSkipped.
+	completeID, err := db.InsertFile(&FileRecord{RunID: "skip-run", SourcePath: "/src/ok.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile complete: %v", err)
+	}
+	completeFile(t, db, completeID, "cksum-ok", "2026/01-Jan/ok.jpg", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	skipped, err := db.AllSkipped()
+	if err != nil {
+		t.Fatalf("AllSkipped: %v", err)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("AllSkipped returned %d files, want 2", len(skipped))
+	}
+	for _, f := range skipped {
+		if f.Status != "skipped" {
+			t.Errorf("file %s: Status = %q, want %q", f.SourcePath, f.Status, "skipped")
+		}
+		if f.SkipReason == nil {
+			t.Errorf("file %s: SkipReason is nil, want non-nil", f.SourcePath)
+		}
+	}
+}
+
+// TestAllSkipped_empty verifies that AllSkipped returns nil (not an error) when
+// there are no skipped files.
+func TestAllSkipped_empty(t *testing.T) {
+	db := openTestDB(t)
+	skipped, err := db.AllSkipped()
+	if err != nil {
+		t.Fatalf("AllSkipped: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("AllSkipped returned %d files, want 0", len(skipped))
+	}
+}
+
+// TestGetRunByPrefix_unique verifies that a prefix matching exactly one run
+// returns that run.
+func TestGetRunByPrefix_unique(t *testing.T) {
+	db := openTestDB(t)
+
+	runs := []*Run{
+		{ID: "aaaa1111-0000-0000-0000-000000000001", PixeVersion: "1.0.0", Source: "/src/a", Destination: "/dst", Algorithm: "sha1", Workers: 1, StartedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)},
+		{ID: "aaaa2222-0000-0000-0000-000000000002", PixeVersion: "1.0.0", Source: "/src/b", Destination: "/dst", Algorithm: "sha1", Workers: 1, StartedAt: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)},
+		{ID: "bbbb3333-0000-0000-0000-000000000003", PixeVersion: "1.0.0", Source: "/src/c", Destination: "/dst", Algorithm: "sha1", Workers: 1, StartedAt: time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)},
+	}
+	for _, r := range runs {
+		if err := db.InsertRun(r); err != nil {
+			t.Fatalf("InsertRun %s: %v", r.ID, err)
+		}
+	}
+
+	// Unique prefix — matches only aaaa1111.
+	got, err := db.GetRunByPrefix("aaaa1111")
+	if err != nil {
+		t.Fatalf("GetRunByPrefix: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("GetRunByPrefix returned %d runs, want 1", len(got))
+	}
+	if got[0].ID != "aaaa1111-0000-0000-0000-000000000001" {
+		t.Errorf("ID = %q, want %q", got[0].ID, "aaaa1111-0000-0000-0000-000000000001")
+	}
+}
+
+// TestGetRunByPrefix_ambiguous verifies that a prefix matching multiple runs
+// returns all of them.
+func TestGetRunByPrefix_ambiguous(t *testing.T) {
+	db := openTestDB(t)
+
+	runs := []*Run{
+		{ID: "aaaa1111-0000-0000-0000-000000000001", PixeVersion: "1.0.0", Source: "/src/a", Destination: "/dst", Algorithm: "sha1", Workers: 1, StartedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)},
+		{ID: "aaaa2222-0000-0000-0000-000000000002", PixeVersion: "1.0.0", Source: "/src/b", Destination: "/dst", Algorithm: "sha1", Workers: 1, StartedAt: time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)},
+		{ID: "bbbb3333-0000-0000-0000-000000000003", PixeVersion: "1.0.0", Source: "/src/c", Destination: "/dst", Algorithm: "sha1", Workers: 1, StartedAt: time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)},
+	}
+	for _, r := range runs {
+		if err := db.InsertRun(r); err != nil {
+			t.Fatalf("InsertRun %s: %v", r.ID, err)
+		}
+	}
+
+	// Ambiguous prefix — matches aaaa1111 and aaaa2222.
+	got, err := db.GetRunByPrefix("aaaa")
+	if err != nil {
+		t.Fatalf("GetRunByPrefix: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("GetRunByPrefix returned %d runs, want 2", len(got))
+	}
+}
+
+// TestGetRunByPrefix_noMatch verifies that an unmatched prefix returns an
+// empty slice (not an error).
+func TestGetRunByPrefix_noMatch(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "aaaa1111-0000-0000-0000-000000000001")
+
+	got, err := db.GetRunByPrefix("cccc")
+	if err != nil {
+		t.Fatalf("GetRunByPrefix: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("GetRunByPrefix returned %d runs, want 0", len(got))
+	}
+}
+
+// TestArchiveStats verifies aggregate counts, size, and date range.
+func TestArchiveStats(t *testing.T) {
+	db := openTestDB(t)
+
+	// Run 1.
+	r1 := &Run{
+		ID: "stats-run-1", PixeVersion: "1.0.0", Source: "/src/a",
+		Destination: "/dst", Algorithm: "sha1", Workers: 1,
+		StartedAt: time.Now().UTC(),
+	}
+	if err := db.InsertRun(r1); err != nil {
+		t.Fatalf("InsertRun r1: %v", err)
+	}
+	// Run 2.
+	r2 := &Run{
+		ID: "stats-run-2", PixeVersion: "1.0.0", Source: "/src/b",
+		Destination: "/dst", Algorithm: "sha1", Workers: 1,
+		StartedAt: time.Now().UTC(),
+	}
+	if err := db.InsertRun(r2); err != nil {
+		t.Fatalf("InsertRun r2: %v", err)
+	}
+
+	captureEarly := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	captureLate := time.Date(2025, 6, 20, 0, 0, 0, 0, time.UTC)
+
+	// 3 complete non-duplicate files (file_size=1000 each).
+	for i := 0; i < 3; i++ {
+		id, err := db.InsertFile(&FileRecord{RunID: "stats-run-1", SourcePath: fmt.Sprintf("/src/a/photo%d.jpg", i)})
+		if err != nil {
+			t.Fatalf("InsertFile complete%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "extracted", WithCaptureDate(captureEarly), WithFileSize(1000)); err != nil {
+			t.Fatalf("UpdateFileStatus extracted%d: %v", i, err)
+		}
+		checksum := fmt.Sprintf("cksum-stats-%d", i)
+		destRel := fmt.Sprintf("2024/01-Jan/photo%d.jpg", i)
+		if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+			t.Fatalf("UpdateFileStatus hashed%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "copied", WithDestination("/dst/"+destRel, destRel)); err != nil {
+			t.Fatalf("UpdateFileStatus copied%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "verified"); err != nil {
+			t.Fatalf("UpdateFileStatus verified%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "complete"); err != nil {
+			t.Fatalf("UpdateFileStatus complete%d: %v", i, err)
+		}
+	}
+
+	// 2 duplicate files (file_size=500 each).
+	for i := 0; i < 2; i++ {
+		id, err := db.InsertFile(&FileRecord{RunID: "stats-run-1", SourcePath: fmt.Sprintf("/src/a/dup%d.jpg", i)})
+		if err != nil {
+			t.Fatalf("InsertFile dup%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "extracted", WithCaptureDate(captureLate), WithFileSize(500)); err != nil {
+			t.Fatalf("UpdateFileStatus dup extracted%d: %v", i, err)
+		}
+		if err := db.UpdateFileStatus(id, "complete",
+			WithChecksum("cksum-stats-0"),
+			WithDestination("/dst/duplicates/dup.jpg", "duplicates/dup.jpg"),
+			WithIsDuplicate(true),
+		); err != nil {
+			t.Fatalf("UpdateFileStatus dup complete%d: %v", i, err)
+		}
+	}
+
+	// 1 failed file (file_size=200).
+	failID, err := db.InsertFile(&FileRecord{RunID: "stats-run-2", SourcePath: "/src/b/fail.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile fail: %v", err)
+	}
+	if err := db.UpdateFileStatus(failID, "extracted", WithFileSize(200)); err != nil {
+		t.Fatalf("UpdateFileStatus fail extracted: %v", err)
+	}
+	if err := db.UpdateFileStatus(failID, "failed", WithError("copy error")); err != nil {
+		t.Fatalf("UpdateFileStatus fail: %v", err)
+	}
+
+	// 1 mismatch file (file_size=300).
+	mmID, err := db.InsertFile(&FileRecord{RunID: "stats-run-2", SourcePath: "/src/b/mm.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile mismatch: %v", err)
+	}
+	if err := db.UpdateFileStatus(mmID, "extracted", WithFileSize(300)); err != nil {
+		t.Fatalf("UpdateFileStatus mm extracted: %v", err)
+	}
+	if err := db.UpdateFileStatus(mmID, "mismatch", WithError("hash mismatch")); err != nil {
+		t.Fatalf("UpdateFileStatus mismatch: %v", err)
+	}
+
+	// 1 skipped file (file_size=nil — not set, as skipped files are never extracted).
+	skipID, err := db.InsertFile(&FileRecord{RunID: "stats-run-2", SourcePath: "/src/b/notes.txt"})
+	if err != nil {
+		t.Fatalf("InsertFile skip: %v", err)
+	}
+	if err := db.UpdateFileStatus(skipID, "skipped", WithSkipReason("unsupported format: .txt")); err != nil {
+		t.Fatalf("UpdateFileStatus skip: %v", err)
+	}
+
+	stats, err := db.ArchiveStats()
+	if err != nil {
+		t.Fatalf("ArchiveStats: %v", err)
+	}
+
+	// Total: 3 complete + 2 duplicate + 1 failed + 1 mismatch + 1 skipped = 8.
+	if stats.TotalFiles != 8 {
+		t.Errorf("TotalFiles = %d, want 8", stats.TotalFiles)
+	}
+	if stats.Complete != 3 {
+		t.Errorf("Complete = %d, want 3", stats.Complete)
+	}
+	if stats.Duplicates != 2 {
+		t.Errorf("Duplicates = %d, want 2", stats.Duplicates)
+	}
+	if stats.Failed != 1 {
+		t.Errorf("Failed = %d, want 1", stats.Failed)
+	}
+	if stats.Mismatches != 1 {
+		t.Errorf("Mismatches = %d, want 1", stats.Mismatches)
+	}
+	if stats.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1", stats.Skipped)
+	}
+	// TotalSize: 3×1000 + 2×500 + 1×200 + 1×300 = 3000+1000+200+300 = 4500.
+	if stats.TotalSize != 4500 {
+		t.Errorf("TotalSize = %d, want 4500", stats.TotalSize)
+	}
+	if stats.RunCount != 2 {
+		t.Errorf("RunCount = %d, want 2", stats.RunCount)
+	}
+	// EarliestCapture should be captureEarly (only complete/dup files have capture_date set).
+	if stats.EarliestCapture == nil {
+		t.Fatal("EarliestCapture is nil, want non-nil")
+	}
+	if !stats.EarliestCapture.Equal(captureEarly) {
+		t.Errorf("EarliestCapture = %v, want %v", stats.EarliestCapture, captureEarly)
+	}
+	if stats.LatestCapture == nil {
+		t.Fatal("LatestCapture is nil, want non-nil")
+	}
+	if !stats.LatestCapture.Equal(captureLate) {
+		t.Errorf("LatestCapture = %v, want %v", stats.LatestCapture, captureLate)
+	}
+}
+
+// TestArchiveStats_empty verifies that ArchiveStats returns zero values and
+// nil date pointers when the database is empty.
+func TestArchiveStats_empty(t *testing.T) {
+	db := openTestDB(t)
+	stats, err := db.ArchiveStats()
+	if err != nil {
+		t.Fatalf("ArchiveStats: %v", err)
+	}
+	if stats.TotalFiles != 0 {
+		t.Errorf("TotalFiles = %d, want 0", stats.TotalFiles)
+	}
+	if stats.TotalSize != 0 {
+		t.Errorf("TotalSize = %d, want 0", stats.TotalSize)
+	}
+	if stats.RunCount != 0 {
+		t.Errorf("RunCount = %d, want 0", stats.RunCount)
+	}
+	if stats.EarliestCapture != nil {
+		t.Errorf("EarliestCapture = %v, want nil", stats.EarliestCapture)
+	}
+	if stats.LatestCapture != nil {
+		t.Errorf("LatestCapture = %v, want nil", stats.LatestCapture)
+	}
+}
+
 // TestBusyRetry verifies that write contention is handled gracefully with
 // PRAGMA busy_timeout. Two connections attempt writes; the second waits for
 // the first to commit before succeeding.
