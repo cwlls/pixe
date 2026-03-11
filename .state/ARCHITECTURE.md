@@ -204,10 +204,14 @@ pending → extracted → hashed → copied → verified → tagged → complete
 3. **Hashed** — Checksum computed over the media payload (data only, excluding metadata).
 4. **Copied** — File written to its destination path in `dirB`.
 5. **Verified** — Destination file re-read and checksum recomputed; matches the source hash.
-6. **Tagged** — Optional EXIF tags (Copyright, CameraOwner) injected into the destination copy.
+6. **Tagged** — Optional metadata persisted to the destination. The pipeline queries the handler's `MetadataSupport()` capability to determine the strategy:
+   - **`MetadataEmbed`** → Tags written directly into the destination file (e.g., JPEG EXIF).
+   - **`MetadataSidecar`** → XMP sidecar file written alongside the destination file (e.g., `*.arw.xmp`).
+   - **`MetadataNone`** → Tagging skipped entirely; stage advances directly to complete.
+   - If no tags are configured (`tags.IsEmpty()`), the stage is skipped regardless of capability.
 7. **Complete** — All operations successful. Recorded in ledger.
 
-Error states (`failed`, `mismatch`, `tag_failed`) halt processing for that file and flag it for user attention.
+Error states (`failed`, `mismatch`, `tag_failed`) halt processing for that file and flag it for user attention. A `tag_failed` status means the media file was successfully copied and verified, but metadata persistence (embedded or sidecar) failed. The file is still present in `dirB`.
 
 ### 4.3 Pipeline Output
 
@@ -333,16 +337,78 @@ Filesystem timestamps (`ModTime`, `CreationTime`) are explicitly **not used** �
 
 ### 4.8 Metadata Tagging (Optional)
 
-On copy to `dirB`, Pixe can inject select EXIF/metadata tags into the destination file. These are **never written to the source**.
+On copy to `dirB`, Pixe can inject select metadata tags. The **tagging strategy** depends on the file format's capabilities — some formats support safe embedded metadata writing, while others receive an XMP sidecar file instead. Tags are **never written to the source**.
 
 | Tag | CLI Flag | Template Support | Example |
 |---|---|---|---|
 | **Copyright** | `--copyright` | Yes — `{{.Year}}` expands to the file's capture year | `"Copyright {{.Year}} My Family, all rights reserved"` |
 | **CameraOwner** | `--camera-owner` | No — freetext string | `"Wells Family"` |
 
-- Both tags are optional. If omitted, no tagging occurs.
+- Both tags are optional. If omitted, no tagging occurs (no embedded writes, no sidecar files).
 - Tagging occurs **after** copy and verify — the checksum reflects the original data, not the tagged version.
-- Each filetype module defines how these tags are written for its format (EXIF for JPEG/HEIC, metadata atoms for MP4, etc.).
+
+#### 4.8.1 Hybrid Tagging Strategy
+
+Each `FileTypeHandler` declares its metadata capability via `MetadataSupport()` (see Section 6.1). The pipeline uses this to select the tagging strategy:
+
+| Capability | Strategy | Formats | Rationale |
+|---|---|---|---|
+| **`MetadataEmbed`** | Write tags directly into the destination file's native metadata structure | JPEG | Maximum portability — metadata travels inside the file and is visible to all consumer apps (Lightroom, Photos, etc.) |
+| **`MetadataSidecar`** | Write an XMP sidecar file alongside the destination file | HEIC, MP4/MOV, DNG, NEF, CR2, CR3, PEF, ARW | Avoids risky writes into proprietary or complex containers while still ensuring metadata is associated with the file |
+| **`MetadataNone`** | No tagging at all | (none currently) | Reserved for future formats where even sidecar association is meaningless |
+
+#### 4.8.2 XMP Sidecar Files
+
+When a handler declares `MetadataSidecar`, the pipeline writes a standards-compliant XMP sidecar file alongside the destination copy in `dirB`.
+
+**Naming convention (Adobe/Lightroom standard):**
+
+```
+<original_filename>.<original_ext>.xmp
+```
+
+Example: A file sorted to `2021/12-Dec/20211225_062223_7d97e98f...arw` produces a sidecar at `2021/12-Dec/20211225_062223_7d97e98f...arw.xmp`.
+
+This follows the Adobe convention where the sidecar name includes the full original extension, ensuring unambiguous association when multiple formats share the same stem (e.g., a `.dng` and `.jpg` shot pair).
+
+**XMP content:** The sidecar contains a minimal, valid XMP packet with the same two metadata fields currently supported:
+
+```xml
+<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+      xmlns:dc="http://purl.org/dc/elements/1.1/"
+      xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/"
+      xmlns:aux="http://ns.adobe.com/exif/1.0/aux/">
+      <dc:rights>
+        <rdf:Alt>
+          <rdf:li xml:lang="x-default">Copyright 2021 My Family, all rights reserved</rdf:li>
+        </rdf:Alt>
+      </dc:rights>
+      <xmpRights:Marked>True</xmpRights:Marked>
+      <aux:OwnerName>Wells Family</aux:OwnerName>
+    </rdf:Description>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>
+```
+
+**Key design points:**
+
+- **`dc:rights`** maps to the Copyright field (using `rdf:Alt` with `x-default` language tag per XMP spec).
+- **`xmpRights:Marked`** is set to `True` to indicate the file is rights-managed (standard practice when Copyright is present).
+- **`aux:OwnerName`** maps to the CameraOwner field (same EXIF `CameraOwnerName` 0xA430 semantic, expressed in the XMP `aux` namespace).
+- Fields are omitted from the XMP when their corresponding tag value is empty (e.g., if only `--copyright` is set, `aux:OwnerName` is absent).
+- The XMP packet uses the `<?xpacket?>` processing instructions for compatibility with Adobe tools.
+
+**Sidecar lifecycle:**
+
+- Sidecars are written to the **destination directory only** — never to `dirA` (preserving the "dirA is read-only" constraint).
+- Sidecars are **generated artifacts**, not copied files. They are not subject to the copy-then-verify integrity flow (no hash check).
+- Sidecar write failure is **non-fatal** (same as embedded tag failure): the pipeline logs a warning, sets the DB status to `tag_failed`, and continues. The media file itself is already safely copied and verified.
+- In **dry-run mode**, sidecar files are not written (same as embedded tags).
+- Sidecars for **duplicate files** are written alongside the duplicate copy in `duplicates/<run_timestamp>/...`, mirroring the media file's routing.
 
 ### 4.9 Recursive Source Processing
 
@@ -441,6 +507,23 @@ New file types are added by implementing a Go interface. The core engine treats 
 ### 6.1 Interface Definition (Conceptual)
 
 ```go
+// MetadataCapability declares how a handler supports metadata tagging.
+type MetadataCapability int
+
+const (
+    // MetadataNone indicates the format cannot receive metadata at all.
+    // The pipeline skips tagging entirely for this handler.
+    MetadataNone MetadataCapability = iota
+
+    // MetadataEmbed indicates the format supports safe in-file metadata writing.
+    // The pipeline calls WriteMetadataTags to inject tags directly into the file.
+    MetadataEmbed
+
+    // MetadataSidecar indicates the format cannot safely embed metadata.
+    // The pipeline writes an XMP sidecar file alongside the destination copy.
+    MetadataSidecar
+)
+
 type FileTypeHandler interface {
     // Detect returns true if this handler can process the given file.
     // Detection is magic-byte verified after initial extension-based assumption.
@@ -454,8 +537,14 @@ type FileTypeHandler interface {
     // excluding metadata. The core engine hashes this stream.
     HashableReader(filePath string) (io.Reader, error)
 
-    // WriteMetadataTags injects optional EXIF/metadata tags into the
-    // destination file. Called after copy and verify.
+    // MetadataSupport declares this handler's metadata tagging capability.
+    // The pipeline uses this to decide between embedded writes, XMP sidecar
+    // generation, or skipping tagging entirely. See Section 4.8.1.
+    MetadataSupport() MetadataCapability
+
+    // WriteMetadataTags injects metadata tags directly into the file.
+    // Only called when MetadataSupport() returns MetadataEmbed.
+    // Must be a no-op when tags.IsEmpty() is true.
     WriteMetadataTags(filePath string, tags MetadataTags) error
 
     // Extensions returns the lowercase file extensions this handler claims
@@ -467,6 +556,12 @@ type FileTypeHandler interface {
 }
 ```
 
+**Interface changes from prior design:**
+
+- **Added:** `MetadataSupport() MetadataCapability` — replaces the implicit "call `WriteMetadataTags` on everything and hope it does the right thing" pattern with an explicit capability query.
+- **Narrowed:** `WriteMetadataTags` is now only called for `MetadataEmbed` handlers. Handlers returning `MetadataSidecar` or `MetadataNone` no longer need to implement `WriteMetadataTags` as a no-op stub — the pipeline never calls it. However, the method remains on the interface for compile-time safety; sidecar/none handlers should still implement it as a no-op that returns nil.
+- **XMP sidecar writing** is handled by the pipeline (or a shared `xmp` package), not by individual handlers. The handler only declares its capability; the pipeline owns the sidecar generation logic.
+
 ### 6.2 Detection Strategy
 
 1. **Extension-based assumption**: File extension is matched against registered handlers for a fast initial classification.
@@ -475,17 +570,17 @@ type FileTypeHandler interface {
 
 ### 6.3 Filetype Modules
 
-| Module | Extensions | Date Source | Hashable Region | Tag Support |
-|---|---|---|---|---|
-| **JPEG** | `.jpg`, `.jpeg` | EXIF `DateTimeOriginal` / `CreateDate` | Full image data (pixel payload) | EXIF Copyright, CameraOwner |
-| **HEIC** | `.heic`, `.heif` | EXIF `DateTimeOriginal` / `CreateDate` | Image data payload | EXIF Copyright, CameraOwner |
-| **MP4** | `.mp4`, `.mov` | QuickTime `CreationDate` / `mvhd` atom | Collected keyframe data | Metadata atom Copyright, CameraOwner |
-| **DNG** | `.dng` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
-| **NEF** | `.nef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
-| **CR2** | `.cr2` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
-| **CR3** | `.cr3` | ISOBMFF container metadata (same approach as HEIC/MP4) | Embedded full-resolution JPEG preview | No (stub) |
-| **PEF** | `.pef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
-| **ARW** | `.arw` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | No (stub) |
+| Module | Extensions | Date Source | Hashable Region | `MetadataSupport()` | Tagging Strategy |
+|---|---|---|---|---|---|
+| **JPEG** | `.jpg`, `.jpeg` | EXIF `DateTimeOriginal` / `CreateDate` | Full image data (pixel payload) | `MetadataEmbed` | EXIF Copyright (IFD0), CameraOwnerName (ExifIFD 0xA430) written in-file |
+| **HEIC** | `.heic`, `.heif` | EXIF `DateTimeOriginal` / `CreateDate` | Image data payload | `MetadataSidecar` | XMP sidecar (`*.heic.xmp`) |
+| **MP4** | `.mp4`, `.mov` | QuickTime `CreationDate` / `mvhd` atom | Collected keyframe data | `MetadataSidecar` | XMP sidecar (`*.mp4.xmp`, `*.mov.xmp`) |
+| **DNG** | `.dng` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.dng.xmp`) |
+| **NEF** | `.nef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.nef.xmp`) |
+| **CR2** | `.cr2` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.cr2.xmp`) |
+| **CR3** | `.cr3` | ISOBMFF container metadata (same approach as HEIC/MP4) | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.cr3.xmp`) |
+| **PEF** | `.pef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.pef.xmp`) |
+| **ARW** | `.arw` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.arw.xmp`) |
 
 ### 6.4 RAW Handler Architecture
 
@@ -584,16 +679,27 @@ The full-resolution JPEG preview is typically stored in a secondary IFD (often I
 
 The embedded JPEG is located within the ISOBMFF container, typically in a `moov` → `trak` → `mdat` path or a dedicated preview box. The handler navigates the box structure to extract the JPEG data.
 
-#### 6.4.7 Metadata Write: No-Op Stub
+#### 6.4.7 Metadata Capability: XMP Sidecar
 
-All RAW handlers implement `WriteMetadataTags()` as a **no-op stub**, identical to the HEIC and MP4 approach. RAW files are archival originals — writing metadata into proprietary RAW containers risks corruption and offers little value since the destination copy is already organized and named by Pixe.
+All RAW handlers declare `MetadataSidecar` as their metadata capability. Writing metadata into proprietary RAW containers risks corruption of archival originals and is not reliably possible in pure Go. Instead, the pipeline writes an XMP sidecar file alongside the destination copy (see Section 4.8.2).
+
+**Shared base implementation (`tiffraw.Base`):**
 
 ```go
-func (h *Handler) WriteMetadataTags(filePath string, tags domain.MetadataTags) error {
-    // RAW metadata write not supported in pure Go.
+func (b *Base) MetadataSupport() domain.MetadataCapability {
+    return domain.MetadataSidecar
+}
+
+func (b *Base) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
+    // Never called — pipeline checks MetadataSupport() first.
+    // Retained as no-op for interface compliance.
     return nil
 }
 ```
+
+The CR3 handler (standalone, not using `tiffraw.Base`) implements the same pattern independently.
+
+**What changed:** Previously, all non-JPEG handlers had no-op `WriteMetadataTags` stubs and the pipeline would call them unconditionally, silently doing nothing. The database would record these files as "tagged" even though no metadata was written. With the new design, the pipeline checks `MetadataSupport()` and routes sidecar-capable handlers to XMP generation. The database status accurately reflects whether metadata was actually persisted.
 
 #### 6.4.8 Magic Byte Signatures
 
@@ -989,16 +1095,23 @@ The ledger is the **only file** Pixe writes to `dirA`.
 dirB (organized destination)
 ├── 2021/
 │   └── 12-Dec/
-│       └── 20211225_062223_7d97e98f...jpg
+│       ├── 20211225_062223_7d97e98f...jpg       ← JPEG: tags embedded in file
+│       ├── 20211225_071500_a3b4c5d6...arw       ← RAW: tags in sidecar
+│       └── 20211225_071500_a3b4c5d6...arw.xmp   ← XMP sidecar (Adobe convention)
 ├── 2022/
 │   ├── 02-Feb/
-│   │   └── 20220202_123101_447d3060...jpg
+│   │   ├── 20220202_123101_447d3060...jpg
+│   │   ├── 20220202_130000_e5f6a7b8...dng
+│   │   └── 20220202_130000_e5f6a7b8...dng.xmp
 │   └── 03-Mar/
-│       └── 20220316_232122_321c7d6f...jpg
+│       ├── 20220316_232122_321c7d6f...mp4
+│       └── 20220316_232122_321c7d6f...mp4.xmp
 ├── duplicates/
 │   └── 20260306_103000/
 │       └── 2022/02-Feb/
-│           └── 20220202_123101_447d...jpg
+│           ├── 20220202_123101_447d...jpg
+│           ├── 20220202_130000_e5f6...nef
+│           └── 20220202_130000_e5f6...nef.xmp   ← sidecars follow dupes too
 └── .pixe/
     ├── pixe.db              ← SQLite database (if dirB is local)
     ├── pixe.db-wal          ← WAL file (transient, managed by SQLite)
@@ -1009,6 +1122,8 @@ dirB (organized destination)
 └── databases/
     └── archive-a1b2c3d4.db  ← database for a network-mounted dirB
 ```
+
+> **Note:** XMP sidecar files (`.xmp`) only appear when the user has configured `--copyright` and/or `--camera-owner`. If no metadata tags are configured, no sidecars are generated and the layout is identical to the pre-sidecar design.
 
 ---
 
@@ -1034,15 +1149,17 @@ The `resume` command now locates the database via the same discovery chain (flag
 
 These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
-1. **Sidecar files** (`.xmp`, `.aae`) — Should they follow their parent media file?
+1. **Source sidecar association** (`.aae`, existing `.xmp`) — When sorting from `dirA`, should Pixe detect and carry along sidecar files that already exist alongside source media files? Currently, only Pixe-generated XMP sidecars (written to `dirB` during tagging) are handled. Pre-existing sidecars in `dirA` are treated as unrecognized files.
 2. **CRW format** (legacy Canon pre-2004) — Excluded from current RAW support due to its obsolete proprietary format and lack of pure-Go library support. Could be revisited if demand arises.
-3. **RAW metadata write support** — Currently all RAW handlers use no-op stubs. Future work could add EXIF write support for formats where pure-Go libraries mature.
-4. **Web UI / TUI** — Progress visualization beyond CLI output.
-5. **Cloud storage targets** — `dirB` on S3, GCS, etc.
-6. **GPS/location-based organization** — Subdirectories by location in addition to date.
-7. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
-8. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
-9. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
-10. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
-11. **Directory-level ignore patterns** — In recursive mode, allow ignoring entire subdirectories (e.g., `--ignore ".git/"` to skip `.git` trees). Currently only files are subject to ignore matching.
-12. **`.pixeignore` file** — A `.gitignore`-style file in `dirA` that specifies ignore patterns, complementing the CLI flag and config file. Lower priority than the other configuration sources.
+3. **MP4/MOV embedded metadata writing** — MP4 currently uses `MetadataSidecar`. A future enhancement could implement `udta/©cpy` and `udta/©own` atom writing in pure Go and promote MP4 to `MetadataEmbed`, eliminating the sidecar for video files.
+4. **HEIC embedded metadata writing** — HEIC currently uses `MetadataSidecar`. If a reliable pure-Go HEIC EXIF writer becomes available, HEIC could be promoted to `MetadataEmbed`. The `MetadataCapability` enum makes this a one-line change per handler.
+5. **Web UI / TUI** — Progress visualization beyond CLI output.
+6. **Cloud storage targets** — `dirB` on S3, GCS, etc.
+7. **GPS/location-based organization** — Subdirectories by location in addition to date.
+8. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
+9. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
+10. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
+11. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
+12. **Directory-level ignore patterns** — In recursive mode, allow ignoring entire subdirectories (e.g., `--ignore ".git/"` to skip `.git` trees). Currently only files are subject to ignore matching.
+13. **`.pixeignore` file** — A `.gitignore`-style file in `dirA` that specifies ignore patterns, complementing the CLI flag and config file. Lower priority than the other configuration sources.
+14. **Extended XMP fields** — The current XMP sidecar writes only Copyright and CameraOwner. Future work could add additional fields (keywords, captions, GPS coordinates, star ratings) to the `MetadataTags` struct and XMP template.
