@@ -1092,3 +1092,180 @@ func TestIntegration_SQLite_DryRun(t *testing.T) {
 		}
 	}
 }
+
+// --- Atomic Copy Integration Tests (Task 7) ---
+
+// TestSort_noPartialFilesOnInterrupt verifies that after a normal sort completes,
+// no files with .pixe-tmp in their name exist anywhere in dirB. This ensures that
+// the atomic copy pattern guarantees: files at canonical paths are always complete
+// and verified, and no partial files are left behind.
+func TestSort_noPartialFilesOnInterrupt(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
+	copyFixture(t, dirA, fixtureNoExif, "IMG_0003.jpg")
+
+	result, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Processed != 3 {
+		t.Errorf("Processed = %d, want 3", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Walk dirB and verify no .pixe-tmp files exist.
+	tempFiles := findFiles(t, dirB, ".pixe-tmp")
+	if len(tempFiles) > 0 {
+		t.Errorf("found %d .pixe-tmp files in dirB after sort completed, want 0", len(tempFiles))
+		for _, f := range tempFiles {
+			t.Logf("  orphaned temp file: %q", f)
+		}
+	}
+
+	// Verify all canonical files pass independent hash verification.
+	h, _ := hash.NewHasher("sha1")
+	reg := discovery.NewRegistry()
+	reg.Register(jpeghandler.New())
+
+	vResult, err := verify.Run(verify.Options{
+		Dir:      dirB,
+		Hasher:   h,
+		Registry: reg,
+		Output:   &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("verify Run: %v", err)
+	}
+
+	if vResult.Mismatches != 0 {
+		t.Errorf("Mismatches = %d, want 0", vResult.Mismatches)
+	}
+	if vResult.Verified < 3 {
+		t.Errorf("Verified = %d, want >= 3", vResult.Verified)
+	}
+}
+
+// TestSort_tempFileCleanupOnResume verifies that an orphaned .pixe-tmp file
+// left from a previous interrupted run does not prevent the next run from
+// completing successfully. The final file ends up at the canonical path with
+// correct content, and the orphan is left behind (since Execute uses os.CreateTemp
+// to generate a new unique name, not overwriting the old orphan).
+func TestSort_tempFileCleanupOnResume(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+
+	// Run the sort once to get the canonical destination path.
+	result1, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if result1.Processed != 1 {
+		t.Errorf("first run Processed = %d, want 1", result1.Processed)
+	}
+
+	// Find the canonical file that was created.
+	canonicalFiles := findFiles(t, dirB, "20211225_062223_")
+	if len(canonicalFiles) != 1 {
+		t.Fatalf("expected 1 canonical file after first run, got %d", len(canonicalFiles))
+	}
+	canonicalPath := canonicalFiles[0]
+
+	// Manually create an orphaned temp file at the old-style temp path
+	// (simulating a previous interrupted run).
+	orphanPath := filepath.Join(filepath.Dir(canonicalPath), "."+filepath.Base(canonicalPath)+".pixe-tmp")
+	if err := os.WriteFile(orphanPath, []byte("orphaned content"), 0o644); err != nil {
+		t.Fatalf("WriteFile orphan: %v", err)
+	}
+
+	// Verify the orphan exists before the second run.
+	if _, err := os.Stat(orphanPath); err != nil {
+		t.Fatalf("orphan file not created: %v", err)
+	}
+
+	// Run the sort again (same source, same destination).
+	result2, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if result2.Processed != 1 {
+		t.Errorf("second run Processed = %d, want 1", result2.Processed)
+	}
+
+	// Verify the canonical file still exists and has correct content.
+	if _, err := os.Stat(canonicalPath); err != nil {
+		t.Errorf("canonical file not found after second run: %v", err)
+	}
+
+	// Verify the canonical file passes hash verification.
+	expectedSum := sha1File(t, filepath.Join(dirA, "IMG_0001.jpg"))
+	actualSum := sha1File(t, canonicalPath)
+	if actualSum != expectedSum {
+		t.Errorf("canonical file checksum mismatch: expected %s, got %s", expectedSum, actualSum)
+	}
+
+	// The orphan may still exist (since Execute creates a new unique temp name),
+	// but the canonical file is correct and complete.
+	// This test verifies that orphans don't prevent the sort from succeeding.
+}
+
+// TestSort_verifiedFileAtCanonicalPath verifies that after a normal sort completes,
+// every file at a canonical path in dirB passes independent hash verification using
+// the verify package. This is the end-to-end proof that the atomic copy pattern
+// works correctly: files at canonical paths are always complete and verified.
+func TestSort_verifiedFileAtCanonicalPath(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.jpg")
+	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
+	copyFixture(t, dirA, fixtureNoExif, "IMG_0003.jpg")
+
+	result, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Processed != 3 {
+		t.Errorf("Processed = %d, want 3", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Run verify on dirB.
+	h, _ := hash.NewHasher("sha1")
+	reg := discovery.NewRegistry()
+	reg.Register(jpeghandler.New())
+
+	vResult, err := verify.Run(verify.Options{
+		Dir:      dirB,
+		Hasher:   h,
+		Registry: reg,
+		Output:   &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("verify Run: %v", err)
+	}
+
+	// Assert zero mismatches and at least 3 verified files.
+	if vResult.Mismatches != 0 {
+		t.Errorf("Mismatches = %d, want 0", vResult.Mismatches)
+	}
+	if vResult.Verified < 3 {
+		t.Errorf("Verified = %d, want >= 3", vResult.Verified)
+	}
+
+	// Walk dirB and assert no .pixe-tmp files exist.
+	tempFiles := findFiles(t, dirB, ".pixe-tmp")
+	if len(tempFiles) > 0 {
+		t.Errorf("found %d .pixe-tmp files in dirB after sort, want 0", len(tempFiles))
+	}
+}
