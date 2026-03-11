@@ -61,6 +61,66 @@ func New(patterns []string) *Matcher {
 	return &Matcher{global: clean}
 }
 
+// MatchDir reports whether a directory should be skipped entirely.
+//
+// dirname is the base name of the directory (e.g. "node_modules").
+// relDirPath is the path relative to dirA (e.g. "src/node_modules").
+//
+// Two classes of patterns trigger a directory skip:
+//
+//  1. Trailing-slash patterns (e.g. "node_modules/", "**/cache/"): the slash is
+//     stripped and the remainder is matched against both dirname and relDirPath.
+//
+//  2. Implicit directory patterns ending with "/**" (e.g. "backups/**"): the
+//     "/**" suffix is stripped and the prefix is matched against relDirPath,
+//     allowing the entire subtree to be skipped rather than descending and
+//     ignoring each file individually.
+//
+// All other patterns are file-level and are ignored by MatchDir.
+func (m *Matcher) MatchDir(dirname, relDirPath string) bool {
+	slashName := filepath.ToSlash(dirname)
+	slashRel := filepath.ToSlash(relDirPath)
+
+	for _, pattern := range m.global {
+		if matchesDir(pattern, slashName, slashRel) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesDir is the per-pattern directory-match logic shared by MatchDir and
+// (in a later task) the scope-aware variant.
+func matchesDir(pattern, slashName, slashRel string) bool {
+	switch {
+	case strings.HasSuffix(pattern, "/"):
+		// Trailing-slash pattern: strip "/" and match the directory name/path.
+		p := pattern[:len(pattern)-1]
+		if matched, _ := doublestar.Match(p, slashName); matched {
+			return true
+		}
+		if slashRel != slashName {
+			if matched, _ := doublestar.Match(p, slashRel); matched {
+				return true
+			}
+		}
+
+	case strings.HasSuffix(pattern, "/**"):
+		// Implicit directory pattern: strip "/**" and match the directory path.
+		// e.g. "backups/**" → skip the "backups" directory itself.
+		p := pattern[:len(pattern)-3]
+		if matched, _ := doublestar.Match(p, slashName); matched {
+			return true
+		}
+		if slashRel != slashName {
+			if matched, _ := doublestar.Match(p, slashRel); matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Match reports whether the file should be ignored.
 //
 // filename is the base name of the file (e.g. "IMG_0001.jpg").

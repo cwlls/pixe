@@ -185,3 +185,92 @@ func TestMatcher_tableTests(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// MatchDir tests (Task 3)
+// ---------------------------------------------------------------------------
+
+// TestMatcher_matchDir_trailingSlash verifies that trailing-slash patterns
+// match directories by name and by relative path.
+func TestMatcher_matchDir_trailingSlash(t *testing.T) {
+	cases := []struct {
+		name       string
+		patterns   []string
+		dirname    string
+		relDirPath string
+		want       bool
+	}{
+		// Simple name match
+		{"node_modules/ by name", []string{"node_modules/"}, "node_modules", "node_modules", true},
+		// Nested: match by relDirPath
+		{"node_modules/ nested", []string{"node_modules/"}, "node_modules", "src/node_modules", true},
+		// Glob trailing-slash
+		{".git/ exact", []string{".git/"}, ".git", ".git", true},
+		// Doublestar trailing-slash
+		{"**/cache/ deep", []string{"**/cache/"}, "cache", "a/b/cache", true},
+		{"**/cache/ top", []string{"**/cache/"}, "cache", "cache", true},
+		// Nested path pattern
+		{"backups/old/ nested", []string{"backups/old/"}, "old", "backups/old", true},
+		// No match — different name
+		{"node_modules/ no match", []string{"node_modules/"}, "vendor", "vendor", false},
+		// No patterns
+		{"no patterns", nil, "node_modules", "node_modules", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(tc.patterns)
+			got := m.MatchDir(tc.dirname, tc.relDirPath)
+			if got != tc.want {
+				t.Errorf("MatchDir(%q, %q) = %v, want %v", tc.dirname, tc.relDirPath, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMatcher_matchDir_noSlashNoMatch verifies that file-level patterns (no
+// trailing slash, no "/**" suffix) do NOT trigger directory skipping.
+func TestMatcher_matchDir_noSlashNoMatch(t *testing.T) {
+	cases := []struct {
+		name     string
+		patterns []string
+		dirname  string
+	}{
+		{"plain glob", []string{"*.tmp"}, "scratch"},
+		{"exact name no slash", []string{"node_modules"}, "node_modules"},
+		{"doublestar file", []string{"**/*.txt"}, "docs"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(tc.patterns)
+			if m.MatchDir(tc.dirname, tc.dirname) {
+				t.Errorf("MatchDir(%q) should NOT match file-level pattern %q", tc.dirname, tc.patterns[0])
+			}
+		})
+	}
+}
+
+// TestMatcher_matchDir_implicitDoublestar verifies that "prefix/**" patterns
+// cause the prefix directory itself to be skipped.
+func TestMatcher_matchDir_implicitDoublestar(t *testing.T) {
+	cases := []struct {
+		name       string
+		patterns   []string
+		dirname    string
+		relDirPath string
+		want       bool
+	}{
+		{"backups/**", []string{"backups/**"}, "backups", "backups", true},
+		{"nested backups/**", []string{"backups/**"}, "backups", "root/backups", true},
+		{"no match vendor", []string{"backups/**"}, "vendor", "vendor", false},
+		{"deep **/cache/**", []string{"**/cache/**"}, "cache", "a/b/cache", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(tc.patterns)
+			got := m.MatchDir(tc.dirname, tc.relDirPath)
+			if got != tc.want {
+				t.Errorf("MatchDir(%q, %q) = %v, want %v", tc.dirname, tc.relDirPath, got, tc.want)
+			}
+		})
+	}
+}
