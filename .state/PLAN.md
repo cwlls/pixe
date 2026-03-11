@@ -4,16 +4,16 @@
 
 | #  | Task | Priority | Agent | Status | Depends On | Notes |
 |:---|:-----|:---------|:------|:-------|:-----------|:------|
-| 1  | Implement `findSensorDataIFD` in `tiffraw` package | high | @developer | [ ] pending | — | New IFD selection logic: sensor data vs JPEG preview |
-| 2  | Rewrite `tiffraw.Base.HashableReader` to use sensor data | high | @developer | [ ] pending | 1 | Replace `findLargestJPEGPreview` call with `findSensorDataIFD` |
-| 3  | Implement `findCR3SensorData` in `cr3` package | high | @developer | [ ] pending | — | ISOBMFF box navigation for raw sensor data track |
-| 4  | Rewrite `cr3.Handler.HashableReader` to use sensor data | high | @developer | [ ] pending | 3 | Replace `findCR3JpegPreview` call with `findCR3SensorData` |
-| 5  | Update `tiffraw` package doc comment | medium | @developer | [ ] pending | 2 | Change "Hashable region" section from JPEG preview to sensor data |
-| 6  | Update `cr3` package doc comment | medium | @developer | [ ] pending | 4 | Change "Hashable region" section from JPEG preview to sensor data |
-| 7  | Update `tiffraw_test.go` — sensor data extraction tests | high | @developer | [ ] pending | 2 | New test fixtures with sensor data IFDs; update existing tests |
-| 8  | Update `cr3_test.go` — sensor data extraction tests | high | @developer | [ ] pending | 4 | New test fixtures with sensor data in mdat; update existing tests |
-| 9  | Run full test suite and fix regressions | high | @tester | [ ] pending | 7, 8 | `make test-all` with `-race`; verify all handler tests pass |
-| 10 | Run lint and format checks | medium | @developer | [ ] pending | 9 | `make check` (fmt-check + vet + unit tests) |
+| 1  | Implement `findSensorDataIFD` in `tiffraw` package | high | @developer | [x] complete | — | New IFD selection logic: sensor data vs JPEG preview |
+| 2  | Rewrite `tiffraw.Base.HashableReader` to use sensor data | high | @developer | [x] complete | 1 | Replace `findLargestJPEGPreview` call with `findSensorDataIFD` |
+| 3  | Implement `findCR3SensorData` in `cr3` package | high | @developer | [x] complete | — | ISOBMFF box navigation for raw sensor data track |
+| 4  | Rewrite `cr3.Handler.HashableReader` to use sensor data | high | @developer | [x] complete | 3 | Replace `findCR3JpegPreview` call with `findCR3SensorData` |
+| 5  | Update `tiffraw` package doc comment | medium | @developer | [x] complete | 2 | Change "Hashable region" section from JPEG preview to sensor data |
+| 6  | Update `cr3` package doc comment | medium | @developer | [x] complete | 4 | Change "Hashable region" section from JPEG preview to sensor data |
+| 7  | Update `tiffraw_test.go` — sensor data extraction tests | high | @developer | [x] complete | 2 | New test fixtures with sensor data IFDs; update existing tests |
+| 8  | Update `cr3_test.go` — sensor data extraction tests | high | @developer | [x] complete | 4 | New test fixtures with sensor data in mdat; update existing tests |
+| 9  | Run full test suite and fix regressions | high | @tester | [x] complete | 7, 8 | `make test-all` with `-race`; verify all handler tests pass |
+| 10 | Run lint and format checks | medium | @developer | [x] complete | 9 | `make check` (fmt-check + vet + unit tests) |
 
 ---
 

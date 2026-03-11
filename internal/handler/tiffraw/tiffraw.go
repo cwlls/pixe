@@ -30,12 +30,13 @@
 //
 // Hashable region:
 //
-//	Extracts the embedded full-resolution JPEG preview image. TIFF-based
-//	RAW files store this in a secondary IFD (often IFD1 or a sub-IFD) with
-//	NewSubfileType = 0 (full-resolution) and Compression = 6 (JPEG).
-//	The handler navigates the IFD chain, locates the JPEG strip/tile
-//	offsets and byte counts, and returns a reader over that region.
-//	Falls back to full-file hash if the JPEG preview cannot be extracted.
+//	Extracts the raw sensor data payload. TIFF-based RAW files store sensor
+//	data in a primary IFD with a non-JPEG compression scheme (uncompressed,
+//	lossless JPEG compression=7, or vendor-specific). The handler navigates
+//	the IFD chain, distinguishes sensor data IFDs from JPEG preview IFDs by
+//	compression type and image dimensions, and returns a reader over the
+//	sensor data strips/tiles. Falls back to full-file hash if the sensor
+//	data cannot be extracted.
 //
 // Metadata write:
 //
@@ -61,16 +62,24 @@ var anselsAdams = time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
 
 const exifDateFormat = "2006:01:02 15:04:05"
 
-// TIFF IFD tag IDs used for JPEG preview extraction.
+// TIFF IFD tag IDs used for sensor data and preview extraction.
 const (
+	tagImageWidth      = 0x0100
+	tagImageLength     = 0x0101
 	tagNewSubfileType  = 0x00FE
 	tagCompression     = 0x0103
 	tagStripOffsets    = 0x0111
 	tagStripByteCounts = 0x0117
+	tagTileOffsets     = 0x0144
+	tagTileByteCounts  = 0x0145
 	tagSubIFDs         = 0x014A
 	tagJPEGOffset      = 0x0201 // JPEGInterchangeFormat (IFD1 thumbnail)
 	tagJPEGLength      = 0x0202 // JPEGInterchangeFormatLength
 )
+
+// compressionJPEG is the standard JPEG compression value used in preview IFDs.
+// Sensor data uses other values (1=uncompressed, 7=lossless JPEG, 34713=NEF, etc.).
+const compressionJPEG = 6
 
 // Base provides shared logic for TIFF-based RAW formats.
 // Per-format handlers embed this struct and supply their own
@@ -114,17 +123,19 @@ func (b *Base) ExtractDate(filePath string) (time.Time, error) {
 	return anselsAdams, nil
 }
 
-// HashableReader returns an io.ReadCloser over the embedded full-resolution
-// JPEG preview image. If the preview cannot be extracted, falls back to
-// returning a reader over the entire file.
+// HashableReader returns an io.ReadCloser over the raw sensor data payload.
+// It navigates the TIFF IFD chain to locate the sensor data IFD (identified
+// by non-JPEG compression and largest image dimensions), then returns a
+// reader that streams all sensor data strips/tiles in order.
+// Falls back to the full file if sensor data cannot be extracted.
 func (b *Base) HashableReader(filePath string) (io.ReadCloser, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("tiffraw: open %q: %w", filePath, err)
 	}
 
-	preview, err := findLargestJPEGPreview(f)
-	if err != nil || preview == nil {
+	sensor, err := findSensorData(f)
+	if err != nil || sensor == nil {
 		// Fallback: hash the full file.
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			_ = f.Close()
@@ -133,9 +144,8 @@ func (b *Base) HashableReader(filePath string) (io.ReadCloser, error) {
 		return f, nil
 	}
 
-	// Return a reader scoped to the JPEG preview region.
-	sr := io.NewSectionReader(f, preview.offset, preview.size)
-	return &sectionReadCloser{Reader: sr, Closer: f}, nil
+	// Return a reader that streams all sensor data strips/tiles in order.
+	return newMultiSectionReader(f, sensor.offsets, sensor.byteCounts), nil
 }
 
 // MetadataSupport declares that TIFF-based RAW formats use XMP sidecar
@@ -152,27 +162,68 @@ func (b *Base) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
 }
 
-// jpegPreview holds the offset and size of an embedded JPEG preview.
-type jpegPreview struct {
-	offset int64
-	size   int64
+// sensorRegion holds the file offsets and byte counts of the raw sensor
+// data strips or tiles within a TIFF-based RAW file.
+type sensorRegion struct {
+	offsets    []int64 // file offsets of each strip/tile
+	byteCounts []int64 // byte count of each strip/tile
+	totalSize  int64   // sum of all byteCounts
 }
 
-// sectionReadCloser wraps an io.Reader with a separate io.Closer,
-// allowing the caller to close the underlying file when done reading
-// a section of it.
-type sectionReadCloser struct {
-	Reader io.Reader
-	Closer io.Closer
+// multiSectionReader streams multiple non-contiguous file regions as a
+// single contiguous byte sequence. Used to read sensor data strips/tiles
+// that may be scattered across the file.
+type multiSectionReader struct {
+	file  *os.File
+	multi io.Reader
 }
 
-func (s *sectionReadCloser) Read(p []byte) (int, error) { return s.Reader.Read(p) }
-func (s *sectionReadCloser) Close() error               { return s.Closer.Close() }
+func newMultiSectionReader(f *os.File, offsets, byteCounts []int64) *multiSectionReader {
+	readers := make([]io.Reader, len(offsets))
+	for i := range offsets {
+		readers[i] = io.NewSectionReader(f, offsets[i], byteCounts[i])
+	}
+	return &multiSectionReader{
+		file:  f,
+		multi: io.MultiReader(readers...),
+	}
+}
 
-// findLargestJPEGPreview parses the TIFF IFD chain and returns the
-// offset and size of the largest embedded JPEG preview image.
-// Returns nil if no JPEG preview is found.
-func findLargestJPEGPreview(r io.ReadSeeker) (*jpegPreview, error) {
+func (m *multiSectionReader) Read(p []byte) (int, error) { return m.multi.Read(p) }
+func (m *multiSectionReader) Close() error               { return m.file.Close() }
+
+// ifdValues holds the parsed values of a single TIFF IFD that we care about.
+type ifdValues struct {
+	newSubfileType  uint32
+	compression     uint32
+	imageWidth      uint32
+	imageLength     uint32
+	stripOffsets    []uint32
+	stripByteCounts []uint32
+	tileOffsets     []uint32
+	tileByteCounts  []uint32
+	subIFDOffsets   []int64
+	jpegOffset      uint32
+	jpegLength      uint32
+}
+
+// ifdCandidate is a parsed IFD with its computed sensor data payload size.
+type ifdCandidate struct {
+	vals       *ifdValues
+	offsets    []int64
+	byteCounts []int64
+	totalSize  int64
+}
+
+// findSensorData parses the TIFF IFD chain and returns the raw sensor data
+// region. It selects the IFD that contains the primary sensor data by:
+//  1. Excluding IFDs with standard JPEG compression (compressionJPEG = 6).
+//  2. Preferring IFDs with NewSubfileType = 0 (full-resolution primary image).
+//  3. Among remaining candidates, selecting the one with the largest total
+//     data payload (most bytes = most likely to be sensor data).
+//
+// Returns nil if no suitable sensor data IFD is found.
+func findSensorData(r io.ReadSeeker) (*sensorRegion, error) {
 	// Read TIFF header (8 bytes).
 	header := make([]byte, 8)
 	if _, err := io.ReadFull(r, header); err != nil {
@@ -199,51 +250,139 @@ func findLargestJPEGPreview(r io.ReadSeeker) (*jpegPreview, error) {
 	// Offset to IFD0.
 	ifd0Offset := int64(order.Uint32(header[4:8]))
 
-	var largest *jpegPreview
+	var candidates []*ifdCandidate
 
-	// Walk the IFD chain: IFD0 → IFD1 → ...
-	offset := ifd0Offset
-	for offset != 0 {
-		preview, subIFDOffsets, nextOffset, err := parseIFD(r, offset, order)
+	// collectCandidate parses an IFD and, if it has strip/tile data and is
+	// not a standard JPEG preview, adds it to the candidates list.
+	var collectCandidate func(offset int64)
+	collectCandidate = func(offset int64) {
+		vals, subIFDOffsets, nextOffset, err := parseIFD(r, offset, order)
 		if err != nil {
-			break
+			return
 		}
 
-		if preview != nil && (largest == nil || preview.size > largest.size) {
-			largest = preview
+		// Build candidate from strip or tile data.
+		cand := buildCandidate(vals)
+		if cand != nil {
+			candidates = append(candidates, cand)
 		}
 
 		// Follow SubIFD pointers (tag 0x014A).
 		for _, subOffset := range subIFDOffsets {
-			subPreview, _, _, err := parseIFD(r, subOffset, order)
+			subVals, _, _, err := parseIFD(r, subOffset, order)
 			if err != nil {
 				continue
 			}
-			if subPreview != nil && (largest == nil || subPreview.size > largest.size) {
-				largest = subPreview
+			subCand := buildCandidate(subVals)
+			if subCand != nil {
+				candidates = append(candidates, subCand)
 			}
 		}
 
-		offset = nextOffset
+		// Walk to next IFD in chain.
+		if nextOffset != 0 {
+			collectCandidate(nextOffset)
+		}
 	}
 
-	return largest, nil
+	collectCandidate(ifd0Offset)
+
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Select the best candidate:
+	// 1. Prefer NewSubfileType == 0 (full-resolution primary image).
+	// 2. Among ties, prefer the largest total payload.
+	var best *ifdCandidate
+	for _, c := range candidates {
+		if best == nil {
+			best = c
+			continue
+		}
+		// Prefer primary image (NewSubfileType == 0) over reduced-resolution.
+		bestIsPrimary := best.vals.newSubfileType == 0
+		candIsPrimary := c.vals.newSubfileType == 0
+		if candIsPrimary && !bestIsPrimary {
+			best = c
+			continue
+		}
+		if bestIsPrimary && !candIsPrimary {
+			continue
+		}
+		// Both same subfile type — prefer larger payload.
+		if c.totalSize > best.totalSize {
+			best = c
+		}
+	}
+
+	if best == nil || best.totalSize == 0 {
+		return nil, nil
+	}
+
+	return &sensorRegion{
+		offsets:    best.offsets,
+		byteCounts: best.byteCounts,
+		totalSize:  best.totalSize,
+	}, nil
 }
 
-// ifdEntry holds the parsed values of a single TIFF IFD entry that we care about.
-type ifdValues struct {
-	newSubfileType  uint32
-	compression     uint32
-	stripOffsets    []uint32
-	stripByteCounts []uint32
-	subIFDOffsets   []int64
-	jpegOffset      uint32
-	jpegLength      uint32
+// buildCandidate constructs an ifdCandidate from parsed IFD values.
+// Returns nil if the IFD uses standard JPEG compression (it's a preview)
+// or has no strip/tile data.
+func buildCandidate(vals *ifdValues) *ifdCandidate {
+	// Exclude standard JPEG preview IFDs.
+	if vals.compression == compressionJPEG {
+		return nil
+	}
+
+	var offsets, byteCounts []int64
+	var totalSize int64
+
+	if len(vals.stripOffsets) > 0 && len(vals.stripByteCounts) > 0 {
+		// Strip-based layout.
+		n := len(vals.stripOffsets)
+		if len(vals.stripByteCounts) < n {
+			n = len(vals.stripByteCounts)
+		}
+		offsets = make([]int64, n)
+		byteCounts = make([]int64, n)
+		for i := 0; i < n; i++ {
+			offsets[i] = int64(vals.stripOffsets[i])
+			byteCounts[i] = int64(vals.stripByteCounts[i])
+			totalSize += byteCounts[i]
+		}
+	} else if len(vals.tileOffsets) > 0 && len(vals.tileByteCounts) > 0 {
+		// Tile-based layout.
+		n := len(vals.tileOffsets)
+		if len(vals.tileByteCounts) < n {
+			n = len(vals.tileByteCounts)
+		}
+		offsets = make([]int64, n)
+		byteCounts = make([]int64, n)
+		for i := 0; i < n; i++ {
+			offsets[i] = int64(vals.tileOffsets[i])
+			byteCounts[i] = int64(vals.tileByteCounts[i])
+			totalSize += byteCounts[i]
+		}
+	}
+
+	if totalSize == 0 {
+		return nil
+	}
+
+	return &ifdCandidate{
+		vals:       vals,
+		offsets:    offsets,
+		byteCounts: byteCounts,
+		totalSize:  totalSize,
+	}
 }
 
-// parseIFD reads a TIFF IFD at the given offset and extracts JPEG preview info.
-// Returns the JPEG preview (if any), sub-IFD offsets, the next IFD offset, and any error.
-func parseIFD(r io.ReadSeeker, offset int64, order binary.ByteOrder) (*jpegPreview, []int64, int64, error) {
+// parseIFD reads a TIFF IFD at the given offset and extracts all relevant
+// tag values. Returns the parsed values, sub-IFD offsets, the next IFD
+// offset, and any error.
+func parseIFD(r io.ReadSeeker, offset int64, order binary.ByteOrder) (*ifdValues, []int64, int64, error) {
 	if _, err := r.Seek(offset, io.SeekStart); err != nil {
 		return nil, nil, 0, fmt.Errorf("tiffraw: seek to IFD at %d: %w", offset, err)
 	}
@@ -270,6 +409,12 @@ func parseIFD(r io.ReadSeeker, offset int64, order binary.ByteOrder) (*jpegPrevi
 		valOff := e[8:12]
 
 		switch tag {
+		case tagImageWidth:
+			vals.imageWidth = readUint32Scalar(order, typ, valOff)
+
+		case tagImageLength:
+			vals.imageLength = readUint32Scalar(order, typ, valOff)
+
 		case tagNewSubfileType:
 			vals.newSubfileType = order.Uint32(valOff)
 
@@ -281,6 +426,12 @@ func parseIFD(r io.ReadSeeker, offset int64, order binary.ByteOrder) (*jpegPrevi
 
 		case tagStripByteCounts:
 			vals.stripByteCounts = readUint32Array(r, order, typ, cnt, valOff)
+
+		case tagTileOffsets:
+			vals.tileOffsets = readUint32Array(r, order, typ, cnt, valOff)
+
+		case tagTileByteCounts:
+			vals.tileByteCounts = readUint32Array(r, order, typ, cnt, valOff)
 
 		case tagSubIFDs:
 			// SubIFDs tag — value is one or more IFD offsets.
@@ -304,39 +455,17 @@ func parseIFD(r io.ReadSeeker, offset int64, order binary.ByteOrder) (*jpegPrevi
 	}
 	nextOffset := int64(nextOffsetRaw)
 
-	// Determine if this IFD contains a JPEG preview.
-	var preview *jpegPreview
+	return vals, vals.subIFDOffsets, nextOffset, nil
+}
 
-	// Path 1: JPEGInterchangeFormat / JPEGInterchangeFormatLength (IFD1 thumbnail path).
-	if vals.jpegOffset > 0 && vals.jpegLength > 0 {
-		preview = &jpegPreview{
-			offset: int64(vals.jpegOffset),
-			size:   int64(vals.jpegLength),
-		}
+// readUint32Scalar reads a single uint32 value from a TIFF IFD entry's
+// value/offset field. Handles both SHORT (2-byte) and LONG (4-byte) types.
+func readUint32Scalar(order binary.ByteOrder, typ uint16, valOff []byte) uint32 {
+	const typeShort = 3
+	if typ == typeShort {
+		return uint32(order.Uint16(valOff))
 	}
-
-	// Path 2: Strip-based JPEG (NewSubfileType=0, Compression=6).
-	// This is the full-resolution preview path used by some RAW formats.
-	if vals.compression == 6 && len(vals.stripOffsets) > 0 && len(vals.stripByteCounts) > 0 {
-		// Calculate total size across all strips.
-		var totalSize int64
-		for _, bc := range vals.stripByteCounts {
-			totalSize += int64(bc)
-		}
-		if totalSize > 0 {
-			// Use the first strip offset as the start.
-			stripPreview := &jpegPreview{
-				offset: int64(vals.stripOffsets[0]),
-				size:   totalSize,
-			}
-			// Prefer the larger of the two paths.
-			if preview == nil || stripPreview.size > preview.size {
-				preview = stripPreview
-			}
-		}
-	}
-
-	return preview, vals.subIFDOffsets, nextOffset, nil
+	return order.Uint32(valOff)
 }
 
 // readUint32Array reads an array of uint32 values from a TIFF IFD entry.
