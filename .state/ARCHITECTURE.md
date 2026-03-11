@@ -805,6 +805,7 @@ pixe sort     --source <dirA> --dest <dirB> [options]
 pixe verify   --dir <dirB>
 pixe resume   --dir <dirB>
 pixe query    <subcommand> --dir <dirB> [options]
+pixe status   --source <dirA> [options]
 pixe version
 ```
 
@@ -813,8 +814,8 @@ Primary operation. Discovers files in `dirA`, processes them through the pipelin
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--source` | | (required) | Source directory (read-only) |
-| `--dest` | | (required) | Destination directory |
+| `--source` | `-s` | (required) | Source directory (read-only) |
+| `--dest` | `-d` | (required) | Destination directory |
 | `--workers` | | auto | Number of concurrent workers |
 | `--algorithm` | | `sha1` | Hash algorithm (`sha1`, `sha256`, etc.) |
 | `--copyright` | | (none) | Copyright string template. `{{.Year}}` supported. |
@@ -851,6 +852,16 @@ pixe v0.10.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)
 ```
 
 No flags. This command calls `fullVersion()` (package-private in `cmd`) and prints to stdout. The version variables are injected at build time via ldflags (see Section 3).
+
+#### `pixe status`
+Shows the sorting status of a source directory by comparing the files currently on disk against the ledger left by prior `pixe sort` runs. This is a **source-oriented** command — it answers "what in this folder still needs sorting?" without requiring access to any destination archive or database. See **Section 7.4** for full design details.
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--source` | `-s` | (required) | Source directory to inspect |
+| `--recursive` | `-r` | `false` | Recursively inspect subdirectories of `--source` |
+| `--ignore` | | (none) | Glob pattern for files to ignore. Repeatable. Merged with config file patterns. |
+| `--json` | | `false` | Emit output as JSON instead of human-readable table |
 
 #### `pixe query <subcommand>`
 Read-only interrogation of the archive database. Exposes the query patterns described in Section 8.4 as user-facing subcommands. No files are modified — this is purely a reporting tool.
@@ -1217,6 +1228,204 @@ Subcommands are responsible for:
 3. Formatting output (table or JSON) based on the `--json` flag.
 
 A shared output formatting helper (e.g., `queryOutput(results, summary, jsonFlag)`) may be extracted if the pattern proves repetitive across subcommands, but this is an implementation detail — each subcommand can start with its own formatting and refactor later.
+
+### 7.4 Status Command
+
+`pixe status` is a **source-oriented, read-only** command that reports the sorting status of a source directory (`dirA`). It compares the files currently on disk against the JSONL ledger (`dirA/.pixe_ledger.json`) left by prior `pixe sort` runs, and produces a categorized listing of what has been sorted, what hasn't, and what Pixe can't handle.
+
+#### 7.4.1 Core Concept: Ledger-Only, No Database Required
+
+Unlike `pixe query` (which requires access to the archive database in `dirB`), `pixe status` operates **entirely from `dirA`**. Its only data source beyond the filesystem is the `.pixe_ledger.json` file. This design has several advantages:
+
+- **Works offline from the archive.** The destination drive (NAS, external disk) does not need to be mounted.
+- **No database dependency.** No SQLite, no `--db-path`, no `--dest` flag.
+- **Fast.** Parsing a JSONL ledger is trivial compared to opening a database and running queries.
+- **Answers the natural question.** When a user looks at a folder of photos, they want to know: "Have I sorted these yet?" The answer is in the ledger, right next to the photos.
+
+If no ledger exists in `dirA`, every discovered file is reported as unsorted. The command emits a notice: `No ledger found — no prior sort runs recorded for this directory.`
+
+#### 7.4.2 Algorithm
+
+1. **Walk `dirA`** using the same `discovery.Walk()` function used by `pixe sort`, with the same `WalkOptions` (recursive flag, ignore matcher). This produces two slices: `discovered` (files with a matched handler) and `skipped` (unrecognized files — dotfiles, unsupported formats, detection errors).
+
+2. **Load the ledger** via `manifest.LoadLedger(dirA)`. Parse all `LedgerEntry` objects into a map keyed by `path` (the relative path from `dirA`). If the ledger does not exist, the map is empty.
+
+3. **Classify each discovered file** by looking up its relative path in the ledger map:
+   - **Sorted** — The ledger contains an entry with `status: "copy"` for this path. The file was successfully copied to the archive.
+   - **Duplicate** — The ledger contains an entry with `status: "duplicate"`. The file's content already existed in the archive.
+   - **Errored** — The ledger contains an entry with `status: "error"`. The file was attempted but failed.
+   - **Unsorted** — No ledger entry exists for this path, or the ledger entry has `status: "skip"` with reason `"previously imported"` from a different context. Practically: any file not in the ledger is unsorted.
+
+4. **Classify each skipped file** from the discovery walk:
+   - **Unrecognized** — Files that no handler claims (unsupported extension, magic byte mismatch). These are reported separately so the user knows they exist but Pixe cannot process them.
+
+5. **Produce output** — categorized file listing with a summary line.
+
+#### 7.4.3 Ledger Multi-Run Handling
+
+The ledger file is **truncated** at the start of each `pixe sort` run (see Section 8.8). This means the ledger always reflects the **most recent run only**. Consequently:
+
+- If a user runs `pixe sort` on a subset of `dirA` (e.g., non-recursive), then adds files and runs `pixe status --recursive`, the ledger will only contain entries from the last run. Files sorted in earlier runs (whose entries were overwritten) will appear as "unsorted."
+- This is an acceptable trade-off for the ledger-only design. The ledger is a receipt of the last run, not a cumulative history. For cumulative history, `pixe query files --source <dirA>` queries the archive database.
+
+**Mitigation:** The status output includes a header line showing the ledger's run metadata (run ID, timestamp, whether recursive was enabled) so the user understands the context of the status report.
+
+#### 7.4.4 Output Format
+
+**Default: human-readable listing**
+
+The output is organized into sections, each with a header. Sections with zero files are omitted.
+
+```
+Source: /Users/wells/photos
+Ledger: run a1b2c3d4, 2026-03-06 10:30:00 UTC (recursive: no)
+
+SORTED (247 files)
+  IMG_0001.jpg         → 2021/12-Dec/20211225_062223_7d97e98f...jpg
+  IMG_0002.jpg         → 2022/02-Feb/20220202_123101_447d3060...jpg
+  VID_0010.mp4         → 2022/03-Mar/20220316_232122_321c7d6f...mp4
+
+DUPLICATE (3 files)
+  IMG_0042.jpg         → matches 2022/02-Feb/20220202_123101_447d3060...jpg
+  IMG_0099.jpg         → matches 2024/07-Jul/20240715_143022_9f8e7d6c...jpg
+  IMG_0100.jpg         → matches 2024/07-Jul/20240715_143022_9f8e7d6c...jpg
+
+ERRORED (1 file)
+  corrupt.jpg          → EXIF parse failed: truncated IFD at offset 0x1A
+
+UNSORTED (12 files)
+  IMG_5001.jpg
+  IMG_5002.jpg
+  vacation/IMG_6001.jpg
+  vacation/IMG_6002.jpg
+
+UNRECOGNIZED (2 files)
+  notes.txt            → unsupported format: .txt
+  readme.pdf           → unsupported format: .pdf
+
+265 total | 247 sorted | 3 duplicates | 1 errored | 12 unsorted | 2 unrecognized
+```
+
+**Design notes:**
+
+- **SORTED** files show the `destination` field from the ledger entry — the relative path within `dirB` where the file was copied. This is truncated in table mode for terminal width.
+- **DUPLICATE** files show the `matches` field — the relative path of the existing archive file this duplicate matched.
+- **ERRORED** files show the `reason` field from the ledger entry.
+- **UNSORTED** files have no additional information — they simply haven't been processed yet.
+- **UNRECOGNIZED** files show the skip reason from the discovery walk (e.g., `unsupported format: .txt`).
+- The **summary line** at the bottom provides a complete accounting. Every file discovered on disk appears in exactly one category. The total equals the sum of all categories.
+- Files are sorted **alphabetically by relative path** within each section.
+
+**No-ledger output:**
+
+When no ledger exists, the SORTED, DUPLICATE, and ERRORED sections are empty (omitted), and the output reflects that all recognized files are unsorted:
+
+```
+Source: /Users/wells/photos
+Ledger: none found — no prior sort runs recorded for this directory.
+
+UNSORTED (250 files)
+  IMG_0001.jpg
+  IMG_0002.jpg
+  ...
+
+UNRECOGNIZED (2 files)
+  notes.txt            → unsupported format: .txt
+  readme.pdf           → unsupported format: .pdf
+
+252 total | 250 unsorted | 2 unrecognized
+```
+
+#### 7.4.5 JSON Output
+
+When `--json` is passed, the output is a single JSON object:
+
+```json
+{
+  "source": "/Users/wells/photos",
+  "ledger": {
+    "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "pixe_version": "0.10.0",
+    "timestamp": "2026-03-06T10:30:00Z",
+    "recursive": false
+  },
+  "sorted": [
+    {"path": "IMG_0001.jpg", "destination": "2021/12-Dec/20211225_062223_7d97e98f...jpg"},
+    {"path": "IMG_0002.jpg", "destination": "2022/02-Feb/20220202_123101_447d3060...jpg"}
+  ],
+  "duplicates": [
+    {"path": "IMG_0042.jpg", "matches": "2022/02-Feb/20220202_123101_447d3060...jpg"}
+  ],
+  "errored": [
+    {"path": "corrupt.jpg", "reason": "EXIF parse failed: truncated IFD at offset 0x1A"}
+  ],
+  "unsorted": [
+    {"path": "IMG_5001.jpg"},
+    {"path": "vacation/IMG_6001.jpg"}
+  ],
+  "unrecognized": [
+    {"path": "notes.txt", "reason": "unsupported format: .txt"}
+  ],
+  "summary": {
+    "total": 265,
+    "sorted": 247,
+    "duplicates": 3,
+    "errored": 1,
+    "unsorted": 12,
+    "unrecognized": 2
+  }
+}
+```
+
+When no ledger exists, the `ledger` field is `null` and the `sorted`, `duplicates`, and `errored` arrays are empty.
+
+Empty arrays are included in JSON output (not omitted) for consistent structure.
+
+#### 7.4.6 Handler Registration
+
+`pixe status` requires the same handler registry as `pixe sort` — it uses `discovery.Walk()` which needs handlers for file detection. The same registration block used in `sort.go` is replicated in `status.go`:
+
+```go
+reg := discovery.NewRegistry()
+reg.Register(jpeghandler.New())
+reg.Register(heichandler.New())
+reg.Register(mp4handler.New())
+reg.Register(dnghandler.New())
+reg.Register(nefhandler.New())
+reg.Register(cr2handler.New())
+reg.Register(cr3handler.New())
+reg.Register(pefhandler.New())
+reg.Register(arwhandler.New())
+```
+
+This ensures that `pixe status` and `pixe sort` have identical file recognition behavior — a file classified as "unsorted" by `status` will be picked up by the next `sort` run.
+
+#### 7.4.7 Package Layout
+
+```
+cmd/
+├── status.go             ← `pixe status` command definition, flag binding, RunE
+```
+
+The command logic is self-contained in a single file. It:
+
+1. Reads flags from Viper (`source`, `recursive`, `ignore`, `json`).
+2. Builds the handler registry and ignore matcher.
+3. Calls `discovery.Walk()` to discover files on disk.
+4. Calls `manifest.LoadLedger()` to load the ledger.
+5. Classifies files into the five categories.
+6. Formats and prints the output (table or JSON).
+
+No new internal packages are needed. The command composes existing packages (`discovery`, `manifest`, `ignore`) without modification.
+
+#### 7.4.8 Exit Codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success — status report produced (regardless of whether unsorted files exist) |
+| `1` | Error — source directory not found, unreadable, or other fatal error |
+
+The presence of unsorted files is not an error condition — it's the expected state before running `pixe sort`. A future enhancement could add a `--check` flag that exits with code `2` when unsorted files exist (useful for scripting/CI), but this is out of scope for the initial implementation.
 
 ---
 
