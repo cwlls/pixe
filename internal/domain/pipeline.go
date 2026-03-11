@@ -138,6 +138,19 @@ type LedgerEntry struct {
 	Reason      string     `json:"reason,omitempty"`      // explanation (skip, error)
 }
 
+// LedgerHeader is the first line of the JSONL ledger file (v4+).
+// It contains run-level metadata; all subsequent lines are LedgerEntry objects.
+// The header is written once at the start of the run, before any files are processed.
+type LedgerHeader struct {
+	Version     int    `json:"version"`      // always 4
+	RunID       string `json:"run_id"`       // UUID linking to archive DB runs table
+	PixeVersion string `json:"pixe_version"` // Pixe binary version that produced this ledger
+	PixeRun     string `json:"pixe_run"`     // ISO 8601 UTC timestamp of run start
+	Algorithm   string `json:"algorithm"`    // hash algorithm used ("sha1", "sha256")
+	Destination string `json:"destination"`  // absolute path to dirB
+	Recursive   bool   `json:"recursive"`    // whether --recursive was active
+}
+
 // Ledger is the source-side record written to dirA/.pixe_ledger.json.
 // It is the only file Pixe writes into the source directory.
 type Ledger struct {

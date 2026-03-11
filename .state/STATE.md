@@ -23,6 +23,26 @@
 
 ---
 
+# Ledger JSONL Conversion
+
+Convert the ledger from a single buffered JSON document to a streaming JSONL format. Entries are written one-per-line as the coordinator processes results, eliminating the in-memory `[]LedgerEntry` accumulation. See Architectural Overview Section 8.8 for the full spec.
+
+| # | Task | Priority | Agent | Status | Depends On | Notes |
+|:--|:-----|:---------|:------|:-------|:-----------|:------|
+| 19 | Introduce `LedgerHeader` type and bump to v4 | high | Developer | ✅ Complete | — | New struct for JSONL line 1; `LedgerEntry` unchanged |
+| 20 | Build `LedgerWriter` in `internal/manifest` | high | Developer | ⬜ Pending | 19 | Open/write-header/append-entry/close; owns file handle + encoder |
+| 21 | Remove `Ledger` struct and `SaveLedger`/`LoadLedger` | high | Developer | ⬜ Pending | 20 | Delete dead code; keep `LedgerEntry` and status constants |
+| 22 | Wire `LedgerWriter` into sequential pipeline | high | Developer | ⬜ Pending | 20, 21 | Replace all `ledger.Files = append(...)` with `lw.WriteEntry(...)` |
+| 23 | Wire `LedgerWriter` into concurrent pipeline | high | Developer | ⬜ Pending | 20, 21 | Same replacement in coordinator goroutine (`worker.go`) |
+| 24 | Update `Run()` orchestrator for streaming lifecycle | high | Developer | ⬜ Pending | 22, 23 | Open writer at start, close at end; skip in dry-run |
+| 25 | Rewrite `LoadLedger` as JSONL reader (test utility) | medium | Developer | ⬜ Pending | 20 | Line-by-line reader returning header + entries; used only in tests |
+| 26 | Tests: `LedgerWriter` unit tests | high | Developer | ⬜ Pending | 20 | Write header, append entries, verify JSONL on disk |
+| 27 | Tests: rewrite ledger round-trip tests for JSONL v4 | high | Developer | ⬜ Pending | 25, 26 | Rewrite all `TestLedger_v3_*` tests for new format |
+| 28 | Tests: pipeline ledger tests for streaming | high | Developer | ⬜ Pending | 22, 23, 25 | Verify ledger file written correctly after sort runs |
+| 29 | Tests: interrupted run produces partial valid JSONL | medium | Developer | ⬜ Pending | 20, 26 | Simulate partial write; verify header + N entries parseable |
+
+---
+
 # Pixe Task Descriptions
 
 ## Task 1 — Add `Recursive` and `Ignore` fields to `AppConfig`
@@ -808,3 +828,502 @@ End-to-end scenario:
    - Verify: `sub/b.jpg` copied.
    - Verify: ledger has 2 entries (1 skip, 1 copy).
    - Verify: DB has `a.jpg` with status `skipped` in run 2, and `complete` in run 1.
+
+---
+
+## Task 19 — Introduce `LedgerHeader` type and bump to v4
+
+**File:** `internal/domain/pipeline.go`
+
+### Add `LedgerHeader` struct
+
+Add a new struct to represent the JSONL header line (line 1 of the ledger). This replaces the run-level metadata that was previously part of the `Ledger` struct.
+
+```go
+// LedgerHeader is the first line of the JSONL ledger file.
+// It contains run-level metadata; all subsequent lines are LedgerEntry objects.
+type LedgerHeader struct {
+    Version     int    `json:"version"`
+    RunID       string `json:"run_id"`
+    PixeVersion string `json:"pixe_version"`
+    PixeRun     string `json:"pixe_run"`     // ISO 8601 UTC
+    Algorithm   string `json:"algorithm"`
+    Destination string `json:"destination"`
+    Recursive   bool   `json:"recursive"`
+}
+```
+
+**Design notes:**
+
+- `PixeRun` is `string` (not `time.Time`) because the header is written once at the start and we want exact control over the ISO 8601 format — `time.Time` marshals to RFC 3339 by default which is fine, but a string avoids any ambiguity and matches the compact JSONL style.
+- `RunID` is **not** `omitempty` — in v4 the run ID is always present (the archive DB is always active).
+- `Version` is `4`.
+- The `LedgerEntry` struct (lines 131-139) is **unchanged** — it already has the right fields and `omitempty` tags for compact JSONL output.
+- The existing ledger status constants (`LedgerStatusCopy`, `LedgerStatusSkip`, `LedgerStatusDuplicate`, `LedgerStatusError`) are **unchanged**.
+
+### Keep `LedgerEntry` as-is
+
+No changes needed. The `LedgerEntry` struct is already self-contained — each entry has `path`, `status`, and optional fields with `omitempty`. This is exactly what a JSONL file entry line needs.
+
+---
+
+## Task 20 — Build `LedgerWriter` in `internal/manifest`
+
+**File:** `internal/manifest/manifest.go`
+
+### New type: `LedgerWriter`
+
+Add a streaming JSONL writer that owns a file handle and a `json.Encoder`. The coordinator calls its methods to write entries one at a time.
+
+```go
+// LedgerWriter streams ledger entries to a JSONL file.
+// The coordinator goroutine is the sole caller — no mutex needed.
+type LedgerWriter struct {
+    f   *os.File
+    enc *json.Encoder
+}
+
+// NewLedgerWriter opens the ledger file for writing (truncating any existing
+// content) and writes the header as line 1. The caller must call Close when
+// the run completes.
+func NewLedgerWriter(dirA string, header domain.LedgerHeader) (*LedgerWriter, error) {
+    path := ledgerPath(dirA)
+    f, err := os.Create(path) // truncate + create
+    if err != nil {
+        return nil, fmt.Errorf("manifest: open ledger: %w", err)
+    }
+
+    enc := json.NewEncoder(f)
+    enc.SetEscapeHTML(false) // file paths may contain & < > in theory
+
+    if err := enc.Encode(header); err != nil {
+        f.Close()
+        return nil, fmt.Errorf("manifest: write ledger header: %w", err)
+    }
+
+    return &LedgerWriter{f: f, enc: enc}, nil
+}
+
+// WriteEntry appends a single file entry as one JSON line.
+func (lw *LedgerWriter) WriteEntry(entry domain.LedgerEntry) error {
+    return lw.enc.Encode(entry)
+}
+
+// Close flushes and closes the underlying file.
+func (lw *LedgerWriter) Close() error {
+    return lw.f.Close()
+}
+```
+
+**Design notes:**
+
+- `json.Encoder.Encode()` writes compact JSON (no indentation) followed by a `\n`. This is exactly the JSONL format — one valid JSON object per line.
+- No explicit `Flush` call is needed after each `Encode` — `json.Encoder` writes directly to the `os.File`, and the OS handles buffering. For crash safety, each `Encode` call produces a complete JSON line. If the process crashes mid-line, the partial line is the only data lost, and all prior lines are valid.
+- `SetEscapeHTML(false)` avoids escaping `<`, `>`, `&` in file paths, keeping the output clean.
+- The `LedgerWriter` is intentionally simple — no mutex, no buffering layer, no retry. The coordinator is the sole writer, and write errors are non-fatal (same as the current `SaveLedger` behavior).
+
+### Keep `ledgerPath` and `ledgerFile` constant
+
+The filename remains `.pixe_ledger.json`. The `ledgerPath` helper and `ledgerFile` constant are unchanged.
+
+---
+
+## Task 21 — Remove `Ledger` struct and `SaveLedger`/`LoadLedger`
+
+**File:** `internal/domain/pipeline.go`
+
+### Remove the `Ledger` struct (lines 143-152)
+
+Delete the entire `Ledger` struct. It is replaced by `LedgerHeader` (Task 19) + streaming `LedgerEntry` writes (Task 20). After this task, the domain package exports:
+
+- `LedgerHeader` (new, from Task 19)
+- `LedgerEntry` (unchanged)
+- `LedgerStatusCopy`, `LedgerStatusSkip`, `LedgerStatusDuplicate`, `LedgerStatusError` (unchanged)
+
+The `Ledger` struct with its `Files []LedgerEntry` slice is gone.
+
+**File:** `internal/manifest/manifest.go`
+
+### Remove `SaveLedger` (lines 94-96)
+
+Delete the function. Its sole production caller (pipeline.go line 178) will be replaced in Task 24.
+
+### Remove `atomicWriteJSON` (lines 118-134)
+
+Delete the function. It is only used by `SaveLedger` and `Save` (the legacy manifest saver). Check if `Save` still exists and has callers — if `Save` is still used by the migration path, keep `atomicWriteJSON` but make it unexported. If `Save` has no remaining callers, delete both.
+
+### Keep `LoadLedger` temporarily
+
+`LoadLedger` has no production callers but is used extensively in tests. It will be rewritten as a JSONL reader in Task 25. For now, leave it in place (it will fail to compile once `Ledger` is removed, which is the signal to implement Task 25).
+
+**Practical note:** Tasks 21 and 25 should be done together in a single commit to keep the build green. The separation here is conceptual — "remove old code" vs. "add JSONL reader" — but they must land atomically.
+
+---
+
+## Task 22 — Wire `LedgerWriter` into sequential pipeline
+
+**File:** `internal/pipeline/pipeline.go`
+
+### Change `runSequential` signature
+
+Replace the `ledger *domain.Ledger` parameter with `lw *manifest.LedgerWriter`:
+
+```go
+func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
+    skipped []discovery.SkippedFile,
+    fileIDs map[string]int64, dirA, dirB string, out io.Writer,
+    lw *manifest.LedgerWriter) SortResult
+```
+
+### Replace all `ledger.Files = append(...)` with `lw.WriteEntry(...)`
+
+There are 4 append sites in `runSequential`:
+
+1. **Discovery-phase skips** (line ~208):
+   ```go
+   // Before:
+   ledger.Files = append(ledger.Files, domain.LedgerEntry{
+       Path: sf.Path, Status: domain.LedgerStatusSkip, Reason: sf.Reason,
+   })
+   // After:
+   _ = lw.WriteEntry(domain.LedgerEntry{
+       Path: sf.Path, Status: domain.LedgerStatusSkip, Reason: sf.Reason,
+   })
+   ```
+
+2. **Previously imported skips** (line ~241): Same pattern.
+
+3. **processFile errors** (line ~260): Same pattern.
+
+4. **processFile success** (line ~277):
+   ```go
+   // Before:
+   ledger.Files = append(ledger.Files, *le)
+   // After:
+   _ = lw.WriteEntry(*le)
+   ```
+
+**Error handling:** `WriteEntry` errors are ignored (same as the current pattern where `SaveLedger` failure is a warning). The ledger is a receipt, not a critical data path — the archive DB is the source of truth.
+
+### Handle nil `LedgerWriter`
+
+In dry-run mode, `lw` will be `nil` (no ledger is written). Guard each `WriteEntry` call:
+
+```go
+if lw != nil {
+    _ = lw.WriteEntry(entry)
+}
+```
+
+Or introduce a helper method on `LedgerWriter` that is nil-safe:
+
+```go
+func (lw *LedgerWriter) WriteEntry(entry domain.LedgerEntry) error {
+    if lw == nil {
+        return nil
+    }
+    return lw.enc.Encode(entry)
+}
+```
+
+The nil-safe method approach is cleaner — it avoids scattering nil checks at every call site.
+
+---
+
+## Task 23 — Wire `LedgerWriter` into concurrent pipeline
+
+**File:** `internal/pipeline/worker.go`
+
+### Change `RunConcurrent` signature
+
+Replace `ledger *domain.Ledger` with `lw *manifest.LedgerWriter`:
+
+```go
+func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
+    skipped []discovery.SkippedFile,
+    fileIDs map[string]int64, dirA, dirB string, out io.Writer,
+    lw *manifest.LedgerWriter) SortResult
+```
+
+### Replace all `ledger.Files = append(...)` with `lw.WriteEntry(...)`
+
+There are 8 append sites in the coordinator goroutine of `runConcurrentCtx`. Each one follows the same transformation as Task 22:
+
+1. **Discovery-phase skips** (line ~136)
+2. **Previously imported skips** (line ~168)
+3. **Extract/hash errors** (line ~241)
+4. **Dedup check errors** (line ~259)
+5. **Final result errors** (line ~291)
+6. **Post-copy dedup race errors** (lines ~313, ~333)
+7. **Duplicate success** (line ~365)
+8. **Copy success** (line ~374)
+
+All are in the coordinator goroutine (single-threaded `select` loop). No concurrency concerns.
+
+The `lw.WriteEntry()` nil-safe pattern from Task 22 applies here too.
+
+---
+
+## Task 24 — Update `Run()` orchestrator for streaming lifecycle
+
+**File:** `internal/pipeline/pipeline.go`
+
+### Replace ledger construction + SaveLedger with LedgerWriter lifecycle
+
+**Before** (current code, lines 157-181):
+```go
+ledger := &domain.Ledger{
+    Version: 3, PixeVersion: opts.PixeVersion, RunID: opts.RunID, ...
+}
+// ... processing ...
+if !cfg.DryRun {
+    if err := manifest.SaveLedger(ledger, dirA); err != nil {
+        _, _ = fmt.Fprintf(out, "WARNING: ...")
+    }
+}
+```
+
+**After:**
+```go
+// Open streaming ledger writer (nil in dry-run mode).
+var lw *manifest.LedgerWriter
+if !cfg.DryRun {
+    header := domain.LedgerHeader{
+        Version:     4,
+        RunID:       opts.RunID,
+        PixeVersion: opts.PixeVersion,
+        PixeRun:     startedAt.UTC().Format(time.RFC3339),
+        Algorithm:   opts.Hasher.Algorithm(),
+        Destination: dirB,
+        Recursive:   cfg.Recursive,
+    }
+    var err error
+    lw, err = manifest.NewLedgerWriter(dirA, header)
+    if err != nil {
+        _, _ = fmt.Fprintf(out, "WARNING: could not open ledger in %s: %v\n", dirA, err)
+        // lw remains nil — processing continues without a ledger.
+    }
+}
+
+// ... pass lw to runSequential or RunConcurrent ...
+
+if cfg.Workers > 1 {
+    result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
+} else {
+    result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
+}
+
+// Close the ledger writer.
+if lw != nil {
+    if err := lw.Close(); err != nil {
+        _, _ = fmt.Fprintf(out, "WARNING: could not close ledger: %v\n", err)
+    }
+}
+```
+
+**Key changes:**
+- The `*domain.Ledger` variable is gone entirely.
+- The `manifest.SaveLedger(ledger, dirA)` call is gone entirely.
+- The `LedgerWriter` is opened at the start (header written immediately) and closed at the end.
+- If opening fails, `lw` stays `nil` and all `WriteEntry` calls are no-ops (nil-safe method).
+- Dry-run mode: `lw` is never created, so no ledger file is opened or written.
+
+---
+
+## Task 25 — Rewrite `LoadLedger` as JSONL reader (test utility)
+
+**File:** `internal/manifest/manifest.go`
+
+### Replace `LoadLedger` with a JSONL-aware reader
+
+`LoadLedger` has **no production callers** — it is used only in tests to verify the ledger was written correctly. Rewrite it to parse JSONL:
+
+```go
+// LedgerContents holds the parsed contents of a JSONL ledger file.
+// Used by tests to verify ledger output.
+type LedgerContents struct {
+    Header  domain.LedgerHeader
+    Entries []domain.LedgerEntry
+}
+
+// LoadLedger reads a JSONL ledger file and returns its parsed contents.
+// Returns (nil, nil) if the file does not exist.
+func LoadLedger(dirA string) (*LedgerContents, error) {
+    path := ledgerPath(dirA)
+    f, err := os.Open(path)
+    if errors.Is(err, os.ErrNotExist) {
+        return nil, nil
+    }
+    if err != nil {
+        return nil, fmt.Errorf("manifest: open ledger: %w", err)
+    }
+    defer f.Close()
+
+    dec := json.NewDecoder(f)
+    result := &LedgerContents{}
+
+    // Line 1: header
+    if err := dec.Decode(&result.Header); err != nil {
+        return nil, fmt.Errorf("manifest: decode ledger header: %w", err)
+    }
+
+    // Lines 2+: entries
+    for dec.More() {
+        var entry domain.LedgerEntry
+        if err := dec.Decode(&entry); err != nil {
+            return nil, fmt.Errorf("manifest: decode ledger entry: %w", err)
+        }
+        result.Entries = append(result.Entries, entry)
+    }
+
+    return result, nil
+}
+```
+
+**Design notes:**
+
+- Returns a `*LedgerContents` instead of `*domain.Ledger` — the old `Ledger` struct no longer exists.
+- `json.Decoder` reads JSONL naturally — each `Decode` call reads one JSON value (one line).
+- `dec.More()` returns `true` as long as there's more data to read.
+- All test callers need to be updated to use `LedgerContents` instead of `domain.Ledger` — the field access changes from `ledger.Files[i]` to `lc.Entries[i]` and `ledger.Version` to `lc.Header.Version`.
+
+---
+
+## Task 26 — Tests: `LedgerWriter` unit tests
+
+**File:** `internal/manifest/manifest_test.go`
+
+### New tests for the streaming writer
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestLedgerWriter_headerOnly` | Open writer, write header, close. File has exactly 1 line. Parse it back as `LedgerHeader`. Verify all fields. |
+| `TestLedgerWriter_headerAndEntries` | Write header + 3 entries (copy, skip, error). File has 4 lines. Parse all back. Verify entry order and fields. |
+| `TestLedgerWriter_omitempty` | Write a skip entry. Read raw bytes. Verify `"checksum"`, `"destination"`, `"verified_at"`, `"matches"` are absent from that line. |
+| `TestLedgerWriter_compactJSON` | Verify no indentation — each line is a single compact JSON object (no `\n` within the JSON, no spaces after `:` beyond what `json.Encoder` produces). |
+| `TestLedgerWriter_nilSafe` | Call `WriteEntry` on a nil `*LedgerWriter`. Verify no panic, returns nil error. |
+| `TestLedgerWriter_version4` | Write header. Verify `"version":4` appears in line 1. |
+
+---
+
+## Task 27 — Tests: rewrite ledger round-trip tests for JSONL v4
+
+**File:** `internal/manifest/manifest_test.go`
+
+### Rewrite existing ledger tests
+
+Every existing `TestLedger_v3_*` test must be rewritten for the v4 JSONL format. The test structure changes from "SaveLedger → LoadLedger → assert fields" to "NewLedgerWriter → WriteEntry × N → Close → LoadLedger → assert fields".
+
+| Old Test | New Test | Key Changes |
+|----------|----------|-------------|
+| `TestLedger_SaveLoad_roundtrip` | `TestLedger_v4_roundtrip` | Use `NewLedgerWriter` + `WriteEntry` + `LoadLedger`. Assert `Header.Version == 4`. |
+| `TestLedger_Load_notExist` | `TestLedger_Load_notExist` | Unchanged — `LoadLedger` still returns `(nil, nil)`. |
+| `TestLedger_Save_atomic_noTmpLeftover` | **Delete** | No `.tmp` file is used in the streaming approach. |
+| `TestLedger_v3_roundtrip` | `TestLedger_v4_fullRoundtrip` | Write all 4 entry types via `LedgerWriter`. Load back. Verify header + 4 entries. |
+| `TestLedger_v3_copyEntry` | `TestLedger_v4_copyEntry` | Same assertions, different write path. |
+| `TestLedger_v3_skipEntry` | `TestLedger_v4_skipEntry` | Same assertions, different write path. |
+| `TestLedger_v3_duplicateEntry` | `TestLedger_v4_duplicateEntry` | Same assertions, different write path. |
+| `TestLedger_v3_errorEntry` | `TestLedger_v4_errorEntry` | Same assertions, different write path. |
+| `TestLedger_v3_recursive_false` | `TestLedger_v4_recursive_false` | Assert `Header.Recursive == false`. |
+| `TestLedger_v3_omitempty_json` | `TestLedger_v4_omitempty_jsonl` | Read raw file bytes. Split by `\n`. Inspect individual lines for absent fields. No `"files"` array structure. |
+
+### Update `sampleLedger()` and `sampleLedgerV3Full()` helpers
+
+Replace with helpers that return a `domain.LedgerHeader` and `[]domain.LedgerEntry` separately, or that write via `LedgerWriter` and return the path.
+
+---
+
+## Task 28 — Tests: pipeline ledger tests for streaming
+
+**File:** `internal/pipeline/pipeline_test.go` and `internal/pipeline/worker_test.go`
+
+### Update all tests that call `manifest.LoadLedger`
+
+These tests currently call `LoadLedger` and assert on `*domain.Ledger` fields. They must be updated to:
+
+1. Call the new `LoadLedger` which returns `*manifest.LedgerContents`.
+2. Access header fields via `lc.Header.Version`, `lc.Header.RunID`, etc.
+3. Access entries via `lc.Entries[i]` instead of `ledger.Files[i]`.
+4. Assert `Header.Version == 4` instead of `3`.
+
+**Tests to update in `pipeline_test.go`** (8 call sites at lines ~221, ~252, ~284, ~582, ~626, ~666, ~707, ~1006):
+
+| Test | Key Assertion Changes |
+|------|----------------------|
+| `TestRun_ledgerWritten` | `lc.Header.Version == 4`, `len(lc.Entries) > 0` |
+| `TestRun_ledgerWritten_withEntry` | `lc.Entries[0].Checksum`, `lc.Entries[0].Destination` |
+| `TestRun_ledgerVersion3WithRunID` → rename to `TestRun_ledgerVersion4WithRunID` | `lc.Header.Version == 4`, `lc.Header.RunID == expectedRunID` |
+| `TestRun_outputFormat_ledgerEntryStatuses` | Count entries by status in `lc.Entries` |
+| `TestRun_outputFormat_ledgerDuplicateEntry` | `lc.Entries[i].Status == "duplicate"`, `.Matches` |
+| `TestRun_outputFormat_skipLedgerEntry` | `lc.Entries[i].Status == "skip"`, `.Reason` |
+| `TestRun_outputFormat_copyLedgerEntry` | `lc.Entries[i].Status == "copy"`, `.VerifiedAt` |
+| `TestRun_recursiveIncremental_ledger` | `lc.Header.Recursive == true`, entry count |
+
+**Tests to update in `worker_test.go`** (1 call site at line ~91):
+
+| Test | Key Assertion Changes |
+|------|----------------------|
+| `TestRunConcurrent_ledger` (or similar) | Same pattern — `lc.Header` + `lc.Entries` |
+
+**Tests to update in `integration_test.go`** (1 call site via helper):
+
+| Test | Key Assertion Changes |
+|------|----------------------|
+| `TestIntegration_SQLite_FullSort` | `lc.Header.Version == 4`, `lc.Header.RunID` matches DB |
+
+---
+
+## Task 29 — Tests: interrupted run produces partial valid JSONL
+
+**File:** `internal/manifest/manifest_test.go`
+
+### New test: `TestLedgerWriter_partialWrite`
+
+Verify that if the writer is opened and some entries are written but `Close` is never called (simulating a crash), the file on disk contains valid JSONL up to the last complete entry.
+
+```go
+func TestLedgerWriter_partialWrite(t *testing.T) {
+    t.Helper()
+    dir := t.TempDir()
+
+    header := domain.LedgerHeader{Version: 4, RunID: "test-run", ...}
+    lw, err := manifest.NewLedgerWriter(dir, header)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Write 2 entries but do NOT call Close (simulating crash).
+    _ = lw.WriteEntry(domain.LedgerEntry{Path: "a.jpg", Status: "copy", ...})
+    _ = lw.WriteEntry(domain.LedgerEntry{Path: "b.jpg", Status: "skip", ...})
+    // Intentionally no lw.Close()
+
+    // Read the file directly and verify it's valid JSONL.
+    raw, err := os.ReadFile(filepath.Join(dir, ".pixe_ledger.json"))
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+    if len(lines) != 3 { // header + 2 entries
+        t.Fatalf("expected 3 lines, got %d", len(lines))
+    }
+
+    // Each line must be valid JSON.
+    for i, line := range lines {
+        if !json.Valid([]byte(line)) {
+            t.Errorf("line %d is not valid JSON: %s", i+1, line)
+        }
+    }
+
+    // Parse header.
+    var h domain.LedgerHeader
+    if err := json.Unmarshal([]byte(lines[0]), &h); err != nil {
+        t.Fatalf("header parse: %v", err)
+    }
+    if h.Version != 4 {
+        t.Errorf("header version: got %d, want 4", h.Version)
+    }
+}
+```
+
+This test validates the key architectural benefit of JSONL over buffered JSON: an interrupted run leaves a partial but valid receipt.

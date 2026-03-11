@@ -1611,3 +1611,42 @@ go mod tidy                                     # ✅ PASS (no diff)
 - ✅ `internal/manifest` package retained for ledger persistence and migration support only
 
 ---
+
+## Task 19 — Introduce `LedgerHeader` type and bump to v4
+
+**Date:** 2026-03-11
+**Status:** ✅ Complete
+
+### Implementation Summary
+
+Added the `LedgerHeader` struct to `internal/domain/pipeline.go` as the first step of the ledger JSONL conversion (v3 → v4). This struct represents line 1 of the new JSONL ledger file — the run-level metadata header written once at the start of each sort run.
+
+### Files Changed
+
+- **`internal/domain/pipeline.go`** — Added `LedgerHeader` struct. No other types modified.
+
+### `LedgerHeader` Fields
+
+| Field | Type | JSON Tag | Notes |
+|---|---|---|---|
+| `Version` | `int` | `"version"` | Always `4` for JSONL format |
+| `RunID` | `string` | `"run_id"` | No `omitempty` — always present in v4 |
+| `PixeVersion` | `string` | `"pixe_version"` | Pixe binary version |
+| `PixeRun` | `string` | `"pixe_run"` | ISO 8601 UTC string (not `time.Time`) |
+| `Algorithm` | `string` | `"algorithm"` | Hash algorithm used |
+| `Destination` | `string` | `"destination"` | Absolute path to dirB |
+| `Recursive` | `bool` | `"recursive"` | Whether `--recursive` was active |
+
+### Design Decisions
+
+- `PixeRun` is `string` rather than `time.Time` for exact control over ISO 8601 formatting in compact JSONL output.
+- `RunID` has no `omitempty` — the archive DB is always active in v4, so a run ID is always present.
+- The existing `LedgerEntry`, `Ledger`, and all ledger status constants are unchanged — `Ledger` will be removed in Task 21.
+
+### Validation
+
+- `go build ./...` ✅ PASS
+- `go vet ./...` ✅ PASS
+- `go test -race -timeout 120s ./internal/domain/...` ✅ PASS
+
+---

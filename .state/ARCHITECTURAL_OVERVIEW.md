@@ -245,7 +245,7 @@ ERR  <source_filename> -> <reason>
 
 #### Ledger Recording
 
-All four outcomes — `COPY`, `SKIP`, `DUPE`, `ERR` — are recorded in the ledger (see Section 8.8). Every file discovered in `dirA` appears in the ledger's `files` array with a `status` field indicating its outcome. This ensures the ledger is a complete manifest of what Pixe saw and decided for every file in the source directory.
+All four outcomes — `COPY`, `SKIP`, `DUPE`, `ERR` — are streamed to the JSONL ledger (see Section 8.8). Every file discovered in `dirA` is appended as an independent JSON line with a `status` field indicating its outcome. Entries are written in processing order as the coordinator finalizes each result. This ensures the ledger is a complete manifest of what Pixe saw and decided for every file in the source directory.
 
 ### 4.4 Ignore List
 
@@ -389,7 +389,7 @@ The second run will:
 1. Discover all files (top-level + nested).
 2. Skip top-level files already recorded in the archive database (stdout: `SKIP IMG_0001.jpg -> previously imported`).
 3. Process newly discovered files from subdirectories.
-4. Write a single updated ledger at `dirA/.pixe_ledger.json` containing entries for **all** files from this run (both skipped and newly processed), using relative paths.
+4. Stream entries to the JSONL ledger at `dirA/.pixe_ledger.json` as each file is processed — both skipped and newly processed files appear as individual JSON lines, using relative paths.
 
 #### Ledger Placement
 
@@ -408,7 +408,7 @@ The ignore list (Section 4.4) applies at every level of the directory tree. Patt
 > - **`dirA` is read-only.** Pixe never modifies, renames, moves, or deletes source files. The sole exception is writing a `.pixe_ledger.json` file into `dirA` to record what was processed.
 > - **Copy-then-verify.** Every file is copied to `dirB`, then the destination is independently re-read and re-hashed to confirm integrity.
 > - **Database-backed resumability.** A SQLite database tracks per-file state across all runs. Interrupted runs resume from the last committed state. Each file completion is committed individually for crash safety.
-> - **Ledger in `dirA`.** A `.pixe_ledger.json` is written to the source directory, recording which files were successfully processed. Each ledger entry includes a `run_id` linking back to the archive database for full queryability.
+> - **Streaming ledger in `dirA`.** A `.pixe_ledger.json` (JSONL format) is streamed to the source directory as files are processed. The header line includes a `run_id` linking back to the archive database. Each file entry is appended as an independent JSON line the moment the coordinator finalizes its result. An interrupted run leaves a partial but valid JSONL file — every line written before interruption is a complete, parseable JSON object.
 > - **No silent outcomes.** Every discovered file produces exactly one line of stdout output (`COPY`, `SKIP`, `DUPE`, or `ERR`) and a corresponding ledger entry. Hash mismatches, copy failures, unrecognized files, duplicates, and skipped files are never silent. Pixe never exits without accounting for every file it saw.
 > - **Concurrent-run safety.** Multiple `pixe sort` processes may target the same `dirB` simultaneously. The SQLite database uses WAL mode and busy-retry to ensure integrity without requiring external coordination.
 
@@ -422,7 +422,7 @@ The ignore list (Section 4.4) applies at every level of the directory tree. Patt
 > - Pixe uses a **worker pool** pattern for parallel file processing.
 > - Worker count is **configurable** via `--workers` flag (default: sensible auto-detect based on `runtime.NumCPU()`).
 > - Workers handle the full pipeline per file: extract → hash → copy → verify → tag.
-> - A **coordinator goroutine** manages database writes, deduplication queries, and progress reporting.
+> - A **coordinator goroutine** manages database writes, deduplication queries, ledger appends, and progress reporting. The coordinator is the **sole writer** to both the archive database and the JSONL ledger file — workers never write to either directly.
 > - `dirA` and `dirB` may reside on **different filesystems** (local, NAS, SMB). Pixe always uses copy (never `os.Rename` across filesystems).
 > - **Cross-process concurrency:** Multiple `pixe sort` processes may target the same `dirB` from different sources. SQLite WAL mode permits concurrent reads with serialized writes. Each process operates within its own `run_id` context. Write contention is handled via `SQLITE_BUSY` retry with exponential backoff.
 
@@ -876,7 +876,7 @@ On first run against a `dirB` with no existing database:
 #### Run Completion
 
 1. Update the `runs` row: set `finished_at` and `status = 'completed'`.
-2. Write the ledger to `dirA` (see Section 8.8).
+2. Close the JSONL ledger file handle (see Section 8.8). The ledger has been streamed progressively throughout the run — no final write is needed.
 
 #### Interrupted Run Recovery
 
@@ -901,54 +901,42 @@ The migration is idempotent — if `manifest.json.migrated` already exists, the 
 
 ### 8.8 Ledger (`dirA/.pixe_ledger.json`)
 
-The ledger is a **complete JSON receipt** left in the source directory. It records the outcome for **every file** Pixe discovered in `dirA` during the run — not just successful copies. This makes the ledger a full manifest of what Pixe saw and decided, and links back to the archive database for detailed query.
+The ledger is a **streaming JSONL receipt** left in the source directory. It records the outcome for **every file** Pixe discovered in `dirA` during the run — not just successful copies. This makes the ledger a full manifest of what Pixe saw and decided for every file in the source directory.
 
-#### Ledger Format (v3)
+#### Format: JSONL (JSON Lines)
 
-```json
-{
-  "version": 3,
-  "pixe_version": "0.10.0",
-  "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "pixe_run": "2026-03-06T10:30:00Z",
-  "algorithm": "sha1",
-  "destination": "/path/to/dirB",
-  "recursive": true,
-  "files": [
-    {
-      "path": "IMG_0001.jpg",
-      "status": "copy",
-      "checksum": "7d97e98f8af710c7e7fe703abc8f639e0ee507c4",
-      "destination": "2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg",
-      "verified_at": "2026-03-06T10:30:03Z"
-    },
-    {
-      "path": "IMG_0002.jpg",
-      "status": "skip",
-      "reason": "previously imported"
-    },
-    {
-      "path": "vacation/IMG_0042.jpg",
-      "status": "duplicate",
-      "checksum": "447d3060abc123...",
-      "destination": "duplicates/20260306_103000/2022/02-Feb/20220202_123101_447d3060...jpg",
-      "matches": "2022/02-Feb/20220202_123101_447d3060...jpg"
-    },
-    {
-      "path": "notes.txt",
-      "status": "skip",
-      "reason": "unsupported format: .txt"
-    },
-    {
-      "path": "corrupt.jpg",
-      "status": "error",
-      "reason": "EXIF parse failed: truncated IFD at offset 0x1A"
-    }
-  ]
-}
+The ledger uses the [JSONL format](https://jsonlines.org/): every line is an independent, valid JSON object terminated by a newline (`\n`). There is no enclosing array or outer object. This enables **streaming writes** — each entry is appended to the file as it is processed, rather than buffering the entire run in memory and serializing at the end.
+
+**Line 1** is a **header object** containing run-level metadata. All subsequent lines are **file entry objects**, one per discovered file, appended in processing order.
+
+#### Ledger Format (v4)
+
+```jsonl
+{"version":4,"run_id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","pixe_version":"0.10.0","pixe_run":"2026-03-06T10:30:00Z","algorithm":"sha1","destination":"/path/to/dirB","recursive":true}
+{"path":"IMG_0001.jpg","status":"copy","checksum":"7d97e98f8af710c7e7fe703abc8f639e0ee507c4","destination":"2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg","verified_at":"2026-03-06T10:30:03Z"}
+{"path":"IMG_0002.jpg","status":"skip","reason":"previously imported"}
+{"path":"vacation/IMG_0042.jpg","status":"duplicate","checksum":"447d3060abc123...","destination":"duplicates/20260306_103000/2022/02-Feb/20220202_123101_447d3060...jpg","matches":"2022/02-Feb/20220202_123101_447d3060...jpg"}
+{"path":"notes.txt","status":"skip","reason":"unsupported format: .txt"}
+{"path":"corrupt.jpg","status":"error","reason":"EXIF parse failed: truncated IFD at offset 0x1A"}
 ```
 
-#### Field Definitions
+#### Header Object (Line 1)
+
+The header is written once at the start of the run, before any files are processed.
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | `int` | Ledger schema version. Currently `4`. |
+| `run_id` | `string` | UUID linking this ledger to the archive database `runs` table. |
+| `pixe_version` | `string` | Pixe binary version that produced this ledger. |
+| `pixe_run` | `string` | ISO 8601 UTC timestamp of when the sort run started. |
+| `algorithm` | `string` | Hash algorithm used (`sha1`, `sha256`). |
+| `destination` | `string` | Absolute path to `dirB`. |
+| `recursive` | `bool` | Whether `--recursive` was active for this run. |
+
+#### File Entry Objects (Lines 2+)
+
+Each file entry is a self-contained JSON object. Entries are appended one at a time as the coordinator processes results from workers.
 
 | Field | Presence | Description |
 |---|---|---|
@@ -960,20 +948,40 @@ The ledger is a **complete JSON receipt** left in the source directory. It recor
 | `matches` | `duplicate` | Relative path within `dirB` of the existing file this duplicate matches. |
 | `reason` | `skip`, `error` | Human-readable explanation of why the file was skipped or why processing failed. Same text shown on stdout. |
 
-#### Changes from v2
+Fields use `omitempty` semantics — absent from the JSON when zero-valued. Each line is compact (no indentation) to keep the JSONL format clean and `jq`-friendly.
 
-- `version` bumped to `3`.
-- `recursive` field added — records whether `--recursive` was active for this run.
-- `status` field added to every file entry — makes each entry self-describing.
-- `reason` field added for `skip` and `error` entries.
-- `matches` field added for `duplicate` entries — identifies the existing archive file.
-- The `files` array now contains **all discovered files**, not just successful copies. Ignored files (matching the ignore list) are **not** included — they are invisible to the pipeline entirely.
+#### Write Strategy: Streaming Appends
+
+The ledger is **not** buffered in memory. Instead, a `LedgerWriter` opens the file at the start of the run, writes the header line, and then appends each file entry as a single JSON line as results arrive from the pipeline.
+
+**Write flow:**
+
+1. **Run start:** Open `dirA/.pixe_ledger.json` for writing (truncate). Write the header object as line 1. Flush.
+2. **During processing:** The coordinator goroutine — the sole writer — appends one JSON line per file as each result is finalized. Each append is a `json.Marshal` + `\n` + flush.
+3. **Run end:** Close the file. No rename step is needed — the file has been written progressively throughout the run.
+
+**Key design points:**
+
+- The **coordinator goroutine is the sole writer** to the ledger file. Workers never write to the ledger directly. This eliminates the need for a mutex on the file handle — ownership is structural, not lock-based.
+- The in-memory `Ledger` struct with its `[]LedgerEntry` slice is **eliminated**. The `LedgerWriter` holds only the open file handle and a `json.Encoder`. Per-file entries are serialized and flushed immediately, then discarded. Memory usage is O(1) regardless of file count.
+- File entries appear in **processing order**, not discovery order. In concurrent mode, the order depends on which workers finish first. This is acceptable — the ledger is a receipt, not a sorted index.
+- An **interrupted run** (crash, Ctrl+C) leaves a partial but valid JSONL file. Every line written before the interruption is a complete, parseable JSON object. The header is always present (written first). This is strictly better than the prior atomic-write approach, which produced no ledger at all on interruption.
+- In **dry-run mode**, the ledger is not written (same as before).
+
+#### Changes from v3
+
+- **Format change:** Single JSON object → JSONL (one JSON object per line).
+- **`version` bumped to `4`.**
+- **Header/entry split:** Run metadata is on line 1; file entries are on lines 2+. The `files` array wrapper is removed.
+- **Streaming writes:** Entries are appended during the run instead of buffered and written atomically at the end. The `.tmp` + rename pattern is removed.
+- **In-memory `Ledger` struct eliminated.** Replaced by a `LedgerWriter` that holds an open file handle and streams entries.
+- **Partial ledger on interruption.** An interrupted run now leaves a valid (but incomplete) JSONL ledger rather than no ledger at all.
 
 #### Ledger Placement
 
 A single ledger is always written at `dirA/.pixe_ledger.json`, regardless of whether `--recursive` is enabled. In recursive mode, file paths within the ledger use relative paths from `dirA` (e.g., `vacation/IMG_0042.jpg`).
 
-The ledger is still written atomically (write `.tmp`, then rename) and is the **only file** Pixe writes to `dirA`.
+The ledger is the **only file** Pixe writes to `dirA`.
 
 ### 8.9 Filesystem Layout
 
