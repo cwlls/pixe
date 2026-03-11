@@ -7,24 +7,16 @@
 ## [Unreleased]
 
 - **Features**:
-  - Ledger format upgraded to v4 JSONL: streaming write replaces buffered JSON array.
-  - `LedgerHeader` struct written as line 1 of the ledger; subsequent lines are individual `LedgerEntry` objects.
-  - `LedgerWriter` type in `internal/manifest`: nil-safe `WriteEntry` and `Close` methods; coordinator goroutine is sole writer, no mutex needed.
-  - Crash-safe ledger: each entry is flushed as it is written; partial writes produce valid JSONL up to the last complete line.
-  - Dry-run mode produces no ledger file (`LedgerWriter` stays nil; all calls are no-ops).
-
-- **Removals**:
-  - Removed `Ledger` struct, `SaveLedger`, and atomic `.tmp`+rename pattern from `internal/manifest`.
-  - `LoadLedger` rewritten as JSONL reader returning `*LedgerContents{Header, Entries}` (test utility only).
-
-## [v0.12.0] - 2026-03-11
-
-- **Features**:
   - `--recursive` flag (`-r`): descend into subdirectories of `--source` during sort.
   - `--ignore` flag: glob pattern for files to exclude from processing (repeatable; e.g. `--ignore "*.txt" --ignore ".DS_Store"`).
   - `internal/ignore` package: glob matcher with hardcoded `.pixe_ledger.json` ignore at any depth.
   - Skip detection: files already imported in a prior run are skipped with `SKIP <path> -> previously imported`.
   - Schema v2 migration: `recursive` column added to `runs` table; `skip_reason` column and `skipped` status added to `files` table.
+  - Ledger format upgraded to v4 JSONL: streaming write replaces buffered JSON array.
+  - `LedgerHeader` struct written as line 1 of the ledger; subsequent lines are individual `LedgerEntry` objects.
+  - `LedgerWriter` type in `internal/manifest`: nil-safe `WriteEntry` and `Close` methods; coordinator goroutine is sole writer, no mutex needed.
+  - Crash-safe ledger: each entry is flushed as it is written; partial writes produce valid JSONL up to the last complete line.
+  - Dry-run mode produces no ledger file (`LedgerWriter` stays nil; all calls are no-ops).
 
 - **Improvements**:
   - Pipeline output format standardized: `COPY`, `SKIP`, `DUPE`, `ERR ` verbs with `->` separator on every line.
@@ -32,7 +24,40 @@
   - All outcomes (copy, skip, duplicate, error) now produce both a ledger entry and a DB row.
   - Discovery-phase skips (unsupported format, dotfiles) recorded in ledger and DB.
 
-## [v0.11.0] - 2026-03-08
+- **Removals**:
+  - Removed `Ledger` struct, `SaveLedger`, and atomic `.tmp`+rename pattern from `internal/manifest`.
+  - `LoadLedger` rewritten as JSONL reader returning `*LedgerContents{Header, Entries}` (test utility only).
+
+## [v1.1.1] - 2026-03-11
+
+- **Bug Fixes**:
+  - Fixed error return handling in test file fixtures.
+  - Replaced `goheif` with pure Go `heic-exif-extractor` for darwin/arm64 compatibility.
+
+## [v1.1.0] - 2026-03-11
+
+- **Features**:
+  - RAW format support: DNG, NEF, CR2, CR3, PEF, ARW — all 9 handlers now registered in CLI commands.
+  - Shared TIFF-RAW base (`internal/handler/tiffraw`): EXIF extraction and embedded JPEG preview for DNG, NEF, CR2, PEF, ARW.
+  - CR3 handler using ISOBMFF container parsing (same approach as HEIC/MP4).
+  - Added integration tests for RAW handler pipeline.
+
+- **Bug Fixes**:
+  - Fixed errcheck lint warnings in `resume` and `sort` commands.
+
+## [v1.0.2] - 2026-03-08
+
+- **Bug Fixes**:
+  - Updated goreleaser config to use non-deprecated `archives` format key.
+  - Fixed deprecated `StringToPtr` → `UTF16PtrFromString` in dblocator (Windows).
+
+## [v1.0.1] - 2026-03-08
+
+- **Bug Fixes**:
+  - Added Windows network mount detection to dblocator.
+  - Updated `.gitignore`.
+
+## [v1.0.0] - 2026-03-07
 
 - **Features**:
   - SQLite archive database (`internal/archivedb`): cumulative registry of all files ever sorted, using CGo-free `modernc.org/sqlite` with WAL mode and busy timeout.
@@ -41,13 +66,11 @@
   - Cross-process dedup race handling: `CompleteFileWithDedupCheck` atomically detects and routes duplicates when two `pixe sort` processes run simultaneously.
   - `--db-path` flag on `pixe sort` and `pixe resume`.
   - Run ID (UUID) written to ledger, linking the human-readable receipt to the archive database record.
-  - RAW format support: DNG, NEF, CR2, CR3, PEF, ARW — all 9 handlers now registered in CLI commands.
-  - Shared TIFF-RAW base (`internal/handler/tiffraw`): EXIF extraction and embedded JPEG preview for DNG, NEF, CR2, PEF, ARW.
-  - CR3 handler uses ISOBMFF container parsing (same approach as HEIC/MP4).
 
 - **Improvements**:
   - `pixe resume` rewritten to use database discovery chain instead of JSON manifest.
-  - Ledger bumped to v3 with `run_id`, `recursive`, `status`, `reason`, and `matches` fields per entry.
+  - Ledger bumped to v2 with `run_id` field.
+  - Version management refactored: `internal/version` package replaced with idiomatic ldflags injection into `cmd` package.
 
 ## [v0.10.0] - 2026-03-07
 
