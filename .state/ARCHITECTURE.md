@@ -743,6 +743,7 @@ Built with `spf13/cobra`. Configuration layered via `spf13/viper` (flags > confi
 pixe sort     --source <dirA> --dest <dirB> [options]
 pixe verify   --dir <dirB>
 pixe resume   --dir <dirB>
+pixe query    <subcommand> --dir <dirB> [options]
 pixe version
 ```
 
@@ -789,6 +790,21 @@ pixe v0.10.0 (commit: abc1234, built: 2026-03-06T10:30:00Z)
 
 No flags. This command calls `fullVersion()` (package-private in `cmd`) and prints to stdout. The version variables are injected at build time via ldflags (see Section 3).
 
+#### `pixe query <subcommand>`
+Read-only interrogation of the archive database. Exposes the query patterns described in Section 8.4 as user-facing subcommands. No files are modified — this is purely a reporting tool.
+
+**Parent-level flags** (inherited by all subcommands):
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dir` | (required) | Destination directory (`dirB`) associated with the archive database |
+| `--db-path` | (auto-detected) | Explicit path to the SQLite database file. Overrides automatic location logic. |
+| `--json` | `false` | Emit output as a JSON array instead of human-readable table. See Section 7.3.3. |
+
+Database discovery follows the same priority chain as `sort` and `resume`: `--db-path` flag → `dirB/.pixe/dbpath` marker → `dirB/.pixe/pixe.db`.
+
+See **Section 7.3** for full subcommand details.
+
 ### 7.2 Configuration File
 
 Viper supports a `.pixe.yaml` (or `.pixe.toml`, `.pixe.json`) configuration file for persistent defaults:
@@ -806,6 +822,338 @@ ignore:
 ```
 
 The `ignore` key is a list of glob patterns. Patterns from the config file are merged with any `--ignore` CLI flags (additive). The hardcoded `.pixe_ledger.json` ignore is always active regardless of config.
+
+### 7.3 Query Command
+
+`pixe query` is a **read-only** command group that exposes the archive database to the end user. It uses Cobra's nested subcommand pattern — each query type is its own subcommand with its own flags, allowing parameter shapes to diverge naturally as the query surface grows.
+
+#### 7.3.1 Subcommands
+
+##### `pixe query runs`
+
+Lists all sort runs recorded in the archive database, with file counts.
+
+```bash
+pixe query runs --dir ./archive
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| (none beyond parent) | | |
+
+**Output columns:** Run ID (truncated to 8 chars in table mode), Pixe version, source directory, started at, finished at, status, file count.
+
+**DB method:** `ListRuns()` → `[]*RunSummary`
+
+**Human-readable example:**
+
+```
+RUN ID    VERSION  SOURCE              STARTED              STATUS      FILES
+a1b2c3d4  0.10.0   /Users/wells/photos 2026-03-06 10:30:00  completed   1,247
+e5f6a7b8  0.10.0   /Users/wells/dcim   2026-03-05 14:15:00  completed     384
+c9d0e1f2  0.9.0    /Users/wells/photos 2026-02-28 09:00:00  interrupted   892
+
+3 runs | 2,523 total files
+```
+
+##### `pixe query run <id>`
+
+Shows all files processed in a specific run.
+
+```bash
+pixe query run a1b2c3d4 --dir ./archive
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| (positional) | (required) | Run ID. Supports prefix matching — if `a1b2c3d4` uniquely identifies a run, the full UUID is not required. |
+
+**Output columns:** Source filename, status, destination (relative), checksum (truncated), capture date.
+
+**DB method:** `GetFilesByRun(runID)` → `[]*FileRecord`
+
+**Prefix matching:** The run ID argument is matched against the `runs.id` column using a `LIKE ?%` prefix query. If exactly one run matches, that run is used. If zero or multiple runs match, the command exits with an error listing the ambiguous matches. This allows users to type `pixe query run a1b2` instead of the full UUID.
+
+**Human-readable example:**
+
+```
+Run a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  Version:  0.10.0
+  Source:   /Users/wells/photos
+  Started:  2026-03-06 10:30:00 UTC
+  Finished: 2026-03-06 10:42:15 UTC
+  Status:   completed
+
+SOURCE FILE          STATUS    DESTINATION                                          CAPTURE DATE
+IMG_0001.jpg         complete  2021/12-Dec/20211225_062223_7d97e98f...jpg            2021-12-25
+IMG_0002.jpg         duplicate duplicates/20260306_103000/2022/02-Feb/20220202...jpg 2022-02-02
+notes.txt            skipped   —                                                    —
+corrupt.jpg          failed    —                                                    —
+
+1,247 files | 1,180 complete | 42 duplicates | 15 skipped | 10 errors
+```
+
+##### `pixe query duplicates`
+
+Lists all files flagged as duplicates across all runs.
+
+```bash
+pixe query duplicates --dir ./archive
+pixe query duplicates --dir ./archive --pairs
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--pairs` | `false` | Show each duplicate alongside the original it matches (joined by checksum). |
+
+**Without `--pairs`:**
+
+**DB method:** `AllDuplicates()` → `[]*FileRecord`
+
+**Output columns:** Source path, destination (in `duplicates/`), checksum (truncated), capture date.
+
+**With `--pairs`:**
+
+**DB method:** `DuplicatePairs()` → `[]*DuplicatePair`
+
+**Output columns:** Duplicate source path, duplicate destination, original destination.
+
+**Human-readable example (`--pairs`):**
+
+```
+DUPLICATE SOURCE                DUPLICATE DEST                                       ORIGINAL
+/Users/wells/photos/IMG_0002.jpg duplicates/20260306.../2022/02-Feb/20220202...jpg   2022/02-Feb/20220202_123101_447d3060...jpg
+/Users/wells/dcim/DSC_4521.jpg   duplicates/20260305.../2024/07-Jul/20240715...jpg   2024/07-Jul/20240715_143022_abc12345...jpg
+
+2 duplicate pairs
+```
+
+##### `pixe query errors`
+
+Lists all files in error states (`failed`, `mismatch`, `tag_failed`) across all runs.
+
+```bash
+pixe query errors --dir ./archive
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| (none beyond parent) | | |
+
+**DB method:** `FilesWithErrors()` → `[]*FileWithSource`
+
+**Output columns:** Source path, status, error message, run source directory.
+
+**Human-readable example:**
+
+```
+SOURCE PATH                       STATUS      ERROR                                    RUN SOURCE
+/Users/wells/photos/corrupt.jpg   failed      EXIF parse failed: truncated IFD         /Users/wells/photos
+/Users/wells/dcim/DSC_9999.jpg    mismatch    expected abc123, got def456               /Users/wells/dcim
+/Users/wells/photos/IMG_5000.jpg  tag_failed  permission denied: write metadata         /Users/wells/photos
+
+3 errors | 1 failed | 1 mismatch | 1 tag_failed
+```
+
+##### `pixe query skipped`
+
+Lists all files that were skipped (previously imported or unsupported format) across all runs.
+
+```bash
+pixe query skipped --dir ./archive
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| (none beyond parent) | | |
+
+**DB method:** New method `AllSkipped()` → `[]*FileRecord` (query: `SELECT ... FROM files WHERE status = 'skipped' ORDER BY id`). Follows the same pattern as `AllDuplicates()`.
+
+**Output columns:** Source path, skip reason.
+
+**Human-readable example:**
+
+```
+SOURCE PATH                        REASON
+/Users/wells/photos/notes.txt      unsupported format: .txt
+/Users/wells/photos/.DS_Store      unsupported format: .DS_Store
+/Users/wells/photos/IMG_0001.jpg   previously imported
+
+3 skipped files | 2 unsupported format | 1 previously imported
+```
+
+##### `pixe query files`
+
+Flexible file search with date-range and source-directory filters. At least one filter flag is required.
+
+```bash
+pixe query files --dir ./archive --from 2024-01-01 --to 2024-12-31
+pixe query files --dir ./archive --imported-from 2026-03-01 --imported-to 2026-03-07
+pixe query files --dir ./archive --source /Users/wells/photos
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--from` | (none) | Start of capture date range (inclusive). Format: `YYYY-MM-DD`. |
+| `--to` | (none) | End of capture date range (inclusive). Format: `YYYY-MM-DD`. |
+| `--imported-from` | (none) | Start of import/verification date range (inclusive). Format: `YYYY-MM-DD`. |
+| `--imported-to` | (none) | End of import/verification date range (inclusive). Format: `YYYY-MM-DD`. |
+| `--source` | (none) | Filter to files imported from this source directory (absolute path). |
+
+**Validation:** At least one filter flag must be provided. The `--from`/`--to` pair and `--imported-from`/`--imported-to` pair are mutually exclusive with each other — a single invocation queries by capture date range, import date range, or source directory, but not multiple at once. If only `--from` is provided (no `--to`), the range extends to the present. If only `--to` is provided (no `--from`), the range starts from the earliest record.
+
+**DB methods:**
+- `--from`/`--to` → `FilesByCaptureDateRange(start, end)` → `[]*FileRecord`
+- `--imported-from`/`--imported-to` → `FilesByImportDateRange(start, end)` → `[]*FileRecord`
+- `--source` → `FilesBySource(sourceDir)` → `[]*FileRecord`
+
+**Output columns:** Source path, destination (relative), checksum (truncated), capture date, status.
+
+**Human-readable example:**
+
+```
+SOURCE PATH                        DESTINATION                                    CHECKSUM   CAPTURE DATE  STATUS
+/Users/wells/photos/IMG_3001.jpg   2024/07-Jul/20240715_143022_abc12345...jpg     abc12345   2024-07-15    complete
+/Users/wells/photos/IMG_3002.jpg   2024/07-Jul/20240715_150100_def67890...jpg     def67890   2024-07-15    complete
+/Users/wells/photos/VID_0050.mp4   2024/08-Aug/20240820_091500_1a2b3c4d...mp4     1a2b3c4d   2024-08-20    complete
+
+3 files | capture range: 2024-07-15 to 2024-08-20
+```
+
+##### `pixe query inventory`
+
+Lists the canonical archive contents — all complete, non-duplicate files. This is the "what does my archive actually contain?" view.
+
+```bash
+pixe query inventory --dir ./archive
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| (none beyond parent) | | |
+
+**DB method:** `ArchiveInventory()` → `[]*InventoryEntry`
+
+**Output columns:** Destination path (relative), checksum, capture date.
+
+**Human-readable example:**
+
+```
+DESTINATION                                          CHECKSUM                                  CAPTURE DATE
+2021/12-Dec/20211225_062223_7d97e98f8af710c7...jpg   7d97e98f8af710c7e7fe703abc8f639e0ee507c4  2021-12-25
+2022/02-Feb/20220202_123101_447d3060abc12345...jpg   447d3060abc1234567890abcdef1234567890abcd  2022-02-02
+2024/07-Jul/20240715_143022_abc1234567890abc...jpg   abc1234567890abcdef1234567890abcdef123456  2024-07-15
+
+8,421 files | capture range: 2021-12-25 to 2024-08-20 | total size: 142.3 GB
+```
+
+#### 7.3.2 Human-Readable Output
+
+The default output mode is a **fixed-width columnar table** suitable for terminal viewing. Design principles:
+
+- **Column headers** are uppercase, left-aligned.
+- **Long values** are truncated with `...` to fit terminal width. Checksums are truncated to 8 hex characters in table mode (the full checksum is available via `--json`). File paths are truncated from the left (showing the most relevant suffix).
+- **Summary line** at the bottom of every query result. The summary provides aggregate counts and any relevant statistics (total files, breakdowns by status, date ranges, total size where applicable). The summary is separated from the table by a blank line.
+- **Empty results** produce a single line: `No <items> found.` (e.g., `No duplicates found.`, `No errors found.`).
+- **Run ID truncation** in table mode: UUIDs are shown as the first 8 characters. The full UUID is available via `--json` or `pixe query run <prefix>`.
+
+#### 7.3.3 JSON Output
+
+When `--json` is passed, the output is a single **JSON object** (not JSONL) written to stdout. This is designed for piping to `jq`, scripting, and programmatic consumption.
+
+**Structure:**
+
+```json
+{
+  "query": "<subcommand name>",
+  "dir": "/absolute/path/to/dirB",
+  "results": [ ... ],
+  "summary": {
+    "total": 42,
+    ...
+  }
+}
+```
+
+- **`query`** — the subcommand name (e.g., `"runs"`, `"duplicates"`, `"errors"`).
+- **`dir`** — the resolved `dirB` path.
+- **`results`** — a JSON array of result objects. Each object contains the full, untruncated data for every field (full UUIDs, full checksums, full paths). Field names use `snake_case` matching the database column names.
+- **`summary`** — the same aggregate statistics shown in the human-readable summary line, structured as a JSON object.
+
+**JSON uses `omitempty` semantics** — null/empty fields are omitted from result objects, consistent with the ledger format convention.
+
+**Example (`pixe query errors --dir ./archive --json`):**
+
+```json
+{
+  "query": "errors",
+  "dir": "/Users/wells/archive",
+  "results": [
+    {
+      "source_path": "/Users/wells/photos/corrupt.jpg",
+      "status": "failed",
+      "error": "EXIF parse failed: truncated IFD at offset 0x1A",
+      "run_source": "/Users/wells/photos"
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "failed": 1,
+    "mismatch": 0,
+    "tag_failed": 0
+  }
+}
+```
+
+#### 7.3.4 Database Interaction
+
+`pixe query` opens the database in **read-only mode**. No writes are performed — no run records, no file records, no schema modifications. The database is opened, queried, and closed.
+
+If the database does not exist at the resolved path, the command exits with a clear error: `Error: no archive database found for <dirB>. Run 'pixe sort' first to create one.`
+
+#### 7.3.5 New Database Methods Required
+
+The existing `queries.go` in `internal/archivedb/` provides most of the needed methods. The following additions are required:
+
+| Method | Query | Purpose |
+|---|---|---|
+| `AllSkipped()` | `SELECT source_path, skip_reason, ... FROM files WHERE status = 'skipped' ORDER BY id` | Backing query for `pixe query skipped` |
+| `GetRunByPrefix(prefix)` | `SELECT ... FROM runs WHERE id LIKE ? ORDER BY started_at DESC` | Prefix-match lookup for `pixe query run <id>` |
+| `ArchiveStats()` | Aggregate query: total files, total duplicates, total errors, total skipped, total size, date range, run count | Backing query for summary statistics (used by all subcommands that need aggregate data beyond a simple `len(results)`) |
+
+`AllSkipped()` follows the exact pattern of `AllDuplicates()` — same scan logic, different WHERE clause.
+
+`GetRunByPrefix()` returns `([]*Run, error)` — the caller checks `len(results)` for 0 (not found) or >1 (ambiguous) and formats the appropriate error message. This keeps the ambiguity logic in the CLI layer, not the database layer.
+
+`ArchiveStats()` is a new aggregate query that returns a stats struct. It powers the summary lines across subcommands and could eventually back a standalone `pixe query stats` command if desired.
+
+#### 7.3.6 Package Layout
+
+```
+cmd/
+├── query.go              ← parent `pixe query` command, defines --dir, --db-path, --json
+├── query_runs.go         ← `pixe query runs` subcommand
+├── query_run.go          ← `pixe query run <id>` subcommand
+├── query_duplicates.go   ← `pixe query duplicates` subcommand
+├── query_errors.go       ← `pixe query errors` subcommand
+├── query_skipped.go      ← `pixe query skipped` subcommand
+├── query_files.go        ← `pixe query files` subcommand
+├── query_inventory.go    ← `pixe query inventory` subcommand
+```
+
+Each subcommand file follows the existing Cobra pattern established by `sort.go`, `verify.go`, and `resume.go`. The parent command (`query.go`) handles:
+
+1. Database discovery and opening (shared `PersistentPreRunE` on the parent command).
+2. Passing the `*archivedb.DB` handle to subcommands via Cobra's context or a package-level variable (same pattern used by `resume.go`).
+3. The `--json` flag (read by subcommands to choose output formatting).
+
+Subcommands are responsible for:
+
+1. Defining their own flags.
+2. Calling the appropriate `archivedb` method.
+3. Formatting output (table or JSON) based on the `--json` flag.
+
+A shared output formatting helper (e.g., `queryOutput(results, summary, jsonFlag)`) may be extracted if the pattern proves repetitive across subcommands, but this is an implementation detail — each subcommand can start with its own formatting and refactor later.
 
 ---
 
@@ -928,22 +1276,24 @@ Future Pixe versions can check this table and apply incremental migrations.
 
 ### 8.4 Query Patterns
 
-The schema supports the following query families, all served by indexed lookups:
+The schema supports the following query families, all served by indexed lookups. Queries marked with **CLI** are exposed to end users via `pixe query` subcommands (see Section 7.3). Queries marked with **Internal** are used by the sort pipeline and are not directly user-facing.
 
-| Query | SQL Pattern |
-|---|---|
-| **Dedup check** | `SELECT dest_rel FROM files WHERE checksum = ? AND status = 'complete' LIMIT 1` |
-| **Files from source** | `SELECT * FROM files WHERE source_path LIKE ? AND run_id IN (SELECT id FROM runs WHERE source = ?)` |
-| **Files by capture date range** | `SELECT * FROM files WHERE capture_date BETWEEN ? AND ? AND status = 'complete'` |
-| **Files by import date range** | `SELECT * FROM files WHERE verified_at BETWEEN ? AND ?` |
-| **Run history** | `SELECT * FROM runs ORDER BY started_at DESC` |
-| **Run detail** | `SELECT * FROM files WHERE run_id = ?` |
-| **All errors/mismatches** | `SELECT f.*, r.source FROM files f JOIN runs r ON f.run_id = r.id WHERE f.status IN ('failed', 'mismatch', 'tag_failed')` |
-| **All duplicates** | `SELECT * FROM files WHERE is_duplicate = 1` |
-| **Duplicate pairs** | `SELECT d.source_path, d.dest_path, o.dest_path AS original FROM files d JOIN files o ON d.checksum = o.checksum AND o.is_duplicate = 0 AND o.status = 'complete' WHERE d.is_duplicate = 1` |
-| **All skipped** | `SELECT source_path, skip_reason FROM files WHERE status = 'skipped'` |
-| **Skip check** | `SELECT id FROM files WHERE source_path = ? AND status IN ('complete', 'duplicate') LIMIT 1` |
-| **Archive inventory** | `SELECT dest_rel, checksum, capture_date FROM files WHERE status = 'complete' AND is_duplicate = 0` |
+| Query | SQL Pattern | Exposure |
+|---|---|---|
+| **Dedup check** | `SELECT dest_rel FROM files WHERE checksum = ? AND status = 'complete' LIMIT 1` | Internal |
+| **Skip check** | `SELECT id FROM files WHERE source_path = ? AND status IN ('complete', 'duplicate') LIMIT 1` | Internal |
+| **Run history** | `SELECT r.*, COUNT(f.id) FROM runs r LEFT JOIN files f ... GROUP BY r.id ORDER BY started_at DESC` | **CLI:** `pixe query runs` |
+| **Run detail** | `SELECT * FROM files WHERE run_id = ?` | **CLI:** `pixe query run <id>` |
+| **Run by prefix** | `SELECT * FROM runs WHERE id LIKE ?% ORDER BY started_at DESC` | **CLI:** `pixe query run <id>` (prefix resolution) |
+| **All duplicates** | `SELECT * FROM files WHERE is_duplicate = 1` | **CLI:** `pixe query duplicates` |
+| **Duplicate pairs** | `SELECT d.source_path, d.dest_rel, o.dest_rel FROM files d JOIN files o ON d.checksum = o.checksum AND o.is_duplicate = 0 AND o.status = 'complete' WHERE d.is_duplicate = 1` | **CLI:** `pixe query duplicates --pairs` |
+| **All errors/mismatches** | `SELECT f.*, r.source FROM files f JOIN runs r ON f.run_id = r.id WHERE f.status IN ('failed', 'mismatch', 'tag_failed')` | **CLI:** `pixe query errors` |
+| **All skipped** | `SELECT source_path, skip_reason FROM files WHERE status = 'skipped'` | **CLI:** `pixe query skipped` |
+| **Files from source** | `SELECT * FROM files f JOIN runs r ON r.id = f.run_id WHERE r.source = ?` | **CLI:** `pixe query files --source` |
+| **Files by capture date range** | `SELECT * FROM files WHERE capture_date BETWEEN ? AND ? AND status = 'complete'` | **CLI:** `pixe query files --from/--to` |
+| **Files by import date range** | `SELECT * FROM files WHERE verified_at BETWEEN ? AND ?` | **CLI:** `pixe query files --imported-from/--imported-to` |
+| **Archive inventory** | `SELECT dest_rel, checksum, capture_date FROM files WHERE status = 'complete' AND is_duplicate = 0` | **CLI:** `pixe query inventory` |
+| **Archive stats** | Aggregate: `COUNT`, `SUM(file_size)`, `MIN/MAX(capture_date)`, grouped by status | **CLI:** summary lines on all subcommands |
 
 ### 8.5 Concurrency & Integrity
 
@@ -1156,7 +1506,7 @@ These items are explicitly **out of scope** for the current build but are acknow
 5. **Web UI / TUI** — Progress visualization beyond CLI output.
 6. **Cloud storage targets** — `dirB` on S3, GCS, etc.
 7. **GPS/location-based organization** — Subdirectories by location in addition to date.
-8. **`pixe query` CLI command** — Expose the database query patterns (Section 8.4) as user-facing subcommands (e.g., `pixe query --duplicates`, `pixe query --errors`, `pixe query --from-source <path>`).
+8. ~~**`pixe query` CLI command**~~ — **Promoted to Section 7.3.** No longer a future consideration.
 9. **Database compaction/maintenance** — `VACUUM` command exposure for long-lived archives.
 10. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
 11. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
