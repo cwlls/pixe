@@ -339,7 +339,7 @@ When `--skip-duplicates` is active, the pipeline skips the copy entirely for fil
 2. The coordinator's pre-copy dedup check identifies the match.
 3. The copy, verify, and tag stages are skipped entirely.
 4. A `DUPE` line is emitted to stdout: `DUPE IMG_0042.jpg -> matches 2022/02-Feb/20220202...jpg`
-5. A database row is recorded with `status = 'duplicate'`, `is_duplicate = 1`, the computed checksum, and `dest_path`/`dest_rel` left NULL (no file was written).
+5. A database row is recorded with `status = 'complete'`, `is_duplicate = 1`, the computed checksum, and `dest_path`/`dest_rel` left NULL (no file was written).
 6. A ledger entry is appended with `status: "duplicate"`, `checksum`, and `matches` fields, but no `destination` field (consistent with `omitempty` — absence of `destination` signals no physical copy was made).
 
 **Safety rationale:** The default remains "copy duplicates" because the safety-first principle says: when in doubt, preserve the file somewhere. Users who know they want to skip can explicitly opt in. The source files in `dirA` are never modified regardless of this flag — if a skipped duplicate needs to be recovered, it can always be re-imported by running without `--skip-duplicates`.
@@ -497,15 +497,17 @@ Pixe uses an **atomic copy pattern** to ensure that a file at its canonical path
 
 #### Temp File Naming
 
-The temp file name follows the pattern `.<original_filename>.pixe-tmp`:
+The temp file name follows the pattern `.<original_filename>.pixe-tmp-<random_suffix>`:
 
 ```
-.<YYYYMMDD_HHMMSS_CHECKSUM.ext>.pixe-tmp
+.<YYYYMMDD_HHMMSS_CHECKSUM.ext>.pixe-tmp-<random>
 ```
 
-Example: A file destined for `2021/12-Dec/20211225_062223_7d97e98f...jpg` is first written to `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp`.
+Example: A file destined for `2021/12-Dec/20211225_062223_7d97e98f...jpg` is first written to `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp-abc123` (or similar unique suffix).
 
-The leading dot makes temp files hidden on Unix systems. The `.pixe-tmp` suffix makes them unambiguously identifiable as Pixe artifacts, distinct from any media file.
+The leading dot makes temp files hidden on Unix systems. The `.pixe-tmp-<random>` suffix makes them unambiguously identifiable as Pixe artifacts, distinct from any media file. The random suffix is generated via `os.CreateTemp` to ensure that concurrent workers processing files with the same destination path do not overwrite each other's temp files.
+
+**Note on `TempPath()` function:** The `copy.TempPath()` helper function returns the deterministic pattern `.<basename>.pixe-tmp` (without the random suffix). This is used by tests and for identifying orphaned temp files by prefix. The actual temp files created by `Execute()` use the unique `os.CreateTemp` pattern.
 
 #### Interrupted Run Behavior
 
@@ -513,8 +515,8 @@ If the process is killed mid-copy or mid-verify, the temp file is left on disk. 
 
 - The canonical destination path **never exists** in a partial state. Any file at a canonical path has passed verification.
 - The DB row for the interrupted file will be in a non-terminal state (`hashed` or earlier — the `copied` status is not set until the temp file is written, and `verified` is not set until after the rename).
-- On **`pixe resume`**, the file is reprocessed. The new copy overwrites the orphaned temp file (using `O_CREATE|O_TRUNC`, not `O_EXCL`) and proceeds normally. The orphan is self-healing.
-- Over time, if orphaned temp files accumulate without a resume, a future `pixe clean` command can scan for and remove them (see Section 10).
+- On **`pixe resume`**, the file is reprocessed. Because `Execute()` uses `os.CreateTemp` to generate a unique temp file name, the new copy creates a **new unique temp file** rather than overwriting the orphaned one. The orphan is left on disk but does not interfere with the new run.
+- Over time, if orphaned temp files accumulate without a resume, a future `pixe clean` command can scan for and remove them by prefix matching (see Section 10). Orphaned temp files are self-healing via `pixe clean`.
 
 #### Interaction with Cross-Process Dedup
 
