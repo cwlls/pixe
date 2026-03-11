@@ -1650,3 +1650,108 @@ Added the `LedgerHeader` struct to `internal/domain/pipeline.go` as the first st
 - `go test -race -timeout 120s ./internal/domain/...` ✅ PASS
 
 ---
+
+## Task 20 — Build `LedgerWriter` in `internal/manifest`
+
+**Date:** 2026-03-11
+**Status:** ✅ Complete
+
+### Implementation Summary
+
+Added the `LedgerWriter` type to `internal/manifest/manifest.go`. This is the streaming JSONL writer that owns the ledger file handle and `json.Encoder`. The coordinator goroutine is the sole caller — no mutex is needed.
+
+### Files Changed
+
+- **`internal/manifest/manifest.go`** — Added `LedgerWriter` struct, `NewLedgerWriter`, `WriteEntry`, `Close`.
+
+### Key Design
+
+- `NewLedgerWriter(dirA, header)`: opens the ledger file (truncating any existing content), writes the header as line 1 via `json.Encoder.Encode`.
+- `WriteEntry(entry)`: nil-safe — returns nil immediately if receiver is nil. Appends one compact JSON line.
+- `Close()`: flushes and closes the underlying `*os.File`.
+- `SetEscapeHTML(false)` on the encoder keeps file paths with `&`, `<`, `>` unescaped.
+- `json.Encoder.Encode()` writes compact JSON + `\n` per call — exactly JSONL format.
+
+### Validation
+
+- `go build ./...` ✅ PASS
+- `go test -race -timeout 120s ./internal/manifest/...` ✅ PASS
+
+---
+
+## Tasks 21–25 — JSONL Ledger Conversion: Core Implementation
+
+**Date:** 2026-03-11
+**Status:** ✅ Complete
+
+### Implementation Summary
+
+Completed the core JSONL conversion: removed the old buffered `Ledger` struct and `SaveLedger`, rewrote `LoadLedger` as a JSONL reader, and wired `LedgerWriter` into both the sequential and concurrent pipeline paths.
+
+### Files Changed
+
+- **`internal/domain/pipeline.go`** — Removed `Ledger` struct (had `Files []LedgerEntry`). `LedgerHeader`, `LedgerEntry`, and all ledger status constants retained.
+- **`internal/manifest/manifest.go`** — Removed `SaveLedger` and `atomicWriteJSON`. Added `LedgerContents` struct. Rewrote `LoadLedger` as JSONL reader returning `*LedgerContents`. Fixed `defer f.Close()` to use anonymous func for errcheck compliance.
+- **`internal/pipeline/pipeline.go`** — `Run()` opens `LedgerWriter` at start (header written immediately), closes at end. Dry-run: `lw` stays nil. `runSequential` signature changed from `ledger *domain.Ledger` to `lw *manifest.LedgerWriter`. All 4 `ledger.Files = append(...)` sites replaced with `lw.WriteEntry(...)`.
+- **`internal/pipeline/worker.go`** — `RunConcurrent`/`runConcurrentCtx` signature changed from `ledger *domain.Ledger` to `lw *manifest.LedgerWriter`. All 8 `ledger.Files = append(...)` sites in the coordinator goroutine replaced with `lw.WriteEntry(...)`. Added `manifest` import.
+
+### `LedgerContents` Type
+
+```go
+type LedgerContents struct {
+    Header  domain.LedgerHeader
+    Entries []domain.LedgerEntry
+}
+```
+
+Used only in tests. `LoadLedger` uses `json.Decoder` which reads JSONL naturally: first `Decode` call reads the header, subsequent calls in a `dec.More()` loop read entries.
+
+### Key Design Decisions
+
+- Nil-safe `WriteEntry` eliminates scattered nil checks at every call site.
+- `lw` is opened before `runSequential`/`RunConcurrent` is called, so the header is always written before any entries.
+- If `NewLedgerWriter` fails (e.g., permission error), `lw` stays nil and processing continues without a ledger — same non-fatal behavior as the old `SaveLedger` warning.
+
+### Validation
+
+- `go build ./...` ✅ PASS
+- `go test -race -timeout 120s ./...` ✅ PASS (all packages)
+- `make lint` ✅ PASS (0 issues)
+
+---
+
+## Tasks 26–29 — JSONL Ledger Conversion: Tests
+
+**Date:** 2026-03-11
+**Status:** ✅ Complete
+
+### Implementation Summary
+
+Added comprehensive tests for the `LedgerWriter` type, rewrote all v3 ledger tests as v4, updated all pipeline and integration test call sites to use `*manifest.LedgerContents`, and added a partial-write crash-safety test.
+
+### Files Changed
+
+- **`internal/manifest/manifest_test.go`** — Added `encoding/json` and `strings` imports. Added helpers `sampleLedgerHeader`, `writeSampleLedger`, `writeLedgerV4Full`. Rewrote all `TestLedger_v3_*` tests as `TestLedger_v4_*`. Added Task 26 tests: `TestLedgerWriter_headerOnly`, `TestLedgerWriter_headerAndEntries`, `TestLedgerWriter_omitempty`, `TestLedgerWriter_compactJSON`, `TestLedgerWriter_nilSafe`, `TestLedgerWriter_version4`. Added Task 29 test: `TestLedgerWriter_partialWrite`.
+- **`internal/pipeline/pipeline_test.go`** — Updated all `manifest.LoadLedger` call sites to use `*manifest.LedgerContents`. Changed `l.Files` → `l.Entries`, `l.Version` → `l.Header.Version`, `l.RunID` → `l.Header.RunID`, `l.Recursive` → `l.Header.Recursive`. Renamed `TestRun_ledgerVersion3WithRunID` → `TestRun_ledgerVersion4WithRunID`.
+- **`internal/pipeline/worker_test.go`** — Updated `l.Files` → `l.Entries`.
+- **`internal/integration/integration_test.go`** — Removed unused `domain` import. Updated `ledger.Version` → `ledger.Header.Version` (assert 4 not 3), `ledger.RunID` → `ledger.Header.RunID`.
+
+### Test Coverage
+
+| Test | What it verifies |
+|------|-----------------|
+| `TestLedgerWriter_headerOnly` | 1-line file; header parses back with all fields |
+| `TestLedgerWriter_headerAndEntries` | 4-line file; entry order and status fields correct |
+| `TestLedgerWriter_omitempty` | Skip entry has no `checksum`, `destination`, `verified_at`, `matches` keys |
+| `TestLedgerWriter_compactJSON` | No embedded newlines; each line is valid JSON |
+| `TestLedgerWriter_nilSafe` | `WriteEntry` on nil receiver: no panic, returns nil |
+| `TestLedgerWriter_version4` | Header line contains `"version":4` |
+| `TestLedgerWriter_partialWrite` | 2 entries written without Close; file has 3 valid JSON lines |
+
+### Validation
+
+- `go build ./...` ✅ PASS
+- `go test -race -timeout 120s ./...` ✅ PASS (all packages including integration)
+- `make lint` ✅ PASS (0 issues)
+
+---

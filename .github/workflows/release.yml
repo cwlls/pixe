@@ -18,8 +18,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-          cache: true # Ensures GoReleaser doesn't have to re-download everything
+          go-version: '1.24'
+          cache: true
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6

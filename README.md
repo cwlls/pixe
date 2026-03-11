@@ -4,7 +4,7 @@ A safe, deterministic photo and video sorting utility.
 
 ## What It Does
 
-Pixe organizes media files into a date-based directory structure with embedded integrity checksums. It extracts capture dates from file metadata, computes deterministic hashes, and produces a consistently organized archive — without ever modifying your source files.
+Pixe organizes media files into a date-based directory structure with embedded integrity checksums. It extracts capture dates from file metadata, computes deterministic hashes, and produces a consistently organized archive — without ever modifying your source files. A SQLite archive database tracks every file ever processed, enabling duplicate detection, skip-on-resume, and queryable history across all runs.
 
 ## Key Principles
 
@@ -30,6 +30,19 @@ discover → extract → hash → copy → verify → tag → complete
 5. **Verify** — Re-read and re-hash the destination to confirm integrity
 6. **Tag** — Optionally inject Copyright/CameraOwner metadata
 
+### Output Format
+
+Each file produces one output line:
+
+```
+COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223_abc123.jpg
+SKIP notes.txt -> unsupported format: .txt
+SKIP IMG_0002.jpg -> previously imported
+DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223_abc123.jpg
+ERR  corrupt.jpg -> extract date: no EXIF data
+Done. processed=3 duplicates=1 skipped=2 errors=1
+```
+
 ### Output Naming Convention
 
 ```
@@ -43,24 +56,24 @@ YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 ### Directory Structure
 
 ```
-<dest>/<YYYY>/<M>/<filename>
+<dest>/<YYYY>/<MM-Mon>/<filename>
 ```
 
 - Year: 4-digit (e.g., `2021`)
-- Month: Non-zero-padded (e.g., `2`, not `02`)
+- Month: Zero-padded number + 3-letter abbreviation (e.g., `12-Dec`)
 
 ### Duplicates
 
 When a file's checksum matches an already-processed file:
 
 ```
-<dest>/duplicates/<run_timestamp>/<YYYY>/<M>/<filename>
+<dest>/duplicates/<run_timestamp>/<YYYY>/<MM-Mon>/<filename>
 ```
 
-### Manifest & Ledger
+### Archive Database & Ledger
 
-- **Manifest** (`<dest>/.pixe/manifest.json`): Tracks per-file processing state, enables resume after interruption
-- **Ledger** (`<source>/.pixe_ledger.json`): Records successfully processed files in the source directory
+- **Archive DB** (`<dest>/.pixe/<slug>.db`): SQLite database tracking all files ever processed across all runs. Enables duplicate detection, skip-on-resume, and queryable history. Automatically migrated from legacy JSON manifest if present.
+- **Ledger** (`<source>/.pixe_ledger.json`): Streaming JSONL receipt written during each run. Line 1 is a header with run metadata; subsequent lines are one entry per file. Human-readable and crash-safe (partial writes are valid JSONL).
 
 ## Installation
 
@@ -75,7 +88,7 @@ go install github.com/cwlls/pixe-go@latest
 ```bash
 git clone https://github.com/cwlls/pixe-go.git
 cd pixe-go
-go build -o pixe .
+make build
 ```
 
 ## Usage
@@ -94,9 +107,12 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | `-d, --dest` | Destination directory for the organized archive (required) |
 | `-w, --workers` | Number of concurrent workers (default: auto-detect) |
 | `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
+| `-r, --recursive` | Recursively process subdirectories of `--source` |
+| `--ignore` | Glob pattern for files to exclude (repeatable, e.g. `--ignore "*.txt"`) |
 | `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
 | `--camera-owner` | Camera owner string to inject |
 | `--dry-run` | Preview operations without copying |
+| `--db-path` | Explicit path to the SQLite archive database |
 
 ### `pixe verify`
 
@@ -124,9 +140,10 @@ pixe resume --dir /path/to/archive
 
 | Flag | Description |
 |------|-------------|
-| `-d, --dir` | Destination directory containing `.pixe/manifest.json` (required) |
+| `-d, --dir` | Destination directory containing the archive database (required) |
+| `--db-path` | Explicit path to the SQLite archive database |
 
-Files marked `complete` are skipped. Files in `copied` state are re-verified. Earlier states re-enter the pipeline.
+Finds the most recent interrupted run in the archive database and re-sorts from the source directory. Files already marked complete are skipped automatically.
 
 ## Configuration File
 
@@ -145,11 +162,17 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 
 ## Supported File Types
 
-| Format | Extensions | Status |
-|--------|------------|--------|
-| JPEG   | `.jpg`, `.jpeg` | Complete |
-| HEIC   | `.heic`, `.heif` | In Progress |
-| MP4    | `.mp4`, `.mov` | In Progress |
+| Format | Extensions |
+|--------|------------|
+| JPEG | `.jpg`, `.jpeg` |
+| HEIC | `.heic`, `.heif` |
+| MP4/MOV | `.mp4`, `.mov` |
+| DNG | `.dng` |
+| NEF | `.nef` |
+| CR2 | `.cr2` |
+| CR3 | `.cr3` |
+| PEF | `.pef` |
+| ARW | `.arw` |
 
 ### Date Fallback Chain
 
@@ -163,14 +186,13 @@ Each file type extracts dates in this order:
 
 - **Source is read-only** — Pixe never modifies, renames, moves, or deletes source files. Only `.pixe_ledger.json` is written to the source directory.
 - **Copy-then-verify** — Every file is copied to the destination, then independently re-hashed to confirm integrity.
-- **Manifest-based resumability** — A manifest tracks each file's state. Interrupted runs resume from the last known-good state.
+- **Database-backed resumability** — The SQLite archive database tracks each file's state across all runs. Interrupted runs resume without re-processing completed files.
+- **Crash-safe ledger** — The JSONL ledger is written one line at a time. An interrupted run leaves a partial but fully valid receipt.
 - **No silent data loss** — Hash mismatches, copy failures, and unrecognized files are always reported. Pixe never exits silently on error.
 
 ## Project Status
 
 This project is under active development. Implementation progress is tracked in [STATE.md](.state/STATE.md).
-
-Current focus: Core pipeline implementation (discovery, hashing, manifest persistence).
 
 ---
 
