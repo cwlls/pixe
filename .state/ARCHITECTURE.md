@@ -520,7 +520,7 @@ If the process is killed mid-copy or mid-verify, the temp file is left on disk. 
 - The canonical destination path **never exists** in a partial state. Any file at a canonical path has passed verification.
 - The DB row for the interrupted file will be in a non-terminal state (`hashed` or earlier — the `copied` status is not set until the temp file is written, and `verified` is not set until after the rename).
 - On **`pixe resume`**, the file is reprocessed. Because `Execute()` uses `os.CreateTemp` to generate a unique temp file name, the new copy creates a **new unique temp file** rather than overwriting the orphaned one. The orphan is left on disk but does not interfere with the new run.
-- Over time, if orphaned temp files accumulate without a resume, a future `pixe clean` command can scan for and remove them by prefix matching (see Section 10). Orphaned temp files are self-healing via `pixe clean`.
+- Over time, if orphaned temp files accumulate without a resume, `pixe clean` can scan for and remove them by suffix matching on `.pixe-tmp` (see Section 7.5). Orphaned temp files are self-healing via `pixe clean`.
 
 #### Interaction with Cross-Process Dedup
 
@@ -823,6 +823,7 @@ pixe verify   --dir <dirB>
 pixe resume   --dir <dirB>
 pixe query    <subcommand> --dir <dirB> [options]
 pixe status   [--source <dirA>] [options]
+pixe clean    --dir <dirB> [options]
 pixe version
 ```
 
@@ -879,6 +880,17 @@ Shows the sorting status of a source directory by comparing the files currently 
 | `--recursive` | `-r` | `false` | Recursively inspect subdirectories of `--source` |
 | `--ignore` | | (none) | Glob pattern for files to ignore. Repeatable. Merged with config file patterns. |
 | `--json` | | `false` | Emit output as JSON instead of human-readable table |
+
+#### `pixe clean`
+Maintenance command for a destination archive. Removes orphaned temp files (`.pixe-tmp`) and XMP sidecars left by interrupted runs, and optionally compacts the archive database via VACUUM. See **Section 7.5** for full design details.
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--dir` | `-d` | (required) | Destination directory (`dirB`) to clean. |
+| `--db-path` | | (auto-detected) | Explicit path to the SQLite database file. |
+| `--dry-run` | | `false` | Preview what would be cleaned without modifying anything. |
+| `--temp-only` | | `false` | Only clean orphaned files. Skip database compaction. |
+| `--vacuum-only` | | `false` | Only compact the database. Skip file scanning. Mutually exclusive with `--temp-only`. |
 
 #### `pixe query <subcommand>`
 Read-only interrogation of the archive database. Exposes the query patterns described in Section 8.4 as user-facing subcommands. No files are modified — this is purely a reporting tool.
@@ -1444,6 +1456,201 @@ No new internal packages are needed. The command composes existing packages (`di
 
 The presence of unsorted files is not an error condition — it's the expected state before running `pixe sort`. A future enhancement could add a `--check` flag that exits with code `2` when unsorted files exist (useful for scripting/CI), but this is out of scope for the initial implementation.
 
+### 7.5 Clean Command
+
+`pixe clean` is a **destination-oriented maintenance command** that performs housekeeping operations on a `dirB` archive. It combines two distinct cleanup responsibilities — orphaned artifact removal and database compaction — into a single command that a user runs periodically on an established archive.
+
+#### 7.5.1 Core Responsibilities
+
+| Responsibility | What it does | Why it's needed |
+|---|---|---|
+| **Orphaned temp file cleanup** | Scans `dirB` for `.pixe-tmp` files left behind by interrupted `pixe sort` runs and removes them. | Interrupted runs (crash, Ctrl+C, power loss) leave temp files on disk. These are harmless (they don't interfere with subsequent runs) but waste space and clutter the archive. See Section 4.10. |
+| **Orphaned XMP sidecar cleanup** | Detects `.xmp` sidecar files in `dirB` that have no corresponding media file and removes them. | If a run is interrupted after writing an XMP sidecar but before the media file's temp file is renamed to its canonical path, the sidecar is left orphaned — associated with a media file that was never finalized. |
+| **Database compaction** | Runs `VACUUM` on the archive SQLite database to reclaim space. | Long-lived archives accumulate deleted rows and fragmentation from many runs. `VACUUM` rebuilds the database file, reclaiming disk space and improving query performance. |
+
+#### 7.5.2 Command Signature
+
+```bash
+pixe clean --dir <dirB> [options]
+```
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--dir` | `-d` | (required) | Destination directory (`dirB`) to clean. |
+| `--db-path` | | (auto-detected) | Explicit path to the SQLite database file. Overrides automatic location logic. |
+| `--dry-run` | | `false` | Preview what would be cleaned without deleting files or running VACUUM. Lists all orphaned artifacts and reports current database size. |
+| `--temp-only` | | `false` | Only clean orphaned temp files and XMP sidecars. Skip database compaction. |
+| `--vacuum-only` | | `false` | Only run database compaction. Skip temp file and sidecar scanning. |
+
+**Flag validation:** `--temp-only` and `--vacuum-only` are mutually exclusive. If both are specified, the command exits with an error. When neither is specified, both operations are performed (the default).
+
+#### 7.5.3 Orphaned Temp File Cleanup
+
+**Detection:** The command walks `dirB` recursively using `filepath.Walk` and identifies orphaned temp files by the presence of `.pixe-tmp` in the filename. This catches both the deterministic pattern (`.<basename>.pixe-tmp`) and the `os.CreateTemp` pattern (`.<basename>.pixe-tmp-<random>`), as both contain the `.pixe-tmp` substring.
+
+**Walk scope:** The walk covers all of `dirB`, including year/month subdirectories, the `duplicates/` tree, and the `.pixe/` directory. The walk does **not** descend into symlinks.
+
+**Deletion:** Each identified temp file is removed via `os.Remove`. Removal failures (e.g., permission denied) are reported as warnings but do not halt the scan — the command continues to the next file.
+
+**Output:** Each deleted temp file produces one line of stdout output:
+
+```
+REMOVE .20211225_062223_7d97e98f...jpg.pixe-tmp-abc123  (2021/12-Dec/)
+REMOVE .20220202_123101_447d3060...mp4.pixe-tmp-def456  (2022/02-Feb/)
+```
+
+The format is `REMOVE <filename>  (<parent_directory_relative_to_dirB>/)`. This follows Pixe's one-line-per-file output convention.
+
+In **dry-run mode**, the verb changes to `WOULD REMOVE` and no files are deleted:
+
+```
+WOULD REMOVE .20211225_062223_7d97e98f...jpg.pixe-tmp-abc123  (2021/12-Dec/)
+WOULD REMOVE .20220202_123101_447d3060...mp4.pixe-tmp-def456  (2022/02-Feb/)
+```
+
+#### 7.5.4 Orphaned XMP Sidecar Cleanup
+
+**Detection:** During the same `filepath.Walk` used for temp file scanning, the command identifies `.xmp` sidecar files and checks whether a corresponding media file exists at the expected path.
+
+A sidecar file at path `<dir>/<stem>.<media_ext>.xmp` is considered orphaned if no file exists at `<dir>/<stem>.<media_ext>`. For example, if `2021/12-Dec/20211225_071500_a3b4c5d6...arw.xmp` exists but `2021/12-Dec/20211225_071500_a3b4c5d6...arw` does not, the sidecar is orphaned.
+
+**Scope limitation:** Only `.xmp` files whose name matches the Pixe naming convention (`<YYYYMMDD_HHMMSS_CHECKSUM>.<media_ext>.xmp`) are considered. This prevents accidentally removing user-created or third-party XMP files that happen to be in `dirB`. The detection uses a regex match on the sidecar filename: `^\d{8}_\d{6}_[0-9a-f]+\..+\.xmp$`.
+
+**Deletion and output:** Same pattern as temp file cleanup — `REMOVE` / `WOULD REMOVE` per file, warnings on failure.
+
+```
+REMOVE 20211225_071500_a3b4c5d6...arw.xmp  (2021/12-Dec/)  orphaned sidecar
+```
+
+#### 7.5.5 Database Compaction
+
+**Database resolution:** The archive database is located via the same priority chain used by `pixe sort`, `pixe resume`, and `pixe query`: `--db-path` flag → `dirB/.pixe/dbpath` marker → `dirB/.pixe/pixe.db`. Resolution uses `dblocator.Resolve()`.
+
+**Pre-flight safety check:** Before running VACUUM, the command queries the `runs` table for any rows with `status = 'running'`. If an active run is detected, the command refuses to VACUUM and emits a clear error:
+
+```
+Error: cannot vacuum — active sort run detected (run a1b2c3d4, started 2026-03-06 10:30:00 UTC).
+Complete or interrupt the active run before running 'pixe clean'.
+```
+
+This is an application-level guard, not a substitute for SQLite's own locking. It catches the common case of a user running `pixe clean` while a sort is in progress on the same archive. If the `runs` row is stale (e.g., the sort process crashed without marking the run as interrupted), the user can resolve it via `pixe resume` first.
+
+**VACUUM execution:** The command opens the database in read-write mode via `archivedb.Open()` and calls a new `Vacuum()` method on the `DB` struct. VACUUM rebuilds the entire database file, requiring temporary disk space roughly equal to the current database size.
+
+**Size reporting:** The command reports the database file size before and after VACUUM:
+
+```
+Database: /Users/wells/archive/.pixe/pixe.db
+  Size before: 12.4 MB
+  Size after:  8.1 MB
+  Reclaimed:   4.3 MB (34.7%)
+```
+
+In **dry-run mode**, only the current size is reported:
+
+```
+Database: /Users/wells/archive/.pixe/pixe.db
+  Current size: 12.4 MB
+  (dry-run: VACUUM not executed)
+```
+
+If the database does not exist, the compaction step is skipped with a notice: `No archive database found — skipping compaction.` This is not an error; it allows `pixe clean --temp-only` to work on a `dirB` that has orphaned temp files but no database (e.g., after a failed first run).
+
+#### 7.5.6 Combined Output
+
+When both operations are performed (the default), the output is structured in two sections with a summary at the end:
+
+```
+Cleaning /Users/wells/archive
+
+Orphaned files:
+  REMOVE .20211225_062223_7d97e98f...jpg.pixe-tmp-abc123  (2021/12-Dec/)
+  REMOVE .20220202_123101_447d3060...mp4.pixe-tmp-def456  (2022/02-Feb/)
+  REMOVE 20211225_071500_a3b4c5d6...arw.xmp               (2021/12-Dec/)  orphaned sidecar
+
+Database compaction:
+  Size before: 12.4 MB
+  Size after:  8.1 MB
+  Reclaimed:   4.3 MB (34.7%)
+
+Cleaned 2 temp files, 1 orphaned sidecar | Reclaimed 4.3 MB from database
+```
+
+When no orphaned files are found:
+
+```
+Cleaning /Users/wells/archive
+
+Orphaned files:
+  No orphaned files found.
+
+Database compaction:
+  Size before: 8.1 MB
+  Size after:  8.1 MB
+  Reclaimed:   0 B (0.0%)
+
+No orphaned files found | Reclaimed 0 B from database
+```
+
+#### 7.5.7 Database Method: `Vacuum()`
+
+A new method is added to `archivedb.DB`:
+
+```go
+// Vacuum rebuilds the database file, reclaiming space from deleted rows
+// and reducing fragmentation. Requires exclusive access — no concurrent
+// readers or writers should be active.
+func (db *DB) Vacuum() error {
+    _, err := db.conn.Exec("VACUUM")
+    if err != nil {
+        return fmt.Errorf("archivedb: vacuum: %w", err)
+    }
+    return nil
+}
+```
+
+A companion method exposes the active-run check:
+
+```go
+// HasActiveRuns returns true if any run has status = 'running'.
+// Used by pixe clean to guard against vacuuming while a sort is in progress.
+func (db *DB) HasActiveRuns() (bool, error) {
+    var count int
+    err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs WHERE status = 'running'`).Scan(&count)
+    if err != nil {
+        return false, fmt.Errorf("archivedb: check active runs: %w", err)
+    }
+    return count > 0, nil
+}
+```
+
+#### 7.5.8 Package Layout
+
+```
+cmd/
+├── clean.go              ← `pixe clean` command definition, flag binding, RunE
+```
+
+The command logic is self-contained in a single file. It:
+
+1. Reads flags from Viper (`clean_dir`, `clean_db_path`, `dry_run`, `temp_only`, `vacuum_only`).
+2. Validates flag combinations (`--temp-only` and `--vacuum-only` are mutually exclusive).
+3. Resolves the absolute path of `--dir`.
+4. If temp cleanup is enabled: walks `dirB` with `filepath.Walk`, identifies and removes orphaned temp files and XMP sidecars, prints per-file output.
+5. If compaction is enabled: resolves the database via `dblocator.Resolve()`, opens in read-write mode via `archivedb.Open()`, checks for active runs via `HasActiveRuns()`, runs `Vacuum()`, reports size change.
+6. Prints the summary line.
+
+No handler registry is needed — `pixe clean` does not process media files. No new internal packages are required; the command composes `archivedb`, `dblocator`, `filepath.Walk`, and `os.Remove`.
+
+#### 7.5.9 Exit Codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success — cleanup completed (even if nothing needed cleaning) |
+| `1` | Error — `dirB` not found, database access failed, active run detected (when VACUUM requested), or other fatal error |
+
+Individual file removal failures (permission denied on a specific temp file) are **warnings**, not fatal errors. The command continues and exits `0` if the overall operation completed. The summary line notes any removal failures.
+
 ---
 
 ## 8. Archive Database & Ledger Design
@@ -1767,7 +1974,7 @@ dirB (organized destination)
 
 > **Note:** XMP sidecar files (`.xmp`) only appear when the user has configured `--copyright` and/or `--camera-owner`. If no metadata tags are configured, no sidecars are generated and the layout is identical to the pre-sidecar design.
 
-> **Note:** During active copy operations, temporary files with the pattern `.<filename>.pixe-tmp` may be visible in destination directories (e.g., `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp`). These are transient artifacts of the atomic copy process (Section 4.10) and are renamed to their canonical paths upon successful verification. Orphaned temp files from interrupted runs are self-healing on `pixe resume` and can be cleaned manually or via a future `pixe clean` command (Section 10).
+> **Note:** During active copy operations, temporary files with the pattern `.<filename>.pixe-tmp` may be visible in destination directories (e.g., `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp`). These are transient artifacts of the atomic copy process (Section 4.10) and are renamed to their canonical paths upon successful verification. Orphaned temp files from interrupted runs are self-healing on `pixe resume` and can be cleaned via `pixe clean` (Section 7.5).
 
 ---
 
@@ -1781,6 +1988,11 @@ dirB (organized destination)
 | `pixe sort` | `--recursive` | `-r` | `false` | `recursive` | Recursively process subdirectories of `--source`. Default is top-level only. |
 | `pixe sort` | `--skip-duplicates` | | `false` | `skip_duplicates` | Skip copying files whose checksum matches an already-archived file. Emits `DUPE` on stdout and records in DB/ledger, but writes no bytes to `dirB`. Default is to copy duplicates to `duplicates/<run_timestamp>/...` for user review. See Section 4.6. |
 | `pixe sort` | `--ignore` | | (none) | `ignore` (list) | Glob pattern for files to ignore. Repeatable on CLI; list in config. Merged additively. `.pixe_ledger.json` is always ignored (hardcoded). |
+| `pixe clean` | `--dir` | `-d` | (required) | `clean_dir` | Destination directory (`dirB`) to clean. |
+| `pixe clean` | `--db-path` | | (auto-detected) | `clean_db_path` | Explicit path to the SQLite database file. Overrides automatic location logic. |
+| `pixe clean` | `--dry-run` | | `false` | — | Preview what would be cleaned without deleting files or running VACUUM. |
+| `pixe clean` | `--temp-only` | | `false` | — | Only clean orphaned temp files and XMP sidecars. Skip database compaction. |
+| `pixe clean` | `--vacuum-only` | | `false` | — | Only run database compaction. Skip artifact scanning. Mutually exclusive with `--temp-only`. |
 
 All flags are supported via config file and environment variable (e.g., `PIXE_RECURSIVE`, `PIXE_SKIP_DUPLICATES`, `PIXE_IGNORE`). The `--ignore` flag can appear multiple times on the command line, each specifying one glob pattern. In the config file, `ignore` is a YAML list.
 
@@ -1802,7 +2014,7 @@ These items are explicitly **out of scope** for the current build but are acknow
 6. **Cloud storage targets** — `dirB` on S3, GCS, etc.
 7. **GPS/location-based organization** — Subdirectories by location in addition to date.
 8. ~~**`pixe query` CLI command**~~ — **Promoted to Section 7.3.** No longer a future consideration.
-9. **`pixe clean` command** — A maintenance subcommand with two responsibilities: (a) **orphaned temp file cleanup** — scan `dirB` for `*.pixe-tmp` files left behind by interrupted runs and remove them, reporting what was deleted; (b) **database compaction** — run `VACUUM` on the archive SQLite database to reclaim space in long-lived archives with many runs. These are combined into a single command because both are housekeeping operations that a user would run periodically on an established archive. The temp file scanner would use a simple `filepath.Walk` with a suffix match on `.pixe-tmp`. The `VACUUM` operation requires exclusive database access (no concurrent `pixe sort` running).
+9. ~~**`pixe clean` command**~~ — **Promoted to Section 7.5.** No longer a future consideration.
 10. **Multi-archive federation** — Querying across multiple `dirB` databases from a single command.
 11. **`**` recursive glob support in ignore patterns** — Go's `filepath.Match` does not support `**`. A library like `bmatcuk/doublestar` could enable patterns like `**/Thumbs.db`. Currently, ignore patterns match against filename and single-level relative paths.
 12. **Directory-level ignore patterns** — In recursive mode, allow ignoring entire subdirectories (e.g., `--ignore ".git/"` to skip `.git` trees). Currently only files are subject to ignore matching.
