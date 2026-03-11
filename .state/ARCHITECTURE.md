@@ -640,12 +640,12 @@ type FileTypeHandler interface {
 | **JPEG** | `.jpg`, `.jpeg` | EXIF `DateTimeOriginal` / `CreateDate` | Full image data (pixel payload) | `MetadataEmbed` | EXIF Copyright (IFD0), CameraOwnerName (ExifIFD 0xA430) written in-file |
 | **HEIC** | `.heic`, `.heif` | EXIF `DateTimeOriginal` / `CreateDate` | Image data payload | `MetadataSidecar` | XMP sidecar (`*.heic.xmp`) |
 | **MP4** | `.mp4`, `.mov` | QuickTime `CreationDate` / `mvhd` atom | Collected keyframe data | `MetadataSidecar` | XMP sidecar (`*.mp4.xmp`, `*.mov.xmp`) |
-| **DNG** | `.dng` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.dng.xmp`) |
-| **NEF** | `.nef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.nef.xmp`) |
-| **CR2** | `.cr2` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.cr2.xmp`) |
-| **CR3** | `.cr3` | ISOBMFF container metadata (same approach as HEIC/MP4) | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.cr3.xmp`) |
-| **PEF** | `.pef` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.pef.xmp`) |
-| **ARW** | `.arw` | EXIF `DateTimeOriginal` / `CreateDate` | Embedded full-resolution JPEG preview | `MetadataSidecar` | XMP sidecar (`*.arw.xmp`) |
+| **DNG** | `.dng` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.dng.xmp`) |
+| **NEF** | `.nef` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.nef.xmp`) |
+| **CR2** | `.cr2` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.cr2.xmp`) |
+| **CR3** | `.cr3` | ISOBMFF container metadata (same approach as HEIC/MP4) | Raw sensor data (ISOBMFF `mdat`) | `MetadataSidecar` | XMP sidecar (`*.cr3.xmp`) |
+| **PEF** | `.pef` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.pef.xmp`) |
+| **ARW** | `.arw` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.arw.xmp`) |
 
 ### 6.4 RAW Handler Architecture
 
@@ -725,24 +725,37 @@ CR3 files use the ISOBMFF container format, the same box-based structure used by
 2. Extract the raw EXIF bytes from the container.
 3. Parse with the standard EXIF library and apply the same fallback chain: `DateTimeOriginal` → `DateTime` → Ansel Adams date.
 
-#### 6.4.6 Hashable Region: Embedded JPEG Preview
+#### 6.4.6 Hashable Region: Raw Sensor Data
 
-All supported RAW formats embed a full-resolution JPEG preview image within the file. The `HashableReader()` method extracts this embedded JPEG and returns it as the hashable region.
+All supported RAW formats contain the actual sensor data payload — the irreducible content that distinguishes one exposure from another. The `HashableReader()` method extracts this sensor data and returns it as the hashable region.
 
-**Why the embedded JPEG preview?**
+**Why the raw sensor data (not the embedded JPEG preview)?**
 
-- RAW files from cameras are never edited in place — the raw sensor data is immutable.
-- Hashing the full file would work (as with HEIC) but would be slower for large RAW files (50-100+ MB).
-- The embedded JPEG preview is a stable, well-defined region that is generated from the sensor data at capture time. It provides a meaningful content fingerprint without needing to parse the proprietary raw sensor data.
-- If the embedded JPEG cannot be located or extracted, the handler falls back to hashing the full file (same safety-first approach as other handlers).
+RAW files embed a full-resolution JPEG preview that could serve as a faster hashing proxy. However, the JPEG preview is not a reliable stand-in for the sensor data:
 
-**Extraction approach for TIFF-based formats:**
+- **Preview instability.** Software tools (Lightroom, Capture One, camera firmware updates) may regenerate or modify the embedded JPEG preview without touching the sensor data. Two copies of the same RAW file processed by different tools would produce different JPEG preview hashes, causing Pixe to treat identical sensor data as unique files — a false negative that wastes archive space with undetectable duplicates.
+- **Preview ambiguity.** In rare cases, different exposures (e.g., burst shots at the same instant) could produce byte-identical JPEG previews despite containing different sensor data — a false positive. While Pixe fails safely in this case (the "duplicate" is still preserved), it misrepresents the archive's contents.
+- **Sensor data is the ground truth.** The raw sensor data is the immutable, authoritative content of a RAW file. It is never modified by post-processing tools, metadata editors, or firmware updates. Hashing the sensor data produces a checksum that is a true content fingerprint — stable across software workflows and deterministic across copies of the same file regardless of how the embedded preview was generated.
+- **Safety over speed.** Hashing sensor data requires reading more bytes than hashing the JPEG preview (the sensor payload is typically 20-80 MB vs. 1-5 MB for the preview). This trade-off is accepted: RAW file users expect processing overhead proportional to file size, and data integrity is Pixe's first principle. A false dedup decision is far more costly than the I/O time to read the sensor data.
+- If the sensor data cannot be located or extracted, the handler falls back to hashing the full file (same safety-first approach as other handlers).
 
-The full-resolution JPEG preview is typically stored in a secondary IFD (often IFD1 or a sub-IFD) with `NewSubfileType = 0` (full-resolution image) and `Compression = 6` (JPEG). The handler navigates the IFD chain, locates the JPEG strip/tile offsets and byte counts, and returns a reader over that region.
+**Extraction approach for TIFF-based formats (DNG, NEF, CR2, PEF, ARW):**
+
+The raw sensor data is stored in a primary IFD (typically IFD0 or a sub-IFD) with a proprietary or format-specific compression scheme (uncompressed, lossless JPEG, Huffman, or vendor-specific). The handler navigates the TIFF IFD chain to locate the sensor data IFD — distinguished from the JPEG preview IFD by its compression type (not JPEG compression `6`) and typically by `NewSubfileType = 0` (full-resolution image). Once identified, the handler reads the `StripOffsets` and `StripByteCounts` (or `TileOffsets` and `TileByteCounts` for tiled formats) and returns a reader that streams the raw sensor bytes from those regions.
+
+**Distinguishing sensor data from JPEG preview in the IFD chain:**
+
+TIFF-based RAW files typically contain multiple IFDs, some holding JPEG preview images and one holding the actual sensor data. The sensor data IFD is identified by:
+
+1. **Compression tag:** The sensor data uses a non-JPEG compression value. Common values include `1` (uncompressed), `7` (lossless JPEG, used by many Nikon NEF and Canon CR2 files), `34713` (Nikon NEF compressed), `34892` (lossy JPEG, used by some DNG files), or other vendor-specific values. JPEG preview IFDs use compression `6` (standard JPEG) or `7` in a thumbnail context.
+2. **Image dimensions:** The sensor data IFD contains the full-resolution image dimensions (`ImageWidth` × `ImageLength`), which are significantly larger than any preview or thumbnail IFD.
+3. **`NewSubfileType` tag:** When present, a value of `0` indicates the primary (full-resolution) image. Preview IFDs typically use `1` (reduced-resolution) or are in IFD1 (the traditional thumbnail IFD).
+
+The handler uses these signals in combination to reliably select the sensor data IFD. If ambiguity remains, the handler selects the IFD with the largest data payload (by total `StripByteCounts` or `TileByteCounts`).
 
 **Extraction approach for CR3:**
 
-The embedded JPEG is located within the ISOBMFF container, typically in a `moov` → `trak` → `mdat` path or a dedicated preview box. The handler navigates the box structure to extract the JPEG data.
+CR3 files use the ISOBMFF container format. The raw sensor data is stored in the `mdat` (media data) box, referenced by track metadata in the `moov` box. The handler navigates the ISOBMFF box structure to locate the sensor data track (typically the primary image item or the largest `trak` entry), determines the byte offset and length of the sensor data within `mdat`, and returns a reader over that region. If the sensor data track cannot be isolated, the handler falls back to hashing the full `mdat` box contents.
 
 #### 6.4.7 Metadata Capability: XMP Sidecar
 
