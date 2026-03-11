@@ -4,7 +4,7 @@
 
 ---
 
-## [Unreleased]
+## [v1.2.0] - 2026-03-11
 
 - **Features**:
   - `--recursive` flag (`-r`): descend into subdirectories of `--source` during sort.
@@ -28,13 +28,13 @@
   - Removed `Ledger` struct, `SaveLedger`, and atomic `.tmp`+rename pattern from `internal/manifest`.
   - `LoadLedger` rewritten as JSONL reader returning `*LedgerContents{Header, Entries}` (test utility only).
 
-## [v1.1.1] - 2026-03-11
+## [v1.1.1] - 2026-03-08
 
 - **Bug Fixes**:
   - Fixed error return handling in test file fixtures.
   - Replaced `goheif` with pure Go `heic-exif-extractor` for darwin/arm64 compatibility.
 
-## [v1.1.0] - 2026-03-11
+## [v1.1.0] - 2026-03-08
 
 - **Features**:
   - RAW format support: DNG, NEF, CR2, CR3, PEF, ARW — all 9 handlers now registered in CLI commands.
@@ -45,13 +45,13 @@
 - **Bug Fixes**:
   - Fixed errcheck lint warnings in `resume` and `sort` commands.
 
-## [v1.0.2] - 2026-03-08
+## [v1.0.2] - 2026-03-07
 
 - **Bug Fixes**:
   - Updated goreleaser config to use non-deprecated `archives` format key.
   - Fixed deprecated `StringToPtr` → `UTF16PtrFromString` in dblocator (Windows).
 
-## [v1.0.1] - 2026-03-08
+## [v1.0.1] - 2026-03-07
 
 - **Bug Fixes**:
   - Added Windows network mount detection to dblocator.
@@ -91,7 +91,7 @@
 - **Other**:
   - Updated release configuration (`release.yml`) and added comprehensive linting and testing workflows for GitHub Actions.
 
-## [v0.9.6] - 2026-03-06
+## [v0.9.6] - 2026-03-07
 
 - **Features**:
   - Implemented core domain types and interfaces for a robust foundation.
@@ -110,7 +110,7 @@
   - Added a Makefile with common development targets to streamline local development.
   - Conducted integration tests and a safety audit to validate system reliability.
 
-## [v0.9.5] - 2026-03-06
+## [v0.9.5] - 2026-03-07
 
 - **Refactor**:
   - Renamed the module to `github.com/cwlls/pixe-go` for better clarity and consistency.
@@ -119,12 +119,12 @@
   - Added a project README to document the project's purpose and setup.
   - Updated the architectural overview to include version management details.
 
-## [v0.9.4] - 2026-03-06
+## [v0.9.4] - 2026-03-07
 
 - **Chore**:
   - Removed a duplicate LICENSE file and added Apache-2.0 license headers to all source files.
 
-## [v0.9.3] - 2026-03-06
+## [v0.9.3] - 2026-03-07
 
 - **Initial Commit**:
   - Project scaffold and Go module initialized.
@@ -132,12 +132,12 @@
 - **Foundation**:
   - Established the core domain structure and interfaces.
 
-## [v0.9.2] - 2026-03-06
+## [v0.9.2] - 2026-03-07
 
 - **Initial Commit**:
   - Project scaffold and Go module initialized.
 
-## [v0.9.1] - 2026-03-06
+## [v0.9.1] - 2026-03-07
 
 - **Initial Commit**:
   - Project scaffold and Go module initialized.
