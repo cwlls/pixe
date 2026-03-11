@@ -15,7 +15,7 @@
 | 6  | Update `discovery.Walk` for `.pixeignore` scoping | High | Code | [x] complete | 4, 5 | `PushScope` on dir entry, `PopScope` on dir exit |
 | 7  | Unit tests for `internal/ignore` | High | Code | [x] complete | 4 | `**` globs, trailing-slash, scopes, `.pixeignore` parsing — written alongside Tasks 3 & 4 |
 | 8  | Unit tests for `discovery.Walk` changes | High | Code | [x] complete | 6 | Directory skipping, `.pixeignore` loading during walk |
-| 9  | Integration tests | Medium | Code | Pending | 6 | End-to-end: nested `.pixeignore` + `**` + directory-skip |
+| 9  | Integration tests | Medium | Code | [x] complete | 6 | End-to-end: nested `.pixeignore` + `**` + directory-skip |
 | 10 | Update ARCHITECTURE.md Section 2 table | Low | Code | Pending | 1 | Add `doublestar` row to Technical Stack |
 | 11 | Docs: CHANGELOG + README | Low | Scribe | Pending | 9 | Document new ignore capabilities |
 
