@@ -513,3 +513,167 @@ func newIgnoreMatcher(t *testing.T, patterns []string) *ignore.Matcher {
 	t.Helper()
 	return ignore.New(patterns)
 }
+
+// ---------------------------------------------------------------------------
+// Task 5 & 6: directory-ignore + .pixeignore walk tests
+// ---------------------------------------------------------------------------
+
+// TestWalk_directoryIgnoreTrailingSlash verifies that a trailing-slash pattern
+// causes an entire directory to be skipped (files inside are invisible).
+func TestWalk_directoryIgnoreTrailingSlash(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "photo.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "node_modules", "file.js"), []byte("js"))
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	m := newIgnoreMatcher(t, []string{"node_modules/"})
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true, Ignore: m})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (photo.jpg only)", len(discovered))
+	}
+	// node_modules/file.js must be completely invisible.
+	for _, sf := range skipped {
+		if sf.Path == filepath.Join("node_modules", "file.js") {
+			t.Error("node_modules/file.js should be invisible (directory skipped), not in skipped")
+		}
+	}
+}
+
+// TestWalk_directoryIgnoreDoublestar verifies that a "**/cache/" pattern skips
+// a deeply nested cache directory entirely.
+func TestWalk_directoryIgnoreDoublestar(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, "photo.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "a", "b", "cache", "thumb.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	m := newIgnoreMatcher(t, []string{"**/cache/"})
+	discovered, _, err := Walk(dir, reg, WalkOptions{Recursive: true, Ignore: m})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (photo.jpg only, cache/ skipped)", len(discovered))
+	}
+	for _, df := range discovered {
+		if df.RelPath == filepath.Join("a", "b", "cache", "thumb.jpg") {
+			t.Error("thumb.jpg inside cache/ should be invisible (directory skipped)")
+		}
+	}
+}
+
+// TestWalk_pixeignoreLoaded verifies that a .pixeignore file in dirA is loaded
+// and its patterns applied during the walk.
+func TestWalk_pixeignoreLoaded(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, ".pixeignore"), []byte("*.txt\n"))
+	writeFile(t, filepath.Join(dir, "notes.txt"), []byte("hello"))
+	writeFile(t, filepath.Join(dir, "photo.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	m := newIgnoreMatcher(t, nil) // no global patterns — only .pixeignore
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true, Ignore: m})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (photo.jpg only)", len(discovered))
+	}
+	// notes.txt must be invisible (matched by .pixeignore pattern *.txt).
+	for _, sf := range skipped {
+		if sf.Path == "notes.txt" {
+			t.Error("notes.txt should be invisible (matched .pixeignore pattern *.txt), not in skipped")
+		}
+	}
+}
+
+// TestWalk_nestedPixeignore verifies that a .pixeignore in a subdirectory only
+// applies to files within that subtree, not to files at the root.
+func TestWalk_nestedPixeignore(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	// Root-level app.log — should NOT be ignored (pattern is in sub/.pixeignore).
+	writeFile(t, filepath.Join(dir, "app.log"), []byte("root log"))
+	// sub/app.log — SHOULD be ignored by sub/.pixeignore.
+	writeFile(t, filepath.Join(dir, "sub", "app.log"), []byte("sub log"))
+	writeFile(t, filepath.Join(dir, "sub", ".pixeignore"), []byte("*.log\n"))
+	writeFile(t, filepath.Join(dir, "photo.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	m := newIgnoreMatcher(t, nil)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true, Ignore: m})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	// photo.jpg discovered; app.log at root is skipped (unsupported); sub/app.log invisible.
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (photo.jpg)", len(discovered))
+	}
+	rootLogFound := false
+	subLogFound := false
+	for _, sf := range skipped {
+		if sf.Path == "app.log" {
+			rootLogFound = true
+		}
+		if sf.Path == filepath.Join("sub", "app.log") {
+			subLogFound = true
+		}
+	}
+	if !rootLogFound {
+		t.Error("expected root app.log in skipped (unsupported format, not in scope)")
+	}
+	if subLogFound {
+		t.Error("sub/app.log should be invisible (matched sub/.pixeignore pattern *.log)")
+	}
+}
+
+// TestWalk_pixeignoreFileItself verifies that .pixeignore files themselves do
+// not appear in either discovered or skipped slices.
+func TestWalk_pixeignoreFileItself(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	writeFile(t, filepath.Join(dir, ".pixeignore"), []byte("*.txt\n"))
+	writeFile(t, filepath.Join(dir, "sub", ".pixeignore"), []byte("*.log\n"))
+	writeFile(t, filepath.Join(dir, "photo.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	m := newIgnoreMatcher(t, nil)
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true, Ignore: m})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	for _, df := range discovered {
+		if filepath.Base(df.RelPath) == ".pixeignore" {
+			t.Errorf(".pixeignore should not appear in discovered: %q", df.RelPath)
+		}
+	}
+	for _, sf := range skipped {
+		if filepath.Base(sf.Path) == ".pixeignore" {
+			t.Errorf(".pixeignore should not appear in skipped: %q", sf.Path)
+		}
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (photo.jpg only)", len(discovered))
+	}
+}

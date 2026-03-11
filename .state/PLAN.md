@@ -11,10 +11,10 @@
 | 2  | Refactor `Matcher` to use `doublestar.Match` | High | Code | [x] complete | 1 | Drop-in replacement for `filepath.Match`; add slash normalization |
 | 3  | Add `MatchDir` method | High | Code | [x] complete | 2 | Trailing-slash semantics for directory-level skipping |
 | 4  | Add `.pixeignore` loading + scope stack | High | Code | [x] complete | 3 | `PushScope` / `PopScope`; parse file format; hardcode `.pixeignore` ignore |
-| 5  | Update `discovery.Walk` for directory ignoring | High | Code | Pending | 3 | Call `MatchDir` in the directory handling block |
-| 6  | Update `discovery.Walk` for `.pixeignore` scoping | High | Code | Pending | 4, 5 | `PushScope` on dir entry, `PopScope` on dir exit |
-| 7  | Unit tests for `internal/ignore` | High | Code | Pending | 4 | `**` globs, trailing-slash, scopes, `.pixeignore` parsing |
-| 8  | Unit tests for `discovery.Walk` changes | High | Code | Pending | 6 | Directory skipping, `.pixeignore` loading during walk |
+| 5  | Update `discovery.Walk` for directory ignoring | High | Code | [x] complete | 3 | Call `MatchDir` in the directory handling block |
+| 6  | Update `discovery.Walk` for `.pixeignore` scoping | High | Code | [x] complete | 4, 5 | `PushScope` on dir entry, `PopScope` on dir exit |
+| 7  | Unit tests for `internal/ignore` | High | Code | [x] complete | 4 | `**` globs, trailing-slash, scopes, `.pixeignore` parsing — written alongside Tasks 3 & 4 |
+| 8  | Unit tests for `discovery.Walk` changes | High | Code | [x] complete | 6 | Directory skipping, `.pixeignore` loading during walk |
 | 9  | Integration tests | Medium | Code | Pending | 6 | End-to-end: nested `.pixeignore` + `**` + directory-skip |
 | 10 | Update ARCHITECTURE.md Section 2 table | Low | Code | Pending | 1 | Add `doublestar` row to Technical Stack |
 | 11 | Docs: CHANGELOG + README | Low | Scribe | Pending | 9 | Document new ignore capabilities |

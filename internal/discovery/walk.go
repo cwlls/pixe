@@ -56,15 +56,40 @@ type WalkOptions struct {
 //   - discovered: files with a matched handler, ready for the pipeline.
 //   - skipped: files that were excluded with a human-readable reason.
 //
-// Files matching the ignore list (including the hardcoded .pixe_ledger.json)
-// are completely invisible — they appear in neither slice.
+// Files matching the ignore list (including the hardcoded .pixe_ledger.json
+// and .pixeignore) are completely invisible — they appear in neither slice.
 //
 // Dot-directories (names starting with ".") are never descended into.
 // When opts.Recursive is false, all subdirectories are skipped.
+//
+// When opts.Recursive is true and opts.Ignore is non-nil, Walk also:
+//   - Calls opts.Ignore.MatchDir to skip directories matching user patterns.
+//   - Loads .pixeignore files found in each directory via opts.Ignore.PushScope,
+//     and pops those scopes when the walk exits the directory.
 func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []DiscoveredFile, skipped []SkippedFile, err error) {
+	// scopeStack tracks absolute paths of directories for which PushScope was
+	// called, so we can call PopScope when the walk moves past them.
+	// filepath.WalkDir visits entries in lexical order; a directory is "exited"
+	// when the current path is no longer a descendant of the top of the stack.
+	var scopeStack []string
+
 	err = filepath.WalkDir(dirA, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("discovery: walk %q: %w", path, walkErr)
+		}
+
+		// --- Pop scopes for directories we have left ---
+		// We detect a directory exit when the current path is no longer under
+		// the top of the scope stack.
+		if opts.Ignore != nil {
+			for len(scopeStack) > 0 {
+				top := scopeStack[len(scopeStack)-1]
+				if path == top || strings.HasPrefix(path, top+string(filepath.Separator)) {
+					break // still inside this scope's directory
+				}
+				opts.Ignore.PopScope()
+				scopeStack = scopeStack[:len(scopeStack)-1]
+			}
 		}
 
 		name := d.Name()
@@ -72,7 +97,14 @@ func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []Discovered
 		// --- Directory handling ---
 		if d.IsDir() {
 			if path == dirA {
-				return nil // always enter the root
+				// Root directory: always enter. Load root .pixeignore if present.
+				if opts.Ignore != nil {
+					pixeignorePath := filepath.Join(dirA, ".pixeignore")
+					if opts.Ignore.PushScope(".", pixeignorePath) {
+						scopeStack = append(scopeStack, dirA)
+					}
+				}
+				return nil
 			}
 			if strings.HasPrefix(name, ".") {
 				return filepath.SkipDir // always skip dot-directories
@@ -80,19 +112,33 @@ func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []Discovered
 			if !opts.Recursive {
 				return filepath.SkipDir // non-recursive: skip all subdirs
 			}
+			// Check user-configured directory ignore patterns (trailing-slash
+			// and "/**"-suffix patterns via MatchDir).
+			if opts.Ignore != nil {
+				relDir, _ := filepath.Rel(dirA, path)
+				if opts.Ignore.MatchDir(name, relDir) {
+					return filepath.SkipDir
+				}
+				// Load .pixeignore in this subdirectory (if present).
+				relDir = filepath.ToSlash(relDir)
+				pixeignorePath := filepath.Join(path, ".pixeignore")
+				if opts.Ignore.PushScope(relDir, pixeignorePath) {
+					scopeStack = append(scopeStack, path)
+				}
+			}
 			return nil // recursive: descend
 		}
 
 		// --- Compute relative path from dirA ---
 		relPath, _ := filepath.Rel(dirA, path)
 
-		// --- Apply ignore matcher (includes hardcoded ledger ignore) ---
+		// --- Apply ignore matcher (includes hardcoded ledger + .pixeignore ignore) ---
 		if opts.Ignore != nil && opts.Ignore.Match(name, relPath) {
 			return nil // completely invisible
 		}
 
 		// --- Dotfile policy (hardcoded, not configurable) ---
-		// .pixe_ledger.json is caught above by the ignore matcher.
+		// .pixe_ledger.json and .pixeignore are caught above by the ignore matcher.
 		// Other dotfiles (e.g. .DS_Store) are skipped with a reason.
 		if strings.HasPrefix(name, ".") {
 			skipped = append(skipped, SkippedFile{
@@ -127,5 +173,14 @@ func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []Discovered
 		})
 		return nil
 	})
+
+	// Final cleanup: pop any scopes that were never exited (e.g. if the walk
+	// ended inside a scoped directory).
+	if opts.Ignore != nil {
+		for range scopeStack {
+			opts.Ignore.PopScope()
+		}
+	}
+
 	return discovered, skipped, err
 }
