@@ -225,13 +225,13 @@ func TestRun_ledgerWritten_withEntry(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if len(l.Files) != 1 {
-		t.Errorf("ledger.Files len = %d, want 1", len(l.Files))
+	if len(l.Entries) != 1 {
+		t.Errorf("ledger.Entries len = %d, want 1", len(l.Entries))
 	}
-	if l.Files[0].Checksum == "" {
+	if l.Entries[0].Checksum == "" {
 		t.Error("ledger entry checksum should not be empty")
 	}
-	if l.Files[0].Destination == "" {
+	if l.Entries[0].Destination == "" {
 		t.Error("ledger entry destination should not be empty")
 	}
 }
@@ -256,15 +256,15 @@ func TestRun_ledgerWritten(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if len(l.Files) != 1 {
-		t.Errorf("ledger.Files len = %d, want 1", len(l.Files))
+	if len(l.Entries) != 1 {
+		t.Errorf("ledger.Entries len = %d, want 1", len(l.Entries))
 	}
-	if l.Files[0].Checksum == "" {
+	if l.Entries[0].Checksum == "" {
 		t.Error("ledger entry checksum should not be empty")
 	}
 }
 
-func TestRun_ledgerVersion3WithRunID(t *testing.T) {
+func TestRun_ledgerVersion4WithRunID(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -288,11 +288,11 @@ func TestRun_ledgerVersion3WithRunID(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if l.Version != 3 {
-		t.Errorf("ledger.Version = %d, want 3", l.Version)
+	if l.Header.Version != 4 {
+		t.Errorf("ledger.Header.Version = %d, want 4", l.Header.Version)
 	}
-	if l.RunID != wantRunID {
-		t.Errorf("ledger.RunID = %q, want %q", l.RunID, wantRunID)
+	if l.Header.RunID != wantRunID {
+		t.Errorf("ledger.Header.RunID = %q, want %q", l.Header.RunID, wantRunID)
 	}
 }
 
@@ -588,15 +588,15 @@ func TestRun_outputFormat_ledgerEntryStatuses(t *testing.T) {
 	}
 
 	statusCounts := make(map[string]int)
-	for _, e := range l.Files {
+	for _, e := range l.Entries {
 		statusCounts[e.Status]++
 	}
 
 	if statusCounts["copy"] != 1 {
-		t.Errorf("ledger copy entries = %d, want 1; entries: %v", statusCounts["copy"], l.Files)
+		t.Errorf("ledger copy entries = %d, want 1; entries: %v", statusCounts["copy"], l.Entries)
 	}
 	if statusCounts["skip"] != 1 {
-		t.Errorf("ledger skip entries = %d, want 1; entries: %v", statusCounts["skip"], l.Files)
+		t.Errorf("ledger skip entries = %d, want 1; entries: %v", statusCounts["skip"], l.Entries)
 	}
 }
 
@@ -629,14 +629,14 @@ func TestRun_outputFormat_ledgerDuplicateEntry(t *testing.T) {
 	}
 
 	var dupEntry *domain.LedgerEntry
-	for i := range l.Files {
-		if l.Files[i].Status == "duplicate" {
-			dupEntry = &l.Files[i]
+	for i := range l.Entries {
+		if l.Entries[i].Status == "duplicate" {
+			dupEntry = &l.Entries[i]
 			break
 		}
 	}
 	if dupEntry == nil {
-		t.Fatalf("no duplicate ledger entry found; entries: %v", l.Files)
+		t.Fatalf("no duplicate ledger entry found; entries: %v", l.Entries)
 	}
 	if dupEntry.Matches == "" {
 		t.Error("duplicate ledger entry has empty Matches field")
@@ -667,19 +667,19 @@ func TestRun_outputFormat_skipLedgerEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
-	if l == nil || len(l.Files) == 0 {
+	if l == nil || len(l.Entries) == 0 {
 		t.Fatal("ledger not written or empty")
 	}
 
 	var skipEntry *domain.LedgerEntry
-	for i := range l.Files {
-		if l.Files[i].Status == "skip" {
-			skipEntry = &l.Files[i]
+	for i := range l.Entries {
+		if l.Entries[i].Status == "skip" {
+			skipEntry = &l.Entries[i]
 			break
 		}
 	}
 	if skipEntry == nil {
-		t.Fatalf("no skip ledger entry found; entries: %v", l.Files)
+		t.Fatalf("no skip ledger entry found; entries: %v", l.Entries)
 	}
 	if skipEntry.Reason == "" {
 		t.Error("skip ledger entry has empty Reason field")
@@ -708,19 +708,19 @@ func TestRun_outputFormat_copyLedgerEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
-	if l == nil || len(l.Files) == 0 {
+	if l == nil || len(l.Entries) == 0 {
 		t.Fatal("ledger not written or empty")
 	}
 
 	var copyEntry *domain.LedgerEntry
-	for i := range l.Files {
-		if l.Files[i].Status == "copy" {
-			copyEntry = &l.Files[i]
+	for i := range l.Entries {
+		if l.Entries[i].Status == "copy" {
+			copyEntry = &l.Entries[i]
 			break
 		}
 	}
 	if copyEntry == nil {
-		t.Fatalf("no copy ledger entry found; entries: %v", l.Files)
+		t.Fatalf("no copy ledger entry found; entries: %v", l.Entries)
 	}
 	if copyEntry.Checksum == "" {
 		t.Error("copy ledger entry has empty Checksum")
@@ -1012,24 +1012,24 @@ func TestRun_recursiveIncremental_ledger(t *testing.T) {
 	}
 
 	// Ledger should reflect run 2: 1 skip + 1 copy = 2 entries.
-	if len(l.Files) != 2 {
-		t.Fatalf("ledger.Files len = %d, want 2; entries: %v", len(l.Files), l.Files)
+	if len(l.Entries) != 2 {
+		t.Fatalf("ledger.Entries len = %d, want 2; entries: %v", len(l.Entries), l.Entries)
 	}
 
 	statusCounts := make(map[string]int)
-	for _, e := range l.Files {
+	for _, e := range l.Entries {
 		statusCounts[e.Status]++
 	}
 	if statusCounts["skip"] != 1 {
-		t.Errorf("ledger skip entries = %d, want 1; entries: %v", statusCounts["skip"], l.Files)
+		t.Errorf("ledger skip entries = %d, want 1; entries: %v", statusCounts["skip"], l.Entries)
 	}
 	if statusCounts["copy"] != 1 {
-		t.Errorf("ledger copy entries = %d, want 1; entries: %v", statusCounts["copy"], l.Files)
+		t.Errorf("ledger copy entries = %d, want 1; entries: %v", statusCounts["copy"], l.Entries)
 	}
 
 	// Ledger should be marked recursive=true.
-	if !l.Recursive {
-		t.Error("ledger.Recursive = false, want true for run 2")
+	if !l.Header.Recursive {
+		t.Error("ledger.Header.Recursive = false, want true for run 2")
 	}
 }
 

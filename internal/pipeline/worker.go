@@ -27,6 +27,7 @@ import (
 	copypkg "github.com/cwlls/pixe-go/internal/copy"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 )
 
@@ -107,16 +108,16 @@ type workerFinalResult struct {
 //	  - send final result to doneCh
 func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, ledger *domain.Ledger) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.LedgerWriter) SortResult {
 
 	ctx := context.Background()
-	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, ledger)
+	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
 }
 
 // runConcurrentCtx is the context-aware implementation, used by tests.
 func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, ledger *domain.Ledger) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.LedgerWriter) SortResult {
 
 	// Wrap out in a mutex so concurrent workers don't race on writes.
 	sw := &syncWriter{w: out}
@@ -133,7 +134,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
 	for _, sf := range skipped {
 		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
-		ledger.Files = append(ledger.Files, domain.LedgerEntry{
+		_ = lw.WriteEntry(domain.LedgerEntry{
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
 			Reason: sf.Reason,
@@ -165,7 +166,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if processed {
 				const reason = "previously imported"
 				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
-				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+				_ = lw.WriteEntry(domain.LedgerEntry{
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
 					Reason: reason,
@@ -238,7 +239,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				}
 				result.Errors++
 				_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, wr.err.Error()))
-				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+				_ = lw.WriteEntry(domain.LedgerEntry{
 					Path:   wr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: wr.err.Error(),
@@ -256,7 +257,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					_ = db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error()))
 					result.Errors++
 					_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, err.Error()))
-					ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					_ = lw.WriteEntry(domain.LedgerEntry{
 						Path:   wr.df.RelPath,
 						Status: domain.LedgerStatusError,
 						Reason: err.Error(),
@@ -288,7 +289,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if fr.err != nil {
 				result.Errors++
 				_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, fr.err.Error()))
-				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+				_ = lw.WriteEntry(domain.LedgerEntry{
 					Path:   fr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: fr.err.Error(),
@@ -310,7 +311,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							result.Errors++
 							errMsg := fmt.Sprintf("dedup check: %v", dedupErr)
 							_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
-							ledger.Files = append(ledger.Files, domain.LedgerEntry{
+							_ = lw.WriteEntry(domain.LedgerEntry{
 								Path:   fr.df.RelPath,
 								Status: domain.LedgerStatusError,
 								Reason: errMsg,
@@ -330,7 +331,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 								result.Errors++
 								errMsg := fmt.Sprintf("relocate duplicate: %v", renErr)
 								_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
-								ledger.Files = append(ledger.Files, domain.LedgerEntry{
+								_ = lw.WriteEntry(domain.LedgerEntry{
 									Path:   fr.df.RelPath,
 									Status: domain.LedgerStatusError,
 									Reason: errMsg,
@@ -362,7 +363,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					}
 					_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
 						fmt.Sprintf("matches %s", matchDetail)))
-					ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					_ = lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusDuplicate,
 						Checksum:    fr.checksum,
@@ -371,7 +372,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					})
 				} else {
 					_, _ = fmt.Fprint(out, formatOutput("COPY", fr.df.RelPath, finalRelDest))
-					ledger.Files = append(ledger.Files, domain.LedgerEntry{
+					_ = lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusCopy,
 						Checksum:    fr.checksum,

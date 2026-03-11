@@ -33,7 +33,6 @@ import (
 	"github.com/cwlls/pixe-go/internal/archivedb"
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
 	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
 	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
 	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
@@ -811,7 +810,7 @@ func buildOptsWithDB(t *testing.T, dirA, dirB string, dryRun bool) (pipeline.Sor
 }
 
 // loadLedger loads the ledger from dirA/.pixe_ledger.json.
-func loadLedger(t *testing.T, dirA string) *domain.Ledger {
+func loadLedger(t *testing.T, dirA string) *manifest.LedgerContents {
 	t.Helper()
 	l, err := manifest.LoadLedger(dirA)
 	if err != nil {
@@ -879,13 +878,13 @@ func TestIntegration_SQLite_FullSort(t *testing.T) {
 		}
 	}
 
-	// Verify ledger has version 3 and run_id.
+	// Verify ledger has version 4 and run_id.
 	ledger := loadLedger(t, dirA)
-	if ledger.Version != 3 {
-		t.Errorf("ledger Version = %d, want 3", ledger.Version)
+	if ledger.Header.Version != 4 {
+		t.Errorf("ledger Version = %d, want 4", ledger.Header.Version)
 	}
-	if ledger.RunID != opts.RunID {
-		t.Errorf("ledger RunID = %q, want %q", ledger.RunID, opts.RunID)
+	if ledger.Header.RunID != opts.RunID {
+		t.Errorf("ledger RunID = %q, want %q", ledger.Header.RunID, opts.RunID)
 	}
 }
 

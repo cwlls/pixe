@@ -30,16 +30,16 @@ Convert the ledger from a single buffered JSON document to a streaming JSONL for
 | # | Task | Priority | Agent | Status | Depends On | Notes |
 |:--|:-----|:---------|:------|:-------|:-----------|:------|
 | 19 | Introduce `LedgerHeader` type and bump to v4 | high | Developer | ✅ Complete | — | New struct for JSONL line 1; `LedgerEntry` unchanged |
-| 20 | Build `LedgerWriter` in `internal/manifest` | high | Developer | ⬜ Pending | 19 | Open/write-header/append-entry/close; owns file handle + encoder |
-| 21 | Remove `Ledger` struct and `SaveLedger`/`LoadLedger` | high | Developer | ⬜ Pending | 20 | Delete dead code; keep `LedgerEntry` and status constants |
-| 22 | Wire `LedgerWriter` into sequential pipeline | high | Developer | ⬜ Pending | 20, 21 | Replace all `ledger.Files = append(...)` with `lw.WriteEntry(...)` |
-| 23 | Wire `LedgerWriter` into concurrent pipeline | high | Developer | ⬜ Pending | 20, 21 | Same replacement in coordinator goroutine (`worker.go`) |
-| 24 | Update `Run()` orchestrator for streaming lifecycle | high | Developer | ⬜ Pending | 22, 23 | Open writer at start, close at end; skip in dry-run |
-| 25 | Rewrite `LoadLedger` as JSONL reader (test utility) | medium | Developer | ⬜ Pending | 20 | Line-by-line reader returning header + entries; used only in tests |
-| 26 | Tests: `LedgerWriter` unit tests | high | Developer | ⬜ Pending | 20 | Write header, append entries, verify JSONL on disk |
-| 27 | Tests: rewrite ledger round-trip tests for JSONL v4 | high | Developer | ⬜ Pending | 25, 26 | Rewrite all `TestLedger_v3_*` tests for new format |
-| 28 | Tests: pipeline ledger tests for streaming | high | Developer | ⬜ Pending | 22, 23, 25 | Verify ledger file written correctly after sort runs |
-| 29 | Tests: interrupted run produces partial valid JSONL | medium | Developer | ⬜ Pending | 20, 26 | Simulate partial write; verify header + N entries parseable |
+| 20 | Build `LedgerWriter` in `internal/manifest` | high | Developer | ✅ Complete | 19 | Open/write-header/append-entry/close; owns file handle + encoder |
+| 21 | Remove `Ledger` struct and `SaveLedger`/`LoadLedger` | high | Developer | ✅ Complete | 20 | Delete dead code; keep `LedgerEntry` and status constants |
+| 22 | Wire `LedgerWriter` into sequential pipeline | high | Developer | ✅ Complete | 20, 21 | Replace all `ledger.Files = append(...)` with `lw.WriteEntry(...)` |
+| 23 | Wire `LedgerWriter` into concurrent pipeline | high | Developer | ✅ Complete | 20, 21 | Same replacement in coordinator goroutine (`worker.go`) |
+| 24 | Update `Run()` orchestrator for streaming lifecycle | high | Developer | ✅ Complete | 22, 23 | Open writer at start, close at end; skip in dry-run |
+| 25 | Rewrite `LoadLedger` as JSONL reader (test utility) | medium | Developer | ✅ Complete | 20 | Line-by-line reader returning header + entries; used only in tests |
+| 26 | Tests: `LedgerWriter` unit tests | high | Developer | ✅ Complete | 20 | Write header, append entries, verify JSONL on disk |
+| 27 | Tests: rewrite ledger round-trip tests for JSONL v4 | high | Developer | ✅ Complete | 25, 26 | Rewrite all `TestLedger_v3_*` tests for new format |
+| 28 | Tests: pipeline ledger tests for streaming | high | Developer | ✅ Complete | 22, 23, 25 | Verify ledger file written correctly after sort runs |
+| 29 | Tests: interrupted run produces partial valid JSONL | medium | Developer | ✅ Complete | 20, 26 | Simulate partial write; verify header + N entries parseable |
 
 ---
 

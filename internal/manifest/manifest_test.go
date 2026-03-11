@@ -15,8 +15,10 @@
 package manifest
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,25 +49,43 @@ func sampleManifest(dirB string) *domain.Manifest {
 	}
 }
 
-// sampleLedger returns a populated Ledger for use in tests.
-func sampleLedger() *domain.Ledger {
-	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
-	return &domain.Ledger{
-		Version:     3,
+// sampleLedgerHeader returns a LedgerHeader for use in tests.
+func sampleLedgerHeader() domain.LedgerHeader {
+	return domain.LedgerHeader{
+		Version:     4,
+		RunID:       "test-run-id",
 		PixeVersion: "test",
-		PixeRun:     now,
+		PixeRun:     "2026-03-06T10:30:00Z",
 		Algorithm:   "sha1",
 		Destination: "/tmp/dest",
-		Files: []domain.LedgerEntry{
-			{
-				Path:        "IMG_0001.jpg",
-				Status:      domain.LedgerStatusCopy,
-				Checksum:    "abc123",
-				Destination: "2021/12/20211225_062223_abc123.jpg",
-				VerifiedAt:  &now,
-			},
-		},
+		Recursive:   false,
 	}
+}
+
+// writeSampleLedger writes a header + one copy entry to dirA and returns
+// the header and entry for assertion.
+func writeSampleLedger(t *testing.T, dirA string) (domain.LedgerHeader, domain.LedgerEntry) {
+	t.Helper()
+	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
+	header := sampleLedgerHeader()
+	entry := domain.LedgerEntry{
+		Path:        "IMG_0001.jpg",
+		Status:      domain.LedgerStatusCopy,
+		Checksum:    "abc123",
+		Destination: "2021/12/20211225_062223_abc123.jpg",
+		VerifiedAt:  &now,
+	}
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	if err := lw.WriteEntry(entry); err != nil {
+		t.Fatalf("WriteEntry: %v", err)
+	}
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return header, entry
 }
 
 // --- Manifest tests ---
@@ -179,15 +199,11 @@ func TestManifest_Save_overwrite(t *testing.T) {
 	}
 }
 
-// --- Ledger tests ---
+// --- Ledger tests (v4 JSONL format) ---
 
-func TestLedger_SaveLoad_roundtrip(t *testing.T) {
+func TestLedger_v4_roundtrip(t *testing.T) {
 	dirA := t.TempDir()
-	l := sampleLedger()
-
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
+	header, entry := writeSampleLedger(t, dirA)
 
 	if _, err := os.Stat(ledgerPath(dirA)); err != nil {
 		t.Fatalf("ledger file not created: %v", err)
@@ -200,20 +216,20 @@ func TestLedger_SaveLoad_roundtrip(t *testing.T) {
 	if got == nil {
 		t.Fatal("LoadLedger returned nil")
 	}
-	if got.Version != l.Version {
-		t.Errorf("Version: got %d, want %d", got.Version, l.Version)
+	if got.Header.Version != header.Version {
+		t.Errorf("Header.Version: got %d, want %d", got.Header.Version, header.Version)
 	}
-	if got.PixeVersion != l.PixeVersion {
-		t.Errorf("PixeVersion: got %q, want %q", got.PixeVersion, l.PixeVersion)
+	if got.Header.PixeVersion != header.PixeVersion {
+		t.Errorf("Header.PixeVersion: got %q, want %q", got.Header.PixeVersion, header.PixeVersion)
 	}
-	if got.Algorithm != l.Algorithm {
-		t.Errorf("Algorithm: got %q, want %q", got.Algorithm, l.Algorithm)
+	if got.Header.Algorithm != header.Algorithm {
+		t.Errorf("Header.Algorithm: got %q, want %q", got.Header.Algorithm, header.Algorithm)
 	}
-	if len(got.Files) != 1 {
-		t.Fatalf("Files len: got %d, want 1", len(got.Files))
+	if len(got.Entries) != 1 {
+		t.Fatalf("Entries len: got %d, want 1", len(got.Entries))
 	}
-	if got.Files[0].Path != "IMG_0001.jpg" {
-		t.Errorf("Files[0].Path: got %q, want %q", got.Files[0].Path, "IMG_0001.jpg")
+	if got.Entries[0].Path != entry.Path {
+		t.Errorf("Entries[0].Path: got %q, want %q", got.Entries[0].Path, entry.Path)
 	}
 }
 
@@ -228,71 +244,71 @@ func TestLedger_Load_notExist(t *testing.T) {
 	}
 }
 
-func TestLedger_Save_atomic_noTmpLeftover(t *testing.T) {
-	dirA := t.TempDir()
-	l := sampleLedger()
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
-	tmp := ledgerPath(dirA) + ".tmp"
-	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
-		t.Errorf("temp file %q should not exist after successful SaveLedger", tmp)
-	}
-}
+// --- Task 27: ledger v4 JSONL serialization tests ---
 
-// --- Task 16: ledger v3 serialization tests ---
-
-// sampleLedgerV3Full returns a v3 Ledger with all four entry types:
-// copy, skip, duplicate, and error.
-func sampleLedgerV3Full() *domain.Ledger {
+// writeLedgerV4Full writes a v4 JSONL ledger with all four entry types and
+// returns the header and entries for assertion.
+func writeLedgerV4Full(t *testing.T, dirA string) (domain.LedgerHeader, []domain.LedgerEntry) {
+	t.Helper()
 	now := time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC)
 	verifiedAt := now.Add(5 * time.Second)
-	return &domain.Ledger{
-		Version:     3,
-		PixeVersion: "1.2.3",
+
+	header := domain.LedgerHeader{
+		Version:     4,
 		RunID:       "run-uuid-abc123",
-		PixeRun:     now,
+		PixeVersion: "1.2.3",
+		PixeRun:     "2026-03-07T12:00:00Z",
 		Algorithm:   "sha256",
 		Destination: "/dst/archive",
 		Recursive:   true,
-		Files: []domain.LedgerEntry{
-			{
-				Path:        "IMG_0001.jpg",
-				Status:      domain.LedgerStatusCopy,
-				Checksum:    "deadbeef01",
-				Destination: "2026/03-Mar/20260307_120000_deadbeef01.jpg",
-				VerifiedAt:  &verifiedAt,
-			},
-			{
-				Path:   "notes.txt",
-				Status: domain.LedgerStatusSkip,
-				Reason: "unsupported format: .txt",
-			},
-			{
-				Path:        "IMG_0002.jpg",
-				Status:      domain.LedgerStatusDuplicate,
-				Checksum:    "deadbeef01",
-				Destination: "duplicates/20260307_120000_deadbeef01.jpg",
-				Matches:     "2026/03-Mar/20260307_120000_deadbeef01.jpg",
-			},
-			{
-				Path:   "corrupt.jpg",
-				Status: domain.LedgerStatusError,
-				Reason: "extract date: no EXIF data",
-			},
+	}
+	entries := []domain.LedgerEntry{
+		{
+			Path:        "IMG_0001.jpg",
+			Status:      domain.LedgerStatusCopy,
+			Checksum:    "deadbeef01",
+			Destination: "2026/03-Mar/20260307_120000_deadbeef01.jpg",
+			VerifiedAt:  &verifiedAt,
+		},
+		{
+			Path:   "notes.txt",
+			Status: domain.LedgerStatusSkip,
+			Reason: "unsupported format: .txt",
+		},
+		{
+			Path:        "IMG_0002.jpg",
+			Status:      domain.LedgerStatusDuplicate,
+			Checksum:    "deadbeef01",
+			Destination: "duplicates/20260307_120000_deadbeef01.jpg",
+			Matches:     "2026/03-Mar/20260307_120000_deadbeef01.jpg",
+		},
+		{
+			Path:   "corrupt.jpg",
+			Status: domain.LedgerStatusError,
+			Reason: "extract date: no EXIF data",
 		},
 	}
+
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	for _, e := range entries {
+		if err := lw.WriteEntry(e); err != nil {
+			t.Fatalf("WriteEntry: %v", err)
+		}
+	}
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return header, entries
 }
 
-// TestLedger_v3_roundtrip verifies that a v3 ledger with all entry types
-// round-trips through SaveLedger/LoadLedger with all fields preserved.
-func TestLedger_v3_roundtrip(t *testing.T) {
+// TestLedger_v4_fullRoundtrip verifies that a v4 ledger with all entry types
+// round-trips through NewLedgerWriter/LoadLedger with all fields preserved.
+func TestLedger_v4_fullRoundtrip(t *testing.T) {
 	dirA := t.TempDir()
-	l := sampleLedgerV3Full()
-
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
+	header, entries := writeLedgerV4Full(t, dirA)
 
 	got, err := LoadLedger(dirA)
 	if err != nil {
@@ -302,51 +318,46 @@ func TestLedger_v3_roundtrip(t *testing.T) {
 		t.Fatal("LoadLedger returned nil")
 	}
 
-	// Top-level fields.
-	if got.Version != 3 {
-		t.Errorf("Version = %d, want 3", got.Version)
+	if got.Header.Version != 4 {
+		t.Errorf("Header.Version = %d, want 4", got.Header.Version)
 	}
-	if got.PixeVersion != l.PixeVersion {
-		t.Errorf("PixeVersion = %q, want %q", got.PixeVersion, l.PixeVersion)
+	if got.Header.PixeVersion != header.PixeVersion {
+		t.Errorf("Header.PixeVersion = %q, want %q", got.Header.PixeVersion, header.PixeVersion)
 	}
-	if got.RunID != l.RunID {
-		t.Errorf("RunID = %q, want %q", got.RunID, l.RunID)
+	if got.Header.RunID != header.RunID {
+		t.Errorf("Header.RunID = %q, want %q", got.Header.RunID, header.RunID)
 	}
-	if !got.PixeRun.Equal(l.PixeRun) {
-		t.Errorf("PixeRun = %v, want %v", got.PixeRun, l.PixeRun)
+	if got.Header.PixeRun != header.PixeRun {
+		t.Errorf("Header.PixeRun = %q, want %q", got.Header.PixeRun, header.PixeRun)
 	}
-	if got.Algorithm != l.Algorithm {
-		t.Errorf("Algorithm = %q, want %q", got.Algorithm, l.Algorithm)
+	if got.Header.Algorithm != header.Algorithm {
+		t.Errorf("Header.Algorithm = %q, want %q", got.Header.Algorithm, header.Algorithm)
 	}
-	if got.Destination != l.Destination {
-		t.Errorf("Destination = %q, want %q", got.Destination, l.Destination)
+	if got.Header.Destination != header.Destination {
+		t.Errorf("Header.Destination = %q, want %q", got.Header.Destination, header.Destination)
 	}
-	if !got.Recursive {
-		t.Error("Recursive = false, want true")
+	if !got.Header.Recursive {
+		t.Error("Header.Recursive = false, want true")
 	}
-	if len(got.Files) != 4 {
-		t.Fatalf("Files len = %d, want 4", len(got.Files))
+	if len(got.Entries) != len(entries) {
+		t.Fatalf("Entries len = %d, want %d", len(got.Entries), len(entries))
 	}
 }
 
-// TestLedger_v3_copyEntry verifies all fields of a "copy" ledger entry.
-func TestLedger_v3_copyEntry(t *testing.T) {
+// TestLedger_v4_copyEntry verifies all fields of a "copy" ledger entry.
+func TestLedger_v4_copyEntry(t *testing.T) {
 	dirA := t.TempDir()
-	l := sampleLedgerV3Full()
+	_, entries := writeLedgerV4Full(t, dirA)
 
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
 	got, err := LoadLedger(dirA)
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
-	// Find the copy entry.
 	var copyEntry *domain.LedgerEntry
-	for i := range got.Files {
-		if got.Files[i].Status == domain.LedgerStatusCopy {
-			copyEntry = &got.Files[i]
+	for i := range got.Entries {
+		if got.Entries[i].Status == domain.LedgerStatusCopy {
+			copyEntry = &got.Entries[i]
 			break
 		}
 	}
@@ -354,7 +365,7 @@ func TestLedger_v3_copyEntry(t *testing.T) {
 		t.Fatal("no copy entry found")
 	}
 
-	want := l.Files[0]
+	want := entries[0]
 	if copyEntry.Path != want.Path {
 		t.Errorf("Path = %q, want %q", copyEntry.Path, want.Path)
 	}
@@ -370,7 +381,6 @@ func TestLedger_v3_copyEntry(t *testing.T) {
 	if !copyEntry.VerifiedAt.Equal(*want.VerifiedAt) {
 		t.Errorf("VerifiedAt = %v, want %v", copyEntry.VerifiedAt, want.VerifiedAt)
 	}
-	// omitempty fields that should be absent.
 	if copyEntry.Reason != "" {
 		t.Errorf("Reason = %q, want empty (omitempty)", copyEntry.Reason)
 	}
@@ -379,23 +389,20 @@ func TestLedger_v3_copyEntry(t *testing.T) {
 	}
 }
 
-// TestLedger_v3_skipEntry verifies all fields of a "skip" ledger entry.
-func TestLedger_v3_skipEntry(t *testing.T) {
+// TestLedger_v4_skipEntry verifies all fields of a "skip" ledger entry.
+func TestLedger_v4_skipEntry(t *testing.T) {
 	dirA := t.TempDir()
-	l := sampleLedgerV3Full()
+	_, entries := writeLedgerV4Full(t, dirA)
 
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
 	got, err := LoadLedger(dirA)
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
 	var skipEntry *domain.LedgerEntry
-	for i := range got.Files {
-		if got.Files[i].Status == domain.LedgerStatusSkip {
-			skipEntry = &got.Files[i]
+	for i := range got.Entries {
+		if got.Entries[i].Status == domain.LedgerStatusSkip {
+			skipEntry = &got.Entries[i]
 			break
 		}
 	}
@@ -403,14 +410,13 @@ func TestLedger_v3_skipEntry(t *testing.T) {
 		t.Fatal("no skip entry found")
 	}
 
-	want := l.Files[1]
+	want := entries[1]
 	if skipEntry.Path != want.Path {
 		t.Errorf("Path = %q, want %q", skipEntry.Path, want.Path)
 	}
 	if skipEntry.Reason != want.Reason {
 		t.Errorf("Reason = %q, want %q", skipEntry.Reason, want.Reason)
 	}
-	// omitempty fields that should be absent.
 	if skipEntry.Checksum != "" {
 		t.Errorf("Checksum = %q, want empty (omitempty)", skipEntry.Checksum)
 	}
@@ -419,23 +425,20 @@ func TestLedger_v3_skipEntry(t *testing.T) {
 	}
 }
 
-// TestLedger_v3_duplicateEntry verifies all fields of a "duplicate" ledger entry.
-func TestLedger_v3_duplicateEntry(t *testing.T) {
+// TestLedger_v4_duplicateEntry verifies all fields of a "duplicate" ledger entry.
+func TestLedger_v4_duplicateEntry(t *testing.T) {
 	dirA := t.TempDir()
-	l := sampleLedgerV3Full()
+	_, entries := writeLedgerV4Full(t, dirA)
 
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
 	got, err := LoadLedger(dirA)
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
 	var dupEntry *domain.LedgerEntry
-	for i := range got.Files {
-		if got.Files[i].Status == domain.LedgerStatusDuplicate {
-			dupEntry = &got.Files[i]
+	for i := range got.Entries {
+		if got.Entries[i].Status == domain.LedgerStatusDuplicate {
+			dupEntry = &got.Entries[i]
 			break
 		}
 	}
@@ -443,7 +446,7 @@ func TestLedger_v3_duplicateEntry(t *testing.T) {
 		t.Fatal("no duplicate entry found")
 	}
 
-	want := l.Files[2]
+	want := entries[2]
 	if dupEntry.Path != want.Path {
 		t.Errorf("Path = %q, want %q", dupEntry.Path, want.Path)
 	}
@@ -456,29 +459,25 @@ func TestLedger_v3_duplicateEntry(t *testing.T) {
 	if dupEntry.Matches != want.Matches {
 		t.Errorf("Matches = %q, want %q", dupEntry.Matches, want.Matches)
 	}
-	// omitempty fields that should be absent.
 	if dupEntry.VerifiedAt != nil {
 		t.Errorf("VerifiedAt = %v, want nil (omitempty for duplicate)", dupEntry.VerifiedAt)
 	}
 }
 
-// TestLedger_v3_errorEntry verifies all fields of an "error" ledger entry.
-func TestLedger_v3_errorEntry(t *testing.T) {
+// TestLedger_v4_errorEntry verifies all fields of an "error" ledger entry.
+func TestLedger_v4_errorEntry(t *testing.T) {
 	dirA := t.TempDir()
-	l := sampleLedgerV3Full()
+	_, entries := writeLedgerV4Full(t, dirA)
 
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
 	got, err := LoadLedger(dirA)
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
 	var errEntry *domain.LedgerEntry
-	for i := range got.Files {
-		if got.Files[i].Status == domain.LedgerStatusError {
-			errEntry = &got.Files[i]
+	for i := range got.Entries {
+		if got.Entries[i].Status == domain.LedgerStatusError {
+			errEntry = &got.Entries[i]
 			break
 		}
 	}
@@ -486,14 +485,13 @@ func TestLedger_v3_errorEntry(t *testing.T) {
 		t.Fatal("no error entry found")
 	}
 
-	want := l.Files[3]
+	want := entries[3]
 	if errEntry.Path != want.Path {
 		t.Errorf("Path = %q, want %q", errEntry.Path, want.Path)
 	}
 	if errEntry.Reason != want.Reason {
 		t.Errorf("Reason = %q, want %q", errEntry.Reason, want.Reason)
 	}
-	// omitempty fields that should be absent.
 	if errEntry.Checksum != "" {
 		t.Errorf("Checksum = %q, want empty (omitempty)", errEntry.Checksum)
 	}
@@ -502,92 +500,109 @@ func TestLedger_v3_errorEntry(t *testing.T) {
 	}
 }
 
-// TestLedger_v3_recursive_false verifies that Recursive=false is preserved.
-func TestLedger_v3_recursive_false(t *testing.T) {
+// TestLedger_v4_recursive_false verifies that Recursive=false is preserved.
+func TestLedger_v4_recursive_false(t *testing.T) {
 	dirA := t.TempDir()
-	l := &domain.Ledger{
-		Version:     3,
+	header := domain.LedgerHeader{
+		Version:     4,
+		RunID:       "test-run",
 		PixeVersion: "1.0.0",
-		PixeRun:     time.Now().UTC(),
+		PixeRun:     "2026-03-07T12:00:00Z",
 		Algorithm:   "sha1",
 		Destination: "/dst",
 		Recursive:   false,
-		Files:       []domain.LedgerEntry{},
+	}
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
 	got, err := LoadLedger(dirA)
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
-	if got.Recursive {
-		t.Error("Recursive = true, want false")
+	if got.Header.Recursive {
+		t.Error("Header.Recursive = true, want false")
 	}
 }
 
-// TestLedger_v3_omitempty_json verifies that omitempty fields are absent from
-// the JSON output for a skip entry (which has no checksum, destination, etc.).
-func TestLedger_v3_omitempty_json(t *testing.T) {
+// TestLedger_v4_omitempty_jsonl verifies that omitempty fields are absent from
+// the JSONL output for a skip entry (which has no checksum, destination, etc.).
+func TestLedger_v4_omitempty_jsonl(t *testing.T) {
 	dirA := t.TempDir()
-	l := &domain.Ledger{
-		Version:     3,
+	header := domain.LedgerHeader{
+		Version:     4,
+		RunID:       "test-run",
 		PixeVersion: "1.0.0",
-		PixeRun:     time.Now().UTC(),
+		PixeRun:     "2026-03-07T12:00:00Z",
 		Algorithm:   "sha1",
 		Destination: "/dst",
-		Files: []domain.LedgerEntry{
-			{
-				Path:   "notes.txt",
-				Status: domain.LedgerStatusSkip,
-				Reason: "unsupported format: .txt",
-				// Checksum, Destination, VerifiedAt, Matches intentionally zero.
-			},
-		},
+	}
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	_ = lw.WriteEntry(domain.LedgerEntry{
+		Path:   "notes.txt",
+		Status: domain.LedgerStatusSkip,
+		Reason: "unsupported format: .txt",
+		// Checksum, Destination, VerifiedAt, Matches intentionally zero.
+	})
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 
-	if err := SaveLedger(l, dirA); err != nil {
-		t.Fatalf("SaveLedger: %v", err)
-	}
-
-	// Read raw JSON and extract just the files array section to check entry-level omitempty.
-	// The top-level Ledger has a "destination" field which is expected; we only
-	// want to verify that the LedgerEntry omits its optional fields.
 	data, err := os.ReadFile(ledgerPath(dirA))
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	jsonStr := string(data)
 
-	// Find the "files" array section — everything after `"files": [`.
-	filesMarker := `"files": [`
-	filesIdx := findStrIdx(jsonStr, filesMarker)
-	if filesIdx < 0 {
-		t.Fatalf("JSON missing 'files' array; JSON:\n%s", jsonStr)
+	// Split into lines; line 2 (index 1) is the entry.
+	lines := splitLines(string(data))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d; content:\n%s", len(lines), string(data))
 	}
-	filesSection := jsonStr[filesIdx+len(filesMarker):]
+	entryLine := lines[1]
 
-	// These keys should NOT appear inside the file entry.
-	absentInEntry := []string{`"checksum"`, `"verified_at"`, `"matches"`}
+	// These keys should NOT appear in the entry line.
+	absentInEntry := []string{`"checksum"`, `"verified_at"`, `"matches"`, `"destination"`}
 	for _, key := range absentInEntry {
-		if containsStr(filesSection, key) {
-			t.Errorf("file entry JSON contains %q but it should be omitted (omitempty); files section:\n%s", key, filesSection)
+		if containsStr(entryLine, key) {
+			t.Errorf("entry line contains %q but it should be omitted (omitempty); line:\n%s", key, entryLine)
 		}
 	}
-	// "destination" should NOT appear inside the entry (it's only at the top level).
-	// We check the files section specifically.
-	if containsStr(filesSection, `"destination"`) {
-		t.Errorf("file entry JSON contains \"destination\" but it should be omitted (omitempty); files section:\n%s", filesSection)
-	}
 
-	// These keys SHOULD appear in the files section.
+	// These keys SHOULD appear in the entry line.
 	presentKeys := []string{`"path"`, `"status"`, `"reason"`}
 	for _, key := range presentKeys {
-		if !containsStr(filesSection, key) {
-			t.Errorf("file entry JSON missing %q; files section:\n%s", key, filesSection)
+		if !containsStr(entryLine, key) {
+			t.Errorf("entry line missing %q; line:\n%s", key, entryLine)
 		}
 	}
+}
+
+// splitLines splits s by newlines, discarding empty trailing lines.
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			line := s[start:i]
+			if line != "" {
+				lines = append(lines, line)
+			}
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		if tail := s[start:]; tail != "" {
+			lines = append(lines, tail)
+		}
+	}
+	return lines
 }
 
 // containsStr is a simple helper to avoid importing strings in the test file.
@@ -607,4 +622,289 @@ func findStrIdx(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// --- Task 26: LedgerWriter unit tests ---
+
+// TestLedgerWriter_headerOnly opens a writer, writes only the header, closes it,
+// and verifies the file has exactly 1 line that parses back as a valid LedgerHeader.
+func TestLedgerWriter_headerOnly(t *testing.T) {
+	dirA := t.TempDir()
+	header := sampleLedgerHeader()
+
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(ledgerPath(dirA))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	lines := splitLines(string(data))
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d; content:\n%s", len(lines), string(data))
+	}
+
+	var got domain.LedgerHeader
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("unmarshal header: %v", err)
+	}
+	if got.Version != header.Version {
+		t.Errorf("Version = %d, want %d", got.Version, header.Version)
+	}
+	if got.RunID != header.RunID {
+		t.Errorf("RunID = %q, want %q", got.RunID, header.RunID)
+	}
+	if got.PixeVersion != header.PixeVersion {
+		t.Errorf("PixeVersion = %q, want %q", got.PixeVersion, header.PixeVersion)
+	}
+	if got.Algorithm != header.Algorithm {
+		t.Errorf("Algorithm = %q, want %q", got.Algorithm, header.Algorithm)
+	}
+	if got.Destination != header.Destination {
+		t.Errorf("Destination = %q, want %q", got.Destination, header.Destination)
+	}
+}
+
+// TestLedgerWriter_headerAndEntries writes a header + 3 entries and verifies
+// the file has 4 lines, each parseable, in the correct order.
+func TestLedgerWriter_headerAndEntries(t *testing.T) {
+	dirA := t.TempDir()
+	header := sampleLedgerHeader()
+	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
+
+	entries := []domain.LedgerEntry{
+		{Path: "a.jpg", Status: domain.LedgerStatusCopy, Checksum: "aaa", Destination: "2026/a.jpg", VerifiedAt: &now},
+		{Path: "b.txt", Status: domain.LedgerStatusSkip, Reason: "unsupported format: .txt"},
+		{Path: "c.jpg", Status: domain.LedgerStatusError, Reason: "extract date: no EXIF"},
+	}
+
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	for _, e := range entries {
+		if err := lw.WriteEntry(e); err != nil {
+			t.Fatalf("WriteEntry: %v", err)
+		}
+	}
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(ledgerPath(dirA))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	lines := splitLines(string(data))
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines (1 header + 3 entries), got %d; content:\n%s", len(lines), string(data))
+	}
+
+	// Verify each line is valid JSON.
+	for i, line := range lines {
+		if !json.Valid([]byte(line)) {
+			t.Errorf("line %d is not valid JSON: %s", i+1, line)
+		}
+	}
+
+	// Verify entry order and status fields.
+	wantStatuses := []string{domain.LedgerStatusCopy, domain.LedgerStatusSkip, domain.LedgerStatusError}
+	for i, wantStatus := range wantStatuses {
+		var e domain.LedgerEntry
+		if err := json.Unmarshal([]byte(lines[i+1]), &e); err != nil {
+			t.Fatalf("unmarshal entry %d: %v", i+1, err)
+		}
+		if e.Status != wantStatus {
+			t.Errorf("entry %d Status = %q, want %q", i+1, e.Status, wantStatus)
+		}
+		if e.Path != entries[i].Path {
+			t.Errorf("entry %d Path = %q, want %q", i+1, e.Path, entries[i].Path)
+		}
+	}
+}
+
+// TestLedgerWriter_omitempty verifies that zero-valued optional fields are absent
+// from the raw JSON line for a skip entry.
+func TestLedgerWriter_omitempty(t *testing.T) {
+	dirA := t.TempDir()
+	lw, err := NewLedgerWriter(dirA, sampleLedgerHeader())
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	_ = lw.WriteEntry(domain.LedgerEntry{
+		Path:   "notes.txt",
+		Status: domain.LedgerStatusSkip,
+		Reason: "unsupported format: .txt",
+		// Checksum, Destination, VerifiedAt, Matches intentionally zero.
+	})
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(ledgerPath(dirA))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	lines := splitLines(string(data))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d", len(lines))
+	}
+	entryLine := lines[1]
+
+	absent := []string{`"checksum"`, `"destination"`, `"verified_at"`, `"matches"`}
+	for _, key := range absent {
+		if containsStr(entryLine, key) {
+			t.Errorf("entry line contains %q but should be omitted (omitempty); line:\n%s", key, entryLine)
+		}
+	}
+}
+
+// TestLedgerWriter_compactJSON verifies that each line is compact JSON —
+// no embedded newlines and no leading/trailing whitespace within the JSON value.
+func TestLedgerWriter_compactJSON(t *testing.T) {
+	dirA := t.TempDir()
+	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
+	lw, err := NewLedgerWriter(dirA, sampleLedgerHeader())
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	_ = lw.WriteEntry(domain.LedgerEntry{
+		Path: "img.jpg", Status: domain.LedgerStatusCopy,
+		Checksum: "abc", Destination: "2026/img.jpg", VerifiedAt: &now,
+	})
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(ledgerPath(dirA))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	// Each non-empty line must be valid JSON with no internal newlines.
+	for i, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		if !json.Valid([]byte(line)) {
+			t.Errorf("line %d is not valid JSON: %s", i+1, line)
+		}
+		// A compact JSON object has no embedded newlines.
+		if strings.ContainsRune(line, '\n') {
+			t.Errorf("line %d contains embedded newline (not compact): %q", i+1, line)
+		}
+	}
+}
+
+// TestLedgerWriter_nilSafe verifies that calling WriteEntry on a nil *LedgerWriter
+// does not panic and returns nil.
+func TestLedgerWriter_nilSafe(t *testing.T) {
+	var lw *LedgerWriter
+	err := lw.WriteEntry(domain.LedgerEntry{Path: "a.jpg", Status: domain.LedgerStatusCopy})
+	if err != nil {
+		t.Errorf("WriteEntry on nil LedgerWriter returned error: %v", err)
+	}
+}
+
+// TestLedgerWriter_version4 verifies that the header line contains "version":4.
+func TestLedgerWriter_version4(t *testing.T) {
+	dirA := t.TempDir()
+	header := sampleLedgerHeader() // Version: 4
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatalf("NewLedgerWriter: %v", err)
+	}
+	if err := lw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(ledgerPath(dirA))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	lines := splitLines(string(data))
+	if len(lines) == 0 {
+		t.Fatal("ledger file is empty")
+	}
+	if !containsStr(lines[0], `"version":4`) {
+		t.Errorf("header line does not contain %q; line:\n%s", `"version":4`, lines[0])
+	}
+}
+
+// --- Task 29: interrupted run produces partial valid JSONL ---
+
+// TestLedgerWriter_partialWrite verifies that if Close is never called (simulating
+// a crash), the file on disk contains valid JSONL up to the last complete entry.
+func TestLedgerWriter_partialWrite(t *testing.T) {
+	dirA := t.TempDir()
+	now := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
+
+	header := domain.LedgerHeader{
+		Version:     4,
+		RunID:       "test-run",
+		PixeVersion: "1.0.0",
+		PixeRun:     "2026-03-06T10:30:00Z",
+		Algorithm:   "sha1",
+		Destination: "/dst",
+	}
+	lw, err := NewLedgerWriter(dirA, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write 2 entries but do NOT call Close (simulating a crash).
+	_ = lw.WriteEntry(domain.LedgerEntry{Path: "a.jpg", Status: domain.LedgerStatusCopy, Checksum: "aaa", Destination: "2026/a.jpg", VerifiedAt: &now})
+	_ = lw.WriteEntry(domain.LedgerEntry{Path: "b.jpg", Status: domain.LedgerStatusSkip, Reason: "previously imported"})
+	// Intentionally no lw.Close()
+
+	// Read the file directly and verify it's valid JSONL.
+	raw, err := os.ReadFile(filepath.Join(dirA, ".pixe_ledger.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lines := splitLines(string(raw))
+	if len(lines) != 3 { // header + 2 entries
+		t.Fatalf("expected 3 lines, got %d; content:\n%s", len(lines), string(raw))
+	}
+
+	// Each line must be valid JSON.
+	for i, line := range lines {
+		if !json.Valid([]byte(line)) {
+			t.Errorf("line %d is not valid JSON: %s", i+1, line)
+		}
+	}
+
+	// Parse and verify the header.
+	var h domain.LedgerHeader
+	if err := json.Unmarshal([]byte(lines[0]), &h); err != nil {
+		t.Fatalf("header parse: %v", err)
+	}
+	if h.Version != 4 {
+		t.Errorf("header version: got %d, want 4", h.Version)
+	}
+
+	// Parse and verify the two entries.
+	var e1, e2 domain.LedgerEntry
+	if err := json.Unmarshal([]byte(lines[1]), &e1); err != nil {
+		t.Fatalf("entry 1 parse: %v", err)
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &e2); err != nil {
+		t.Fatalf("entry 2 parse: %v", err)
+	}
+	if e1.Path != "a.jpg" {
+		t.Errorf("entry 1 path = %q, want %q", e1.Path, "a.jpg")
+	}
+	if e2.Path != "b.jpg" {
+		t.Errorf("entry 2 path = %q, want %q", e2.Path, "b.jpg")
+	}
 }

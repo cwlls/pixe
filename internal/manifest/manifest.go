@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package manifest handles atomic persistence of the Pixe manifest and
-// ledger JSON files.
+// Package manifest handles persistence of the Pixe manifest and ledger files.
 //
-// Manifest — written to <dirB>/.pixe/manifest.json — is the operational
-// journal for a sort run. It tracks per-file pipeline state and enables
-// interrupted runs to be resumed.
+// Manifest — written to <dirB>/.pixe/manifest.json — is the legacy
+// operational journal for a sort run. It is retained for the migration path
+// only; new runs use the SQLite archive database instead.
 //
-// Ledger — written to <dirA>/.pixe_ledger.json — is the minimal,
-// source-side record of files that were successfully processed. It is the
-// only file Pixe writes into the source directory.
+// Ledger — written to <dirA>/.pixe_ledger.json — is the source-side receipt
+// of every file Pixe processed during a run. It uses the JSONL format (v4):
+// line 1 is a header object containing run metadata; each subsequent line is
+// an independent LedgerEntry JSON object appended as the coordinator
+// finalises each file result. This streaming approach keeps memory usage O(1)
+// regardless of file count and leaves a partial-but-valid receipt if the run
+// is interrupted.
 //
-// Both files are written atomically: the new content is first written to a
-// temporary file in the same directory, then renamed over the target. On
-// POSIX filesystems rename(2) is atomic within a single filesystem, so a
-// crash between write and rename leaves the previous version intact.
+// The LedgerWriter type owns the file handle and json.Encoder. The pipeline
+// coordinator is the sole caller — no mutex is needed.
 package manifest
 
 import (
@@ -90,27 +91,94 @@ func Load(dirB string) (*domain.Manifest, error) {
 	return &m, nil
 }
 
-// SaveLedger atomically writes l to <dirA>/.pixe_ledger.json.
-func SaveLedger(l *domain.Ledger, dirA string) error {
-	return atomicWriteJSON(l, ledgerPath(dirA))
+// LedgerContents holds the parsed contents of a JSONL ledger file.
+// Used by tests to verify ledger output after a sort run.
+type LedgerContents struct {
+	Header  domain.LedgerHeader
+	Entries []domain.LedgerEntry
 }
 
-// LoadLedger reads and deserialises the ledger from <dirA>/.pixe_ledger.json.
+// LoadLedger reads a JSONL ledger file and returns its parsed contents.
+// Line 1 is decoded as the LedgerHeader; all subsequent lines are decoded
+// as LedgerEntry objects.
 // Returns (nil, nil) if the ledger file does not exist.
-func LoadLedger(dirA string) (*domain.Ledger, error) {
+func LoadLedger(dirA string) (*LedgerContents, error) {
 	path := ledgerPath(dirA)
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("manifest: read ledger %q: %w", path, err)
+		return nil, fmt.Errorf("manifest: open ledger %q: %w", path, err)
 	}
-	var l domain.Ledger
-	if err := json.Unmarshal(data, &l); err != nil {
-		return nil, fmt.Errorf("manifest: parse ledger %q: %w", path, err)
+	defer func() {
+		_ = f.Close()
+	}()
+
+	dec := json.NewDecoder(f)
+
+	var lc LedgerContents
+	if err := dec.Decode(&lc.Header); err != nil {
+		return nil, fmt.Errorf("manifest: decode ledger header %q: %w", path, err)
 	}
-	return &l, nil
+	for dec.More() {
+		var entry domain.LedgerEntry
+		if err := dec.Decode(&entry); err != nil {
+			return nil, fmt.Errorf("manifest: decode ledger entry %q: %w", path, err)
+		}
+		lc.Entries = append(lc.Entries, entry)
+	}
+	return &lc, nil
+}
+
+// LedgerWriter streams ledger entries to a JSONL file.
+// The pipeline coordinator goroutine is the sole caller — no mutex is needed.
+// Call NewLedgerWriter to open the file and write the header, then WriteEntry
+// for each file result, and finally Close when the run completes.
+type LedgerWriter struct {
+	f   *os.File
+	enc *json.Encoder
+}
+
+// NewLedgerWriter opens <dirA>/.pixe_ledger.json for writing (truncating any
+// existing content), writes header as the first JSON line, and returns the
+// writer. The caller must call Close when the run completes.
+//
+// Returns an error if the file cannot be created or the header cannot be
+// written. In either case the file is closed before returning.
+func NewLedgerWriter(dirA string, header domain.LedgerHeader) (*LedgerWriter, error) {
+	f, err := os.Create(ledgerPath(dirA))
+	if err != nil {
+		return nil, fmt.Errorf("manifest: open ledger: %w", err)
+	}
+
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false) // keep file paths with & < > unescaped
+
+	if err := enc.Encode(header); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("manifest: write ledger header: %w", err)
+	}
+
+	return &LedgerWriter{f: f, enc: enc}, nil
+}
+
+// WriteEntry appends entry as a single compact JSON line to the ledger.
+// If lw is nil (dry-run mode) the call is a no-op and returns nil.
+func (lw *LedgerWriter) WriteEntry(entry domain.LedgerEntry) error {
+	if lw == nil {
+		return nil
+	}
+	return lw.enc.Encode(entry)
+}
+
+// Close flushes and closes the underlying file.
+// If lw is nil the call is a no-op and returns nil.
+func (lw *LedgerWriter) Close() error {
+	if lw == nil {
+		return nil
+	}
+	return lw.f.Close()
 }
 
 // atomicWriteJSON marshals v to indented JSON and writes it to target

@@ -16,9 +16,10 @@
 // discovery, extraction, hashing, path building, copy, verify, tagging,
 // and archive-DB / ledger persistence.
 //
-// State is persisted to the SQLite archive database (archivedb) rather than
-// the legacy JSON manifest. The manifest package is still used for ledger
-// persistence (dirA/.pixe_ledger.json) which is unchanged.
+// State is persisted to the SQLite archive database (archivedb). The ledger
+// (dirA/.pixe_ledger.json) is written in JSONL format via manifest.LedgerWriter:
+// the coordinator goroutine streams one JSON line per file as each result is
+// finalised, keeping memory usage O(1) regardless of file count.
 package pipeline
 
 import (
@@ -152,32 +153,42 @@ func Run(opts SortOptions) (SortResult, error) {
 	}
 
 	// ------------------------------------------------------------------
-	// 4. Process files (sequential or concurrent).
+	// 4. Open streaming ledger writer (nil in dry-run — no ledger written).
 	// ------------------------------------------------------------------
-	ledger := &domain.Ledger{
-		Version:     3,
-		PixeVersion: opts.PixeVersion,
-		RunID:       opts.RunID,
-		PixeRun:     startedAt,
-		Algorithm:   opts.Hasher.Algorithm(),
-		Destination: dirB,
-		Recursive:   cfg.Recursive,
+	var lw *manifest.LedgerWriter
+	if !cfg.DryRun {
+		header := domain.LedgerHeader{
+			Version:     4,
+			RunID:       opts.RunID,
+			PixeVersion: opts.PixeVersion,
+			PixeRun:     startedAt.UTC().Format(time.RFC3339),
+			Algorithm:   opts.Hasher.Algorithm(),
+			Destination: dirB,
+			Recursive:   cfg.Recursive,
+		}
+		var lwErr error
+		lw, lwErr = manifest.NewLedgerWriter(dirA, header)
+		if lwErr != nil {
+			_, _ = fmt.Fprintf(out, "WARNING: could not open ledger in %s: %v\n", dirA, lwErr)
+			// lw stays nil — processing continues without a ledger.
+		}
 	}
 
+	// ------------------------------------------------------------------
+	// 5. Process files (sequential or concurrent).
+	// ------------------------------------------------------------------
 	var result SortResult
 	if cfg.Workers > 1 {
-		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, ledger)
+		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
 	} else {
-		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, ledger)
+		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
 	}
 
 	// ------------------------------------------------------------------
-	// 5. Finalise: write ledger to dirA, mark run complete in DB.
+	// 6. Finalise: close ledger, mark run complete in DB.
 	// ------------------------------------------------------------------
-	if !cfg.DryRun {
-		if err := manifest.SaveLedger(ledger, dirA); err != nil {
-			_, _ = fmt.Fprintf(out, "WARNING: could not write ledger to %s: %v\n", dirA, err)
-		}
+	if err := lw.Close(); err != nil {
+		_, _ = fmt.Fprintf(out, "WARNING: could not close ledger: %v\n", err)
 	}
 	if db != nil {
 		if err := db.CompleteRun(opts.RunID, time.Now().UTC()); err != nil {
@@ -194,7 +205,7 @@ func Run(opts SortOptions) (SortResult, error) {
 // runSequential processes all discovered files one at a time.
 func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, ledger *domain.Ledger) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.LedgerWriter) SortResult {
 
 	var result SortResult
 	db := opts.DB
@@ -205,7 +216,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
 	for _, sf := range skipped {
 		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
-		ledger.Files = append(ledger.Files, domain.LedgerEntry{
+		_ = lw.WriteEntry(domain.LedgerEntry{
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
 			Reason: sf.Reason,
@@ -238,7 +249,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			if processed {
 				const reason = "previously imported"
 				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
-				ledger.Files = append(ledger.Files, domain.LedgerEntry{
+				_ = lw.WriteEntry(domain.LedgerEntry{
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
 					Reason: reason,
@@ -257,7 +268,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 				_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
 			}
 			_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, err.Error()))
-			ledger.Files = append(ledger.Files, domain.LedgerEntry{
+			_ = lw.WriteEntry(domain.LedgerEntry{
 				Path:   df.RelPath,
 				Status: domain.LedgerStatusError,
 				Reason: err.Error(),
@@ -274,7 +285,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			if db == nil {
 				memSeen[le.Checksum] = le.Destination
 			}
-			ledger.Files = append(ledger.Files, *le)
+			_ = lw.WriteEntry(*le)
 		}
 	}
 

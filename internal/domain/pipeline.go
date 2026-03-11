@@ -150,16 +150,3 @@ type LedgerHeader struct {
 	Destination string `json:"destination"`  // absolute path to dirB
 	Recursive   bool   `json:"recursive"`    // whether --recursive was active
 }
-
-// Ledger is the source-side record written to dirA/.pixe_ledger.json.
-// It is the only file Pixe writes into the source directory.
-type Ledger struct {
-	Version     int           `json:"version"`
-	PixeVersion string        `json:"pixe_version"`
-	RunID       string        `json:"run_id,omitempty"` // UUID linking to archive DB (v2+)
-	PixeRun     time.Time     `json:"pixe_run"`
-	Algorithm   string        `json:"algorithm"`
-	Destination string        `json:"destination"`
-	Recursive   bool          `json:"recursive"`
-	Files       []LedgerEntry `json:"files"`
-}

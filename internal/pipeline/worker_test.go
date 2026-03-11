@@ -95,10 +95,10 @@ func TestRun_multipleWorkers(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if len(l.Files) != 4 {
-		t.Errorf("ledger.Files len = %d, want 4\nOutput:\n%s", len(l.Files), out.String())
+	if len(l.Entries) != 4 {
+		t.Errorf("ledger.Entries len = %d, want 4\nOutput:\n%s", len(l.Entries), out.String())
 	}
-	for _, e := range l.Files {
+	for _, e := range l.Entries {
 		if e.Checksum == "" {
 			t.Errorf("ledger entry %q has empty checksum", e.Path)
 		}
