@@ -22,6 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/viper"
+
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
@@ -585,6 +587,91 @@ func TestPrintStatusJSON_structure(t *testing.T) {
 	}
 	if strings.Contains(raw, `"unrecognized": null`) {
 		t.Error("unrecognized should serialize as [] not null")
+	}
+}
+
+// TestRunStatus_defaultsToCwd verifies that omitting --source causes runStatus
+// to inspect the current working directory.
+func TestRunStatus_defaultsToCwd(t *testing.T) {
+	dir := t.TempDir()
+	copyJPEG(t, dir, "with_exif_date.jpg", "IMG_0001.jpg")
+
+	// Change working directory to the temp dir; restore on cleanup.
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	})
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %q: %v", dir, err)
+	}
+
+	// Call runStatus with source unset (empty string from Viper default).
+	// statusCmd.OutOrStdout() needs a writer; set it on the command.
+	var buf bytes.Buffer
+	statusCmd.SetOut(&buf)
+	defer statusCmd.SetOut(nil)
+
+	// Invoke runStatus directly — source is "" so cwd fallback fires.
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+
+	out := buf.String()
+	// The output header must reference the temp dir (the cwd).
+	if !strings.Contains(out, dir) {
+		t.Errorf("expected output to reference cwd %q, got:\n%s", dir, out)
+	}
+	// The JPEG should appear as unsorted (no ledger).
+	if !strings.Contains(out, "UNSORTED") {
+		t.Errorf("expected UNSORTED section, got:\n%s", out)
+	}
+}
+
+// TestRunStatus_sourceOverridesCwd verifies that an explicit --source flag
+// takes precedence over the current working directory.
+func TestRunStatus_sourceOverridesCwd(t *testing.T) {
+	// Two distinct temp dirs: cwd and the explicit source.
+	cwdDir := t.TempDir()
+	srcDir := t.TempDir()
+	copyJPEG(t, srcDir, "with_exif_date.jpg", "IMG_explicit.jpg")
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	})
+	if err := os.Chdir(cwdDir); err != nil {
+		t.Fatalf("chdir %q: %v", cwdDir, err)
+	}
+
+	// Simulate --source being set to srcDir via Viper.
+	viper.Set("status_source", srcDir)
+	defer viper.Set("status_source", "")
+
+	var buf bytes.Buffer
+	statusCmd.SetOut(&buf)
+	defer statusCmd.SetOut(nil)
+
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+
+	out := buf.String()
+	// Output must reference srcDir, not cwdDir.
+	if !strings.Contains(out, srcDir) {
+		t.Errorf("expected output to reference explicit source %q, got:\n%s", srcDir, out)
+	}
+	if strings.Contains(out, cwdDir) {
+		t.Errorf("output should not reference cwd %q when --source is explicit, got:\n%s", cwdDir, out)
 	}
 }
 

@@ -15,7 +15,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -47,9 +46,10 @@ import (
 var sortCmd = &cobra.Command{
 	Use:   "sort",
 	Short: "Sort and rename media files from a source directory into an organized archive",
-	Long: `Sort discovers all supported media files in the source directory (--source),
-extracts capture dates from metadata, computes data-only checksums, and copies
-files into the destination directory (--dest) using the naming convention:
+	Long: `Sort discovers all supported media files in the source directory. When --source
+is omitted, the current working directory is used. Extracts capture dates from
+metadata, computes data-only checksums, and copies files into the destination
+directory (--dest) using the naming convention:
 
   YYYY/MM-Mon/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 
@@ -81,10 +81,14 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// 2. Validate inputs.
 	// ------------------------------------------------------------------
 	if cfg.Source == "" {
-		return errors.New("--source is required")
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolve current directory: %w", err)
+		}
+		cfg.Source = cwd
 	}
 	if cfg.Destination == "" {
-		return errors.New("--dest is required")
+		return fmt.Errorf("--dest is required")
 	}
 
 	// Source must exist and be a directory.
@@ -196,7 +200,7 @@ func init() {
 	rootCmd.AddCommand(sortCmd)
 
 	// Sort-specific flags.
-	sortCmd.Flags().StringP("source", "s", "", "source directory containing media files to sort (required)")
+	sortCmd.Flags().StringP("source", "s", "", "source directory containing media files to sort (default: current directory)")
 	sortCmd.Flags().StringP("dest", "d", "", "destination directory for the organized archive (required)")
 	sortCmd.Flags().String("copyright", "", `copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"`)
 	sortCmd.Flags().String("camera-owner", "", "camera owner string injected into destination files")
@@ -206,8 +210,7 @@ func init() {
 	sortCmd.Flags().Bool("skip-duplicates", false, "skip copying duplicate files instead of copying to duplicates/ directory")
 	sortCmd.Flags().StringArray("ignore", nil, `glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")`)
 
-	// Mark required flags.
-	_ = sortCmd.MarkFlagRequired("source")
+	// Mark required flags (--source defaults to cwd; --dest has no default).
 	_ = sortCmd.MarkFlagRequired("dest")
 
 	// Bind sort-specific flags to Viper.

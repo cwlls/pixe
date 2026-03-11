@@ -6,7 +6,12 @@
 
 ## [Unreleased] - In Development
 
-- No pending tasks.
+- **Features**:
+  - `--source` flag is now optional for both `pixe sort` and `pixe status` commands, defaulting to the current working directory when omitted. Explicit `--source` still overrides the default.
+
+- **Test Coverage**:
+  - Added `TestSortCmd_sourceNotRequired` in `cmd/sort_test.go`.
+  - Added `TestRunStatus_defaultsToCwd` and `TestRunStatus_sourceOverridesCwd` in `cmd/status_test.go`.
 
 ## [v1.6.0] - 2026-03-11
 

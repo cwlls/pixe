@@ -69,8 +69,9 @@ func (r *statusResult) total() int {
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the sorting status of a source directory",
-	Long: `Status inspects a source directory and reports which files have been sorted,
-which are duplicates, which encountered errors, and which still need sorting.
+	Long: `Status inspects a source directory (defaulting to the current working directory)
+and reports which files have been sorted, which are duplicates, which encountered
+errors, and which still need sorting.
 
 It reads the ledger file (dirA/.pixe_ledger.json) left by the most recent
 'pixe sort' run. No archive database or destination directory is required —
@@ -88,6 +89,14 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	recursive := viper.GetBool("status_recursive")
 	ignorePatterns := viper.GetStringSlice("status_ignore")
 	jsonFlag := viper.GetBool("status_json")
+
+	if source == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolve current directory: %w", err)
+		}
+		source = cwd
+	}
 
 	// ------------------------------------------------------------------
 	// 2. Validate source directory.
@@ -415,12 +424,10 @@ func printStatusJSON(w io.Writer, r *statusResult) error {
 func init() {
 	rootCmd.AddCommand(statusCmd)
 
-	statusCmd.Flags().StringP("source", "s", "", "source directory to inspect (required)")
+	statusCmd.Flags().StringP("source", "s", "", "source directory to inspect (default: current directory)")
 	statusCmd.Flags().BoolP("recursive", "r", false, "recursively inspect subdirectories of --source")
 	statusCmd.Flags().StringArray("ignore", nil, `glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt")`)
 	statusCmd.Flags().Bool("json", false, "emit JSON output instead of a human-readable listing")
-
-	_ = statusCmd.MarkFlagRequired("source")
 
 	_ = viper.BindPFlag("status_source", statusCmd.Flags().Lookup("source"))
 	_ = viper.BindPFlag("status_recursive", statusCmd.Flags().Lookup("recursive"))

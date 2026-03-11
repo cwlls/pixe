@@ -105,7 +105,7 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 
 | Flag | Description |
 |------|-------------|
-| `-s, --source` | Source directory containing media files (required) |
+| `-s, --source` | Source directory containing media files (default: current directory) |
 | `-d, --dest` | Destination directory for the organized archive (required) |
 | `-w, --workers` | Number of concurrent workers (default: auto-detect) |
 | `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
@@ -186,7 +186,7 @@ pixe status --source /path/to/photos [options]
 
 | Flag | Description |
 |------|-------------|
-| `-s, --source` | Source directory to inspect (required) |
+| `-s, --source` | Source directory to inspect (default: current directory) |
 | `-r, --recursive` | Recursively inspect subdirectories (default: false) |
 | `--ignore` | Glob pattern for files to exclude (repeatable) |
 | `--json` | Emit JSON output instead of human-readable listing |
