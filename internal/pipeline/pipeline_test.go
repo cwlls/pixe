@@ -1096,6 +1096,226 @@ func TestRun_recursiveIncremental_dbStatus(t *testing.T) {
 	}
 }
 
+// TestProcessFile_skipDuplicates_noFileCopied verifies that with SkipDuplicates=true,
+// a duplicate file produces a DUPE ledger entry with no Destination, and no file
+// exists in dirB.
+func TestProcessFile_skipDuplicates_noFileCopied(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	db := openTestDB(t)
+
+	// Copy the same file twice under different names.
+	copyFixture(t, dirA, "with_exif_date.jpg")
+	src := filepath.Join("..", "handler", "jpeg", "testdata", "with_exif_date.jpg")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirA, "duplicate.jpg"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	cfg := &config.AppConfig{
+		Source:         dirA,
+		Destination:    dirB,
+		Algorithm:      "sha1",
+		SkipDuplicates: true,
+	}
+	result, err := Run(newOptsWithDB(t, cfg, &out, db, "skip-dup-run"))
+	if err != nil {
+		t.Fatalf("Run: %v\nOutput:\n%s", err, out.String())
+	}
+
+	// Should process 2 files, 1 duplicate.
+	if result.Processed != 2 {
+		t.Errorf("Processed = %d, want 2", result.Processed)
+	}
+	if result.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", result.Duplicates)
+	}
+
+	// Load the ledger.
+	l, err := manifest.LoadLedger(dirA)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if l == nil {
+		t.Fatal("ledger not written")
+	}
+	if len(l.Entries) != 2 {
+		t.Errorf("ledger.Entries len = %d, want 2", len(l.Entries))
+	}
+
+	// Find the duplicate entry.
+	var dupEntry *domain.LedgerEntry
+	for i, e := range l.Entries {
+		if e.Status == domain.LedgerStatusDuplicate {
+			dupEntry = &l.Entries[i]
+			break
+		}
+	}
+	if dupEntry == nil {
+		t.Fatal("no duplicate entry in ledger")
+	}
+
+	// Duplicate entry should have no Destination.
+	if dupEntry.Destination != "" {
+		t.Errorf("duplicate entry Destination = %q, want empty", dupEntry.Destination)
+	}
+
+	// Duplicate entry should have Matches set.
+	if dupEntry.Matches == "" {
+		t.Error("duplicate entry Matches should not be empty")
+	}
+
+	// No file should exist in dirB/duplicates/ (since we skipped the copy).
+	dupDir := filepath.Join(dirB, "duplicates")
+	if _, err := os.Stat(dupDir); err == nil {
+		t.Error("duplicates directory should not exist when SkipDuplicates=true")
+	}
+}
+
+// TestProcessFile_skipDuplicates_dbRowCorrect verifies that when a duplicate is
+// skipped, the DB row has status='complete', is_duplicate=1, checksum set, and
+// dest_path NULL.
+func TestProcessFile_skipDuplicates_dbRowCorrect(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	db := openTestDB(t)
+
+	// Copy the same file twice.
+	copyFixture(t, dirA, "with_exif_date.jpg")
+	src := filepath.Join("..", "handler", "jpeg", "testdata", "with_exif_date.jpg")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirA, "duplicate.jpg"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	cfg := &config.AppConfig{
+		Source:         dirA,
+		Destination:    dirB,
+		Algorithm:      "sha1",
+		SkipDuplicates: true,
+	}
+	_, err = Run(newOptsWithDB(t, cfg, &out, db, "skip-dup-db-run"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Get all files from the run.
+	files, err := db.GetFilesByRun("skip-dup-db-run")
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+
+	// Find the duplicate file (the one with IsDuplicate=true).
+	var dupFile *archivedb.FileRecord
+	for _, f := range files {
+		if f.IsDuplicate {
+			dupFile = f
+			break
+		}
+	}
+	if dupFile == nil {
+		t.Fatal("no duplicate file found in DB")
+	}
+
+	// Verify the duplicate file's DB row.
+	if dupFile.Status != "complete" {
+		t.Errorf("duplicate file Status = %q, want %q", dupFile.Status, "complete")
+	}
+	if !dupFile.IsDuplicate {
+		t.Error("duplicate file IsDuplicate = false, want true")
+	}
+	if dupFile.Checksum == nil || *dupFile.Checksum == "" {
+		t.Error("duplicate file Checksum should not be empty")
+	}
+	if dupFile.DestPath != nil && *dupFile.DestPath != "" {
+		t.Errorf("duplicate file DestPath = %q, want nil/empty", *dupFile.DestPath)
+	}
+	if dupFile.DestRel != nil && *dupFile.DestRel != "" {
+		t.Errorf("duplicate file DestRel = %q, want nil/empty", *dupFile.DestRel)
+	}
+}
+
+// TestProcessFile_defaultDuplicates_stillCopied verifies that with SkipDuplicates=false
+// (the default), duplicates are still copied to duplicates/ — regression guard.
+func TestProcessFile_defaultDuplicates_stillCopied(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Copy the same file twice.
+	copyFixture(t, dirA, "with_exif_date.jpg")
+	src := filepath.Join("..", "handler", "jpeg", "testdata", "with_exif_date.jpg")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirA, "duplicate.jpg"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	cfg := &config.AppConfig{
+		Source:      dirA,
+		Destination: dirB,
+		Algorithm:   "sha1",
+		// SkipDuplicates defaults to false
+	}
+	result, err := Run(newOpts(t, cfg, &out))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Should process 2 files, 1 duplicate.
+	if result.Processed != 2 {
+		t.Errorf("Processed = %d, want 2", result.Processed)
+	}
+	if result.Duplicates != 1 {
+		t.Errorf("Duplicates = %d, want 1", result.Duplicates)
+	}
+
+	// Duplicate must be under dirB/duplicates/ (not skipped).
+	dupDir := filepath.Join(dirB, "duplicates")
+	if _, err := os.Stat(dupDir); err != nil {
+		t.Errorf("duplicates directory not created: %v", err)
+	}
+
+	// Load the ledger.
+	l, err := manifest.LoadLedger(dirA)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if l == nil {
+		t.Fatal("ledger not written")
+	}
+
+	// Find the duplicate entry.
+	var dupEntry *domain.LedgerEntry
+	for i, e := range l.Entries {
+		if e.Status == domain.LedgerStatusDuplicate {
+			dupEntry = &l.Entries[i]
+			break
+		}
+	}
+	if dupEntry == nil {
+		t.Fatal("no duplicate entry in ledger")
+	}
+
+	// Duplicate entry should have a Destination (it was copied).
+	if dupEntry.Destination == "" {
+		t.Error("duplicate entry Destination should not be empty when SkipDuplicates=false")
+	}
+}
+
 func TestRenderCopyright(t *testing.T) {
 	cases := []struct {
 		tmpl string

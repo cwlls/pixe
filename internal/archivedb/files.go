@@ -315,6 +315,10 @@ func (db *DB) CompleteFileWithDedupCheck(fileID int64, checksum string) (existin
 // CheckDuplicate queries whether a file with the given checksum exists with
 // status "complete". Returns the dest_rel path if found, empty string if not.
 // This is the hot-path dedup query — served by idx_files_checksum.
+//
+// When a matching complete row exists but dest_rel is NULL (e.g. the file was
+// previously skipped via --skip-duplicates), the sentinel "<duplicate>" is
+// returned so callers can still detect the duplicate without a valid path.
 func (db *DB) CheckDuplicate(checksum string) (string, error) {
 	const q = `
 		SELECT dest_rel FROM files
@@ -329,7 +333,12 @@ func (db *DB) CheckDuplicate(checksum string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("archivedb: check duplicate: %w", err)
 	}
-	return destRel.String, nil
+	if destRel.Valid && destRel.String != "" {
+		return destRel.String, nil
+	}
+	// dest_rel is NULL or empty — the matching row was a skipped duplicate.
+	// Return a non-empty sentinel so the caller detects the duplicate.
+	return "<duplicate>", nil
 }
 
 // GetFilesByRun returns all file records for a given run ID.

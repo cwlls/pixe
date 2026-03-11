@@ -2304,3 +2304,141 @@ func TestBusyRetry(t *testing.T) {
 		t.Error("write on db2 did not succeed")
 	}
 }
+
+// TestCheckDuplicate_nullDestRel verifies that when a complete row exists with
+// NULL dest_rel (skipped duplicate), CheckDuplicate returns "<duplicate>" sentinel
+// instead of "".
+func TestCheckDuplicate_nullDestRel(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-null-dest")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "run-null-dest", SourcePath: "/src/skipped_dup.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+
+	const checksum = "skipped-dup-checksum"
+
+	// Update file to complete status with checksum but no destination (skipped duplicate).
+	if err := db.UpdateFileStatus(id, "complete",
+		WithChecksum(checksum),
+		WithIsDuplicate(true),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus: %v", err)
+	}
+
+	// CheckDuplicate should return "<duplicate>" sentinel, not "".
+	got, err := db.CheckDuplicate(checksum)
+	if err != nil {
+		t.Fatalf("CheckDuplicate: %v", err)
+	}
+	if got != "<duplicate>" {
+		t.Errorf("CheckDuplicate = %q, want %q", got, "<duplicate>")
+	}
+}
+
+// TestAllDuplicates_includesSkipped verifies that AllDuplicates() returns both
+// copied and skipped duplicates (all files with is_duplicate=1).
+func TestAllDuplicates_includesSkipped(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "dup-skip-run")
+
+	// Insert original.
+	origID, err := db.InsertFile(&FileRecord{RunID: "dup-skip-run", SourcePath: "/src/original.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile orig: %v", err)
+	}
+	completeFile(t, db, origID, "cksum-orig", "2026/01-Jan/original.jpg", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	// Insert copied duplicate.
+	copiedDupID, err := db.InsertFile(&FileRecord{RunID: "dup-skip-run", SourcePath: "/src/dup_copied.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile copied dup: %v", err)
+	}
+	if err := db.UpdateFileStatus(copiedDupID, "complete",
+		WithChecksum("cksum-orig"),
+		WithDestination("/dst/duplicates/dup.jpg", "duplicates/dup.jpg"),
+		WithIsDuplicate(true),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus copied dup: %v", err)
+	}
+
+	// Insert skipped duplicate (no destination).
+	skippedDupID, err := db.InsertFile(&FileRecord{RunID: "dup-skip-run", SourcePath: "/src/dup_skipped.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile skipped dup: %v", err)
+	}
+	if err := db.UpdateFileStatus(skippedDupID, "complete",
+		WithChecksum("cksum-orig"),
+		WithIsDuplicate(true),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus skipped dup: %v", err)
+	}
+
+	dups, err := db.AllDuplicates()
+	if err != nil {
+		t.Fatalf("AllDuplicates: %v", err)
+	}
+	// Should return both the copied and skipped duplicates.
+	if len(dups) != 2 {
+		t.Errorf("AllDuplicates returned %d files, want 2", len(dups))
+	}
+	for _, d := range dups {
+		if !d.IsDuplicate {
+			t.Errorf("file %s: IsDuplicate = false, want true", d.SourcePath)
+		}
+	}
+}
+
+// TestDuplicatePairs_handlesNullDestRel verifies that DuplicatePairs() handles
+// skipped duplicates (NULL dest_rel) gracefully by still returning the pair
+// (with empty DuplicateDest).
+func TestDuplicatePairs_handlesNullDestRel(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "dp-null-run")
+
+	const checksum = "cksum-pair-null"
+	const origDestRel = "2026/01-Jan/original.jpg"
+
+	// Insert original.
+	origID, err := db.InsertFile(&FileRecord{RunID: "dp-null-run", SourcePath: "/src/original.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile orig: %v", err)
+	}
+	completeFile(t, db, origID, checksum, origDestRel, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	// Insert skipped duplicate (no destination).
+	skippedDupID, err := db.InsertFile(&FileRecord{RunID: "dp-null-run", SourcePath: "/src/skipped_dup.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile skipped dup: %v", err)
+	}
+	if err := db.UpdateFileStatus(skippedDupID, "complete",
+		WithChecksum(checksum),
+		WithIsDuplicate(true),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus skipped dup: %v", err)
+	}
+
+	pairs, err := db.DuplicatePairs()
+	if err != nil {
+		t.Fatalf("DuplicatePairs: %v", err)
+	}
+	// DuplicatePairs should return the pair even though the duplicate has NULL dest_rel.
+	if len(pairs) != 1 {
+		t.Errorf("DuplicatePairs returned %d pairs, want 1", len(pairs))
+	}
+	if len(pairs) > 0 {
+		p := pairs[0]
+		if p.DuplicateSource != "/src/skipped_dup.jpg" {
+			t.Errorf("DuplicateSource = %q, want %q", p.DuplicateSource, "/src/skipped_dup.jpg")
+		}
+		// DuplicateDest should be empty (NULL in DB).
+		if p.DuplicateDest != "" {
+			t.Errorf("DuplicateDest = %q, want empty (NULL in DB)", p.DuplicateDest)
+		}
+		// OriginalDest should be set.
+		if p.OriginalDest != origDestRel {
+			t.Errorf("OriginalDest = %q, want %q", p.OriginalDest, origDestRel)
+		}
+	}
+}

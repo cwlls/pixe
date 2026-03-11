@@ -64,16 +64,17 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// 1. Resolve configuration from Viper (flags > config file > defaults).
 	// ------------------------------------------------------------------
 	cfg := &config.AppConfig{
-		Source:      viper.GetString("source"),
-		Destination: viper.GetString("dest"),
-		Workers:     viper.GetInt("workers"),
-		Algorithm:   viper.GetString("algorithm"),
-		Copyright:   viper.GetString("copyright"),
-		CameraOwner: viper.GetString("camera_owner"),
-		DryRun:      viper.GetBool("dry_run"),
-		DBPath:      viper.GetString("db_path"),
-		Recursive:   viper.GetBool("recursive"),
-		Ignore:      viper.GetStringSlice("ignore"),
+		Source:         viper.GetString("source"),
+		Destination:    viper.GetString("dest"),
+		Workers:        viper.GetInt("workers"),
+		Algorithm:      viper.GetString("algorithm"),
+		Copyright:      viper.GetString("copyright"),
+		CameraOwner:    viper.GetString("camera_owner"),
+		DryRun:         viper.GetBool("dry_run"),
+		DBPath:         viper.GetString("db_path"),
+		Recursive:      viper.GetBool("recursive"),
+		SkipDuplicates: viper.GetBool("skip_duplicates"),
+		Ignore:         viper.GetStringSlice("ignore"),
 	}
 
 	// ------------------------------------------------------------------
@@ -202,6 +203,7 @@ func init() {
 	sortCmd.Flags().Bool("dry-run", false, "preview operations without copying any files")
 	sortCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
 	sortCmd.Flags().BoolP("recursive", "r", false, "recursively process subdirectories of --source")
+	sortCmd.Flags().Bool("skip-duplicates", false, "skip copying duplicate files instead of copying to duplicates/ directory")
 	sortCmd.Flags().StringArray("ignore", nil, `glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")`)
 
 	// Mark required flags.
@@ -216,5 +218,6 @@ func init() {
 	_ = viper.BindPFlag("dry_run", sortCmd.Flags().Lookup("dry-run"))
 	_ = viper.BindPFlag("db_path", sortCmd.Flags().Lookup("db-path"))
 	_ = viper.BindPFlag("recursive", sortCmd.Flags().Lookup("recursive"))
+	_ = viper.BindPFlag("skip_duplicates", sortCmd.Flags().Lookup("skip-duplicates"))
 	_ = viper.BindPFlag("ignore", sortCmd.Flags().Lookup("ignore"))
 }

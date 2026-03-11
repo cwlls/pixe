@@ -1,11 +1,11 @@
 # Implementation State
 
-**Status:** Active — Atomic Copy Complete, Skip Duplicates Pending (Architecture §4.6, §4.10)
+**Status:** Active — Skip Duplicates Complete, Integration Tests & Architecture Pending (Architecture §4.6, §4.10)
 
 ## Summary
 
-**Completed:** Tasks 1–6 (Atomic Copy feature fully implemented and tested)
-**Pending:** Tasks 7–15 (Skip Duplicates feature and integration tests)
+**Completed:** Tasks 1–6 (Atomic Copy), Tasks 8–14 (Skip Duplicates implementation & tests)
+**Pending:** Tasks 7, 15 (Atomic copy integration tests, architecture doc update)
 
 | #  | Task | Priority | Agent | Status | Depends On | Notes |
 |:---|:-----|:---------|:------|:-------|:-----------|:------|
@@ -16,13 +16,13 @@
 | 5  | Atomic copy: update mismatch handling (delete temp, not preserve) | High | @developer | [x] complete | 2 | Behavioral change from current design |
 | 6  | Atomic copy: tests for copy package | High | @tester | [x] complete | 2 | Unit tests for temp file, rename, mismatch cleanup |
 | 7  | Atomic copy: integration tests | Medium | @tester | [ ] pending | 3, 4 | End-to-end: interrupted copy leaves no partial files |
-| 8  | Skip-duplicates: add `SkipDuplicates` to `AppConfig` | High | @developer | [ ] pending | — | Config struct change |
-| 9  | Skip-duplicates: add `--skip-duplicates` CLI flag | High | @developer | [ ] pending | 8 | Flag, Viper binding, config construction |
-| 10 | Skip-duplicates: sequential pipeline skip path | High | @developer | [ ] pending | 8 | Short-circuit in `processFile` after dedup check |
-| 11 | Skip-duplicates: concurrent pipeline skip path | High | @developer | [ ] pending | 8 | Coordinator skips worker dispatch for dupes |
-| 12 | Skip-duplicates: ledger entry for skipped duplicates | High | @developer | [ ] pending | 10, 11 | `destination` omitted, `matches` present |
-| 13 | Skip-duplicates: DB row for skipped duplicates | High | @developer | [ ] pending | 10, 11 | `dest_path`/`dest_rel` NULL, `is_duplicate=1` |
-| 14 | Skip-duplicates: tests | High | @tester | [ ] pending | 10, 11, 12, 13 | Unit + integration |
+| 8  | Skip-duplicates: add `SkipDuplicates` to `AppConfig` | High | @developer | [x] complete | — | Config struct change |
+| 9  | Skip-duplicates: add `--skip-duplicates` CLI flag | High | @developer | [x] complete | 8 | Flag, Viper binding, config construction |
+| 10 | Skip-duplicates: sequential pipeline skip path | High | @developer | [x] complete | 8 | Short-circuit in `processFile` after dedup check |
+| 11 | Skip-duplicates: concurrent pipeline skip path | High | @developer | [x] complete | 8 | Coordinator skips worker dispatch for dupes |
+| 12 | Skip-duplicates: ledger entry for skipped duplicates | High | @developer | [x] complete | 10, 11 | `destination` omitted, `matches` present |
+| 13 | Skip-duplicates: DB row for skipped duplicates | High | @developer | [x] complete | 10, 11 | `dest_path`/`dest_rel` NULL, `is_duplicate=1` |
+| 14 | Skip-duplicates: tests | High | @tester | [x] complete | 10, 11, 12, 13 | Unit + integration |
 | 15 | Update ARCHITECTURE.md cross-references if needed | Low | @scribe | [ ] pending | 7, 14 | Final consistency pass |
 
 ---

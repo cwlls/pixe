@@ -348,6 +348,26 @@ func processFile(
 		existingDestForLedger = dest
 	}
 
+	// --- Skip duplicates (when --skip-duplicates is set) ---
+	if isDuplicate && cfg.SkipDuplicates {
+		if db != nil {
+			_ = db.UpdateFileStatus(fileID, "complete",
+				archivedb.WithChecksum(checksum),
+				archivedb.WithIsDuplicate(true))
+		}
+		matchDetail := existingDestForLedger
+		_, _ = fmt.Fprint(out, formatOutput("DUPE", df.RelPath,
+			fmt.Sprintf("matches %s", matchDetail)))
+		le := &domain.LedgerEntry{
+			Path:     df.RelPath,
+			Status:   domain.LedgerStatusDuplicate,
+			Checksum: checksum,
+			Matches:  existingDestForLedger,
+			// Destination intentionally omitted — no file was written.
+		}
+		return le, true, nil
+	}
+
 	// --- Build destination path ---
 	ext := filepath.Ext(df.Path)
 	relDest := pathbuilder.Build(captureDate, checksum, ext, isDuplicate, opts.RunTimestamp)

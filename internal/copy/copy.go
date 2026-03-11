@@ -63,22 +63,30 @@ type CopyResult struct {
 // The temp file is placed in the same directory as dest so that Promote can
 // use an atomic os.Rename on the same filesystem. The name follows the
 // pattern: <dir>/.<basename>.pixe-tmp
+//
+// TempPath is used by tests and by callers that need to predict the temp path
+// before calling Execute. Execute itself uses os.CreateTemp to generate a
+// unique name, so the actual temp path returned by Execute may differ from
+// TempPath when multiple workers process files with the same destination.
 func TempPath(dest string) string {
 	dir := filepath.Dir(dest)
 	base := filepath.Base(dest)
 	return filepath.Join(dir, "."+base+".pixe-tmp")
 }
 
-// Execute streams src to a temporary file adjacent to dest and returns the
-// temp file path. The caller must call Verify on the temp file and then
-// either Promote (on success) or CleanupTempFile (on failure).
+// Execute streams src to a uniquely-named temporary file in the same directory
+// as dest and returns the temp file path. The caller must call Verify on the
+// temp file and then either Promote (on success) or CleanupTempFile (on failure).
+//
+// The temp file is placed in the same directory as dest so that Promote can
+// use an atomic os.Rename on the same filesystem. A unique name is generated
+// via os.CreateTemp to prevent concurrent workers from overwriting each other's
+// temp files when processing files with the same destination path.
 //
 // Execute creates all parent directories of dest if they do not exist, sets
 // temp file permissions to 0644, and preserves the source file's modification
 // time on the temp file via os.Chtimes.
 func Execute(src, dest string) (tmpPath string, err error) {
-	tmpPath = TempPath(dest)
-
 	// Stat the source so we can preserve its mtime.
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -86,7 +94,8 @@ func Execute(src, dest string) (tmpPath string, err error) {
 	}
 
 	// Create parent directories (for the final dest — temp file shares the dir).
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	destDir := filepath.Dir(dest)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("copy: create parent directories for %q: %w", dest, err)
 	}
 
@@ -97,10 +106,22 @@ func Execute(src, dest string) (tmpPath string, err error) {
 	}
 	defer func() { _ = in.Close() }()
 
-	// Create temp file in the destination directory.
-	out, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	// Create a uniquely-named temp file in the destination directory.
+	// Using os.CreateTemp prevents concurrent workers from overwriting each
+	// other's temp files when they share the same canonical destination path
+	// (e.g. two workers processing identical files in no-DB mode).
+	base := filepath.Base(dest)
+	out, err := os.CreateTemp(destDir, "."+base+".pixe-tmp-*")
 	if err != nil {
-		return "", fmt.Errorf("copy: create temp file %q: %w", tmpPath, err)
+		return "", fmt.Errorf("copy: create temp file in %q: %w", destDir, err)
+	}
+	tmpPath = out.Name()
+
+	// os.CreateTemp creates files with 0600; set to 0644 for archive consistency.
+	if err := out.Chmod(0o644); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("copy: chmod temp file %q: %w", tmpPath, err)
 	}
 
 	// Stream with a fixed-size buffer.

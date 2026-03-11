@@ -55,6 +55,13 @@ type AppConfig struct {
 	// of Source. Default is false (top-level only).
 	Recursive bool
 
+	// SkipDuplicates, when true, causes the pipeline to skip copying files
+	// whose checksum matches an already-archived file. No file is written to
+	// the duplicates/ directory; the ledger entry records the match but omits
+	// the destination field. Default is false (duplicates are copied to
+	// duplicates/<run_timestamp>/).
+	SkipDuplicates bool
+
 	// Ignore is a list of glob patterns for files to exclude from processing.
 	// Patterns are matched against the filename (and relative path in recursive
 	// mode) using filepath.Match semantics. The ledger file (.pixe_ledger.json)

@@ -129,3 +129,76 @@ func TestRun_workers1_equivalentToSequential(t *testing.T) {
 		t.Errorf("Errors = %d, want 0", result.Errors)
 	}
 }
+
+// TestRunConcurrent_skipDuplicates verifies that concurrent pipeline with
+// SkipDuplicates=true correctly skips duplicate copies without race conditions.
+func TestRunConcurrent_skipDuplicates(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Copy 4 files: 1 unique + 3 duplicates.
+	// All test fixtures have the same image payload, so we use them all as duplicates.
+	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo1.jpg")
+	copyFixtureN(t, dirA, "with_exif_date2.jpg", "photo2.jpg") // duplicate of photo1 (same image payload)
+	copyFixtureN(t, dirA, "no_exif.jpg", "photo3.jpg")         // duplicate of photo1 (same image payload)
+	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo4.jpg")  // duplicate of photo1
+
+	var out bytes.Buffer
+	cfg := &config.AppConfig{
+		Source:         dirA,
+		Destination:    dirB,
+		Algorithm:      "sha1",
+		SkipDuplicates: true,
+	}
+	opts := newOptsN(t, cfg, 4, &out)
+
+	result, err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run (4 workers, skip-duplicates): %v\nOutput:\n%s", err, out.String())
+	}
+
+	// Should process 4 files: 1 unique + 3 duplicates.
+	if result.Processed != 4 {
+		t.Errorf("Processed = %d, want 4", result.Processed)
+	}
+	// 3 duplicates should be skipped.
+	if result.Duplicates != 3 {
+		t.Errorf("Duplicates = %d, want 3\nOutput:\n%s", result.Duplicates, out.String())
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0\nOutput:\n%s", result.Errors, out.String())
+	}
+
+	// Load the ledger.
+	l, err := manifest.LoadLedger(dirA)
+	if err != nil {
+		t.Fatalf("LoadLedger: %v", err)
+	}
+	if l == nil {
+		t.Fatal("ledger not written")
+	}
+	if len(l.Entries) != 4 {
+		t.Errorf("ledger.Entries len = %d, want 4", len(l.Entries))
+	}
+
+	// Count duplicate entries.
+	dupCount := 0
+	for _, e := range l.Entries {
+		if e.Status == "duplicate" {
+			dupCount++
+			// Duplicate entries should have no Destination.
+			if e.Destination != "" {
+				t.Errorf("duplicate entry %q has Destination %q, want empty", e.Path, e.Destination)
+			}
+		}
+	}
+	if dupCount != 3 {
+		t.Errorf("ledger has %d duplicate entries, want 3", dupCount)
+	}
+
+	// No files should exist in dirB/duplicates/ (since we skipped the copies).
+	dupDir := filepath.Join(dirB, "duplicates")
+	if _, err := os.Stat(dupDir); err == nil {
+		t.Error("duplicates directory should not exist when SkipDuplicates=true")
+	}
+}

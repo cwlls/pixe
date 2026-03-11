@@ -136,13 +136,24 @@ func TestExecute_writesToTempFile(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	// Temp file must exist at the expected path.
-	wantTmp := TempPath(destFile)
-	if tmpPath != wantTmp {
-		t.Errorf("Execute returned tmpPath %q, want %q", tmpPath, wantTmp)
-	}
+	// Temp file must exist at the returned path.
 	if _, err := os.Stat(tmpPath); err != nil {
 		t.Errorf("temp file not found at %q: %v", tmpPath, err)
+	}
+
+	// Temp file must be in the same directory as dest (required for atomic rename).
+	if filepath.Dir(tmpPath) != filepath.Dir(destFile) {
+		t.Errorf("temp file dir %q != dest dir %q — must be same dir for atomic rename",
+			filepath.Dir(tmpPath), filepath.Dir(destFile))
+	}
+
+	// Temp file name must start with "." and contain ".pixe-tmp".
+	base := filepath.Base(tmpPath)
+	if !strings.HasPrefix(base, ".") {
+		t.Errorf("temp file base %q should start with '.'", base)
+	}
+	if !strings.Contains(base, ".pixe-tmp") {
+		t.Errorf("temp file base %q should contain '.pixe-tmp'", base)
 	}
 
 	// Final destination must NOT exist yet.

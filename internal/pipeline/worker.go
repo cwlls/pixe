@@ -72,10 +72,11 @@ type destAssignment struct {
 	relDest               string
 	isDuplicate           bool
 	existingDestForLedger string // non-empty when isDuplicate is true
+	skipCopy              bool   // true when --skip-duplicates is set and file is a duplicate
 }
 
 // workerFinalResult is sent from a worker to the coordinator after
-// copy+verify+tag completes.
+// copy+verify+tag completes (or after a skip-copy no-op).
 type workerFinalResult struct {
 	df                    discovery.DiscoveredFile
 	fileID                int64
@@ -84,6 +85,7 @@ type workerFinalResult struct {
 	isDuplicate           bool
 	existingDestForLedger string
 	verifiedAt            time.Time
+	skipCopy              bool // true when the worker skipped I/O due to --skip-duplicates
 	err                   error
 }
 
@@ -274,14 +276,25 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				existingDestForLedger = dest
 			}
 
+			skipCopy := isDuplicate && opts.Config.SkipDuplicates
 			relDest := pathbuilder.Build(wr.date, wr.checksum, wr.ext, isDuplicate, opts.RunTimestamp)
 			absDest := filepath.Join(dirB, relDest)
+
+			// When no DB is available, record the assignment in memSeen immediately
+			// so that subsequent workResults with the same checksum are routed as
+			// duplicates before this worker completes. Without this, two workers
+			// processing identical files concurrently would both receive
+			// isDuplicate=false and race to write the same temp file path.
+			if db == nil && !isDuplicate {
+				memSeen[wr.checksum] = relDest
+			}
 
 			assignChs[wr.workerID] <- destAssignment{
 				absDest:               absDest,
 				relDest:               relDest,
 				isDuplicate:           isDuplicate,
 				existingDestForLedger: existingDestForLedger,
+				skipCopy:              skipCopy,
 			}
 
 		case fr, ok := <-doneCh:
@@ -295,6 +308,25 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					Path:   fr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: fr.err.Error(),
+				})
+			} else if fr.skipCopy {
+				// --skip-duplicates: no file was written; update DB and emit output.
+				if db != nil {
+					_ = db.UpdateFileStatus(fr.fileID, "complete",
+						archivedb.WithChecksum(fr.checksum),
+						archivedb.WithIsDuplicate(true))
+				}
+				result.Processed++
+				result.Duplicates++
+				matchDetail := fr.existingDestForLedger
+				_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
+					fmt.Sprintf("matches %s", matchDetail)))
+				_ = lw.WriteEntry(domain.LedgerEntry{
+					Path:     fr.df.RelPath,
+					Status:   domain.LedgerStatusDuplicate,
+					Checksum: fr.checksum,
+					Matches:  fr.existingDestForLedger,
+					// Destination intentionally omitted — no file was written.
 				})
 			} else {
 				finalRelDest := fr.relDest
@@ -351,8 +383,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
 					}
 				} else if !finalIsDup {
-					// No DB — record in memSeen so subsequent files with the same checksum
-					// are routed as duplicates by the coordinator's dedup check.
+					// No DB — ensure memSeen is up to date. The coordinator already
+					// wrote this entry at assignment time, but update here as a
+					// safety net in case the relDest was adjusted (e.g. race rename).
 					memSeen[fr.checksum] = finalRelDest
 				}
 
@@ -463,6 +496,20 @@ func runWorker(ctx context.Context, id int,
 			case assign = <-assignCh:
 			}
 
+			// --- Skip-duplicates: no I/O, coordinator handles DB + ledger ---
+			if assign.skipCopy {
+				doneCh <- workerFinalResult{
+					df:                    item.df,
+					fileID:                item.fileID,
+					checksum:              checksum,
+					relDest:               assign.relDest,
+					isDuplicate:           true,
+					existingDestForLedger: assign.existingDestForLedger,
+					skipCopy:              true,
+				}
+				continue
+			}
+
 			if opts.Config.DryRun {
 				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, assign.relDest)
 				if db != nil {
@@ -500,6 +547,19 @@ func runWorker(ctx context.Context, id int,
 			// --- Verify (hash the temp file) ---
 			vr := copypkg.Verify(tmpPath, checksum, item.df.Handler, opts.Hasher)
 			if !vr.Success {
+				// If the temp file no longer exists, another worker won the race
+				// to the same destination (same checksum, no-DB mode). The file
+				// is already at the canonical path — treat this as a duplicate.
+				if errors.Is(vr.Error, os.ErrNotExist) {
+					doneCh <- workerFinalResult{
+						df:          item.df,
+						fileID:      item.fileID,
+						checksum:    checksum,
+						relDest:     assign.relDest,
+						isDuplicate: true,
+					}
+					continue
+				}
 				copypkg.CleanupTempFile(tmpPath)
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
