@@ -60,9 +60,19 @@ func init() {
 	rootCmd.PersistentFlags().StringP("algorithm", "a", "sha1",
 		"hash algorithm to use: sha1, sha256")
 
+	rootCmd.PersistentFlags().BoolP("quiet", "q", false,
+		"suppress per-file output; show only the final summary")
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false,
+		"show per-stage timing and debug information")
+	rootCmd.PersistentFlags().String("profile", "",
+		"load a named config profile from ~/.pixe/profiles/<name>.yaml")
+
 	// Bind persistent flags to Viper so config file values are also respected.
 	_ = viper.BindPFlag("workers", rootCmd.PersistentFlags().Lookup("workers"))
 	_ = viper.BindPFlag("algorithm", rootCmd.PersistentFlags().Lookup("algorithm"))
+	_ = viper.BindPFlag("quiet", rootCmd.PersistentFlags().Lookup("quiet"))
+	_ = viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	_ = viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
 }
 
 // initConfig reads the config file and environment variables.

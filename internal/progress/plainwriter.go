@@ -26,15 +26,22 @@ import (
 //
 // Usage:
 //
-//	pw := progress.NewPlainWriter(os.Stdout)
+//	pw := progress.NewPlainWriter(os.Stdout, 0)
 //	go pw.Run(bus.Events())
 type PlainWriter struct {
-	w io.Writer
+	w         io.Writer
+	verbosity int
 }
 
 // NewPlainWriter creates a PlainWriter that writes to w.
-func NewPlainWriter(w io.Writer) *PlainWriter {
-	return &PlainWriter{w: w}
+// verbosity controls output detail: -1 = quiet (summary only),
+// 0 = normal (default), 1 = verbose.
+func NewPlainWriter(w io.Writer, verbosity ...int) *PlainWriter {
+	v := 0
+	if len(verbosity) > 0 {
+		v = verbosity[0]
+	}
+	return &PlainWriter{w: w, verbosity: v}
 }
 
 // Run reads events from the channel and writes formatted output until the
@@ -43,30 +50,42 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 	for e := range events {
 		switch e.Kind {
 		case EventFileComplete:
-			_, _ = fmt.Fprintf(pw.w, "COPY %s -> %s\n", e.RelPath, e.Destination)
+			if pw.verbosity >= 0 {
+				_, _ = fmt.Fprintf(pw.w, "COPY %s -> %s\n", e.RelPath, e.Destination)
+			}
 
 		case EventFileDuplicate:
-			if e.MatchesDest != "" {
-				_, _ = fmt.Fprintf(pw.w, "DUPE %s -> matches %s\n", e.RelPath, e.MatchesDest)
-			} else {
-				_, _ = fmt.Fprintf(pw.w, "DUPE %s -> %s\n", e.RelPath, e.Destination)
+			if pw.verbosity >= 0 {
+				if e.MatchesDest != "" {
+					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> matches %s\n", e.RelPath, e.MatchesDest)
+				} else {
+					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> %s\n", e.RelPath, e.Destination)
+				}
 			}
 
 		case EventFileSkipped:
-			_, _ = fmt.Fprintf(pw.w, "SKIP %s -> %s\n", e.RelPath, e.Reason)
+			if pw.verbosity >= 0 {
+				_, _ = fmt.Fprintf(pw.w, "SKIP %s -> %s\n", e.RelPath, e.Reason)
+			}
 
 		case EventFileError:
-			msg := e.Reason
-			if msg == "" && e.Err != nil {
-				msg = e.Err.Error()
+			if pw.verbosity >= 0 {
+				msg := e.Reason
+				if msg == "" && e.Err != nil {
+					msg = e.Err.Error()
+				}
+				_, _ = fmt.Fprintf(pw.w, "ERR  %s -> %s\n", e.RelPath, msg)
 			}
-			_, _ = fmt.Fprintf(pw.w, "ERR  %s -> %s\n", e.RelPath, msg)
 
 		case EventSidecarCarried:
-			_, _ = fmt.Fprintf(pw.w, "     +sidecar %s -> %s\n", e.SidecarRelPath, e.Destination)
+			if pw.verbosity >= 0 {
+				_, _ = fmt.Fprintf(pw.w, "     +sidecar %s -> %s\n", e.SidecarRelPath, e.Destination)
+			}
 
 		case EventSidecarFailed:
-			_, _ = fmt.Fprintf(pw.w, "  WARNING  sidecar carry failed for %s: %v\n", e.SidecarRelPath, e.Err)
+			if pw.verbosity >= 0 {
+				_, _ = fmt.Fprintf(pw.w, "  WARNING  sidecar carry failed for %s: %v\n", e.SidecarRelPath, e.Err)
+			}
 
 		case EventRunComplete:
 			if s := e.Summary; s != nil {
@@ -76,18 +95,24 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 
 		// Verify events.
 		case EventVerifyOK:
-			_, _ = fmt.Fprintf(pw.w, "  OK            %s\n", e.RelPath)
+			if pw.verbosity >= 0 {
+				_, _ = fmt.Fprintf(pw.w, "  OK            %s\n", e.RelPath)
+			}
 
 		case EventVerifyMismatch:
-			if e.Err != nil {
-				_, _ = fmt.Fprintf(pw.w, "  ERROR         %s: %v\n", e.RelPath, e.Err)
-			} else {
-				_, _ = fmt.Fprintf(pw.w, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
-					e.RelPath, e.ExpectedChecksum, e.ActualChecksum)
+			if pw.verbosity >= 0 {
+				if e.Err != nil {
+					_, _ = fmt.Fprintf(pw.w, "  ERROR         %s: %v\n", e.RelPath, e.Err)
+				} else {
+					_, _ = fmt.Fprintf(pw.w, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
+						e.RelPath, e.ExpectedChecksum, e.ActualChecksum)
+				}
 			}
 
 		case EventVerifyUnrecognised:
-			_, _ = fmt.Fprintf(pw.w, "  UNRECOGNISED  %s\n", e.RelPath)
+			if pw.verbosity >= 0 {
+				_, _ = fmt.Fprintf(pw.w, "  UNRECOGNISED  %s\n", e.RelPath)
+			}
 
 		case EventVerifyDone:
 			if s := e.Summary; s != nil {
