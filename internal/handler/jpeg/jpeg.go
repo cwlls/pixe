@@ -30,7 +30,6 @@
 package jpeg
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -299,74 +298,4 @@ func (h *Handler) WriteMetadataTags(filePath string, tags domain.MetadataTags) e
 	}
 
 	return nil
-}
-
-// extractSOSPayload scans the JPEG byte stream and returns the bytes from
-// the SOS marker (0xFF 0xDA) through to and including the EOI (0xFF 0xD9).
-// This is the media payload used for hashing.
-func extractSOSPayload(data []byte) ([]byte, error) {
-	i := 0
-	n := len(data)
-
-	for i < n-1 {
-		if data[i] != 0xFF {
-			return nil, fmt.Errorf("expected 0xFF at offset %d, got 0x%02X", i, data[i])
-		}
-		marker := data[i+1]
-
-		// SOI — no length field.
-		if marker == 0xD8 {
-			i += 2
-			continue
-		}
-		// EOI before SOS — malformed, but handle gracefully.
-		if marker == 0xD9 {
-			break
-		}
-		// SOS — scan forward through entropy data to find EOI.
-		if marker == 0xDA {
-			return scanForEOI(data, i, n)
-		}
-		// RST0–RST7 — no length field.
-		if marker >= 0xD0 && marker <= 0xD7 {
-			i += 2
-			continue
-		}
-		// All other markers carry a 2-byte big-endian length.
-		if i+4 > n {
-			return nil, fmt.Errorf("truncated JPEG at offset %d", i)
-		}
-		segLen := int(binary.BigEndian.Uint16(data[i+2 : i+4]))
-		i += 2 + segLen
-	}
-
-	return nil, fmt.Errorf("SOS marker not found in JPEG data")
-}
-
-// scanForEOI scans forward from the SOS marker through the entropy data
-// to find the EOI marker (0xFF 0xD9). It properly handles JPEG byte stuffing
-// where 0xFF 0x00 is a stuffed byte (not a marker).
-func scanForEOI(data []byte, start, n int) ([]byte, error) {
-	for i := start; i < n-1; i++ {
-		if data[i] != 0xFF {
-			continue
-		}
-		next := data[i+1]
-		// Stuffed byte 0xFF 0x00 — skip the stuffed byte.
-		if next == 0x00 {
-			i++ // skip the 0x00, continue from next position
-			continue
-		}
-		// RST markers — skip, continue scanning.
-		if next >= 0xD0 && next <= 0xD7 {
-			i++
-			continue
-		}
-		// EOI marker found — return from SOS start to and including EOI.
-		if next == 0xD9 {
-			return data[start : i+2], nil
-		}
-		// Other 0xFF bytes in entropy data — malformed, but keep scanning.
-	}
-	return nil, fmt.Errorf("EOI marker not found after SOS")
 }

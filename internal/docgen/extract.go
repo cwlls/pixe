@@ -651,7 +651,7 @@ func extractPackageReference() (string, error) {
 				doc = doc[:idx]
 			}
 			doc = strings.ReplaceAll(doc, "\n", " ")
-			sb.WriteString(fmt.Sprintf("**`%s`** — %s\n\n", importPath, doc))
+			fmt.Fprintf(&sb, "**`%s`** — %s\n\n", importPath, doc)
 		}
 	}
 
@@ -673,7 +673,7 @@ func extractPackageReference() (string, error) {
 				doc = doc[:idx]
 			}
 			doc = strings.ReplaceAll(doc, "\n", " ")
-			sb.WriteString(fmt.Sprintf("**`%s`** — %s\n\n", info.ImportPath, doc))
+			fmt.Fprintf(&sb, "**`%s`** — %s\n\n", info.ImportPath, doc)
 		}
 	}
 

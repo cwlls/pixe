@@ -45,7 +45,7 @@ func FormatMarkdownTable(headers []string, rows [][]string) string {
 	// Header row.
 	sb.WriteString("|")
 	for i, h := range headers {
-		sb.WriteString(fmt.Sprintf(" %-*s |", widths[i], h))
+		fmt.Fprintf(&sb, " %-*s |", widths[i], h)
 	}
 	sb.WriteString("\n")
 
