@@ -3,14 +3,7 @@ on:
   push:
     tags:
       - 'v*'
-      -
-  workflow_dispatch:
-    inputs:
-      # Optional inputs can be defined here
-      logLevel:
-        description: 'Log level'
-        required: true
-        default: 'info'
+
 
 permissions:
   contents: write  # Allows the action to create a release and upload assets
