@@ -17,8 +17,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/cwlls/pixe-go/internal/archivedb"
@@ -33,7 +36,10 @@ import (
 	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
 	mp4handler "github.com/cwlls/pixe-go/internal/handler/mp4"
 	nefhandler "github.com/cwlls/pixe-go/internal/handler/nef"
+	orfhandler "github.com/cwlls/pixe-go/internal/handler/orf"
 	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
+	pnghandler "github.com/cwlls/pixe-go/internal/handler/png"
+	rw2handler "github.com/cwlls/pixe-go/internal/handler/rw2"
 	"github.com/cwlls/pixe-go/internal/migrate"
 )
 
@@ -58,6 +64,34 @@ func resolveConfig() (*config.AppConfig, error) {
 		OverwriteSidecarTags: viper.GetBool("overwrite_sidecar_tags"),
 	}
 
+	if s := viper.GetString("since"); s != "" {
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --since date %q: expected YYYY-MM-DD: %w", s, err)
+		}
+		cfg.Since = &t
+	}
+	if s := viper.GetString("before"); s != "" {
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --before date %q: expected YYYY-MM-DD: %w", s, err)
+		}
+		// End of day — inclusive.
+		eod := t.Add(24*time.Hour - time.Nanosecond)
+		cfg.Before = &eod
+	}
+
+	quiet := viper.GetBool("quiet")
+	verbose := viper.GetBool("verbose")
+	if quiet && verbose {
+		return nil, fmt.Errorf("--quiet and --verbose are mutually exclusive")
+	}
+	if quiet {
+		cfg.Verbosity = -1
+	} else if verbose {
+		cfg.Verbosity = 1
+	}
+
 	if cfg.Source == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -80,12 +114,15 @@ func buildRegistry() *discovery.Registry {
 	reg.Register(jpeghandler.New())
 	reg.Register(heichandler.New())
 	reg.Register(mp4handler.New())
+	reg.Register(pnghandler.New())
 	reg.Register(dnghandler.New())
 	reg.Register(nefhandler.New())
 	reg.Register(cr2handler.New())
 	reg.Register(cr3handler.New())
 	reg.Register(pefhandler.New())
 	reg.Register(arwhandler.New())
+	reg.Register(orfhandler.New())
+	reg.Register(rw2handler.New())
 	return reg
 }
 
@@ -132,4 +169,74 @@ func openArchiveDB(cfg *config.AppConfig) (*archivedb.DB, func(), error) {
 	}
 
 	return db, cleanup, nil
+}
+
+// mergeSourceConfig merges values from a secondary Viper instance into the
+// global Viper store. Only keys not explicitly set via CLI flags are merged.
+// This preserves the priority chain: CLI flags > source config > global config.
+//
+// The ignore key is special: patterns from the source config are appended to
+// the existing ignore list (additive merge) rather than replacing it.
+func mergeSourceConfig(local *viper.Viper, cmd *cobra.Command) {
+	keys := []struct {
+		viperKey string
+		flagName string
+	}{
+		{"dest", "dest"},
+		{"copyright", "copyright"},
+		{"camera_owner", "camera-owner"},
+		{"algorithm", "algorithm"},
+		{"recursive", "recursive"},
+		{"skip_duplicates", "skip-duplicates"},
+		{"no_carry_sidecars", "no-carry-sidecars"},
+		{"overwrite_sidecar_tags", "overwrite-sidecar-tags"},
+	}
+
+	for _, k := range keys {
+		// Only merge if the CLI flag was not explicitly provided.
+		if cmd.Flags().Changed(k.flagName) {
+			continue
+		}
+		if local.IsSet(k.viperKey) {
+			viper.Set(k.viperKey, local.Get(k.viperKey))
+		}
+	}
+
+	// Ignore patterns are merged additively.
+	if local.IsSet("ignore") {
+		existing := viper.GetStringSlice("ignore")
+		additional := local.GetStringSlice("ignore")
+		viper.Set("ignore", append(existing, additional...))
+	}
+}
+
+// loadProfile loads a named config profile and merges it into the global
+// Viper store. Profiles are YAML files stored in ~/.pixe/profiles/<name>.yaml
+// or $XDG_CONFIG_HOME/pixe/profiles/<name>.yaml.
+//
+// Priority chain after loading: CLI flags > source config > profile > global config.
+// Only keys not already set via CLI flags are merged (same rule as mergeSourceConfig).
+func loadProfile(name string, cmd *cobra.Command) error {
+	var profilePaths []string
+	if home, err := os.UserHomeDir(); err == nil {
+		profilePaths = append(profilePaths, filepath.Join(home, ".pixe", "profiles", name+".yaml"))
+	}
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		profilePaths = append(profilePaths, filepath.Join(xdg, "pixe", "profiles", name+".yaml"))
+	}
+
+	for _, p := range profilePaths {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		profileViper := viper.New()
+		profileViper.SetConfigFile(p)
+		if err := profileViper.ReadInConfig(); err != nil {
+			return fmt.Errorf("load profile %q: %w", name, err)
+		}
+		fmt.Fprintln(os.Stderr, "Using profile:", p)
+		mergeSourceConfig(profileViper, cmd)
+		return nil
+	}
+	return fmt.Errorf("profile %q not found (searched: %v)", name, profilePaths)
 }

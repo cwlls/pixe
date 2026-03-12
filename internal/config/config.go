@@ -16,6 +16,8 @@
 // populated from CLI flags, config file, and environment variables via Viper.
 package config
 
+import "time"
+
 // AppConfig holds the fully resolved configuration for a Pixe run.
 // It is constructed in the CLI layer (cmd/) from Viper's merged values
 // and passed down into the pipeline — no package below cmd/ reads Viper directly.
@@ -80,4 +82,16 @@ type AppConfig struct {
 	// preserved (source is authoritative). When true, Pixe's configured
 	// --copyright and --camera-owner values replace existing values.
 	OverwriteSidecarTags bool
+
+	// Since, when non-nil, causes the pipeline to skip files with a capture
+	// date before this time. Format: YYYY-MM-DD parsed to start-of-day UTC.
+	Since *time.Time
+
+	// Before, when non-nil, causes the pipeline to skip files with a capture
+	// date after this time. Format: YYYY-MM-DD parsed to end-of-day UTC (23:59:59.999999999).
+	Before *time.Time
+
+	// Verbosity controls output detail level.
+	// -1 = quiet (summary only), 0 = normal (default), 1 = verbose (timing info).
+	Verbosity int
 }

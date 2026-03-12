@@ -23,6 +23,7 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,6 +67,9 @@ type SortOptions struct {
 	// the plain-text Output writer. Both can be active simultaneously.
 	// When nil, no events are emitted (existing behaviour is unchanged).
 	EventBus *progress.Bus
+	// ColorOutput, when true, enables ANSI color codes in status verb output.
+	// Automatically set by the CLI layer based on TTY detection and NO_COLOR.
+	ColorOutput bool
 }
 
 // emit sends an event to the bus if one is configured. It is a no-op when
@@ -76,20 +80,22 @@ func emit(bus *progress.Bus, e progress.Event) {
 	}
 }
 
+// dateFilterSkip is returned by processFile when a file is skipped due to
+// the --since/--before date filter. It is not an error — the caller should
+// treat it as a skip.
+type dateFilterSkip struct {
+	reason      string
+	captureDate time.Time
+}
+
+func (d *dateFilterSkip) Error() string { return d.reason }
+
 // SortResult summarises the outcome of a completed sort run.
 type SortResult struct {
 	Processed  int // Processed is the total number of files that completed the pipeline.
 	Duplicates int // Duplicates is the number of files identified as content duplicates.
 	Skipped    int // Skipped is the number of files skipped (previously imported or unsupported).
 	Errors     int // Errors is the number of files that failed at some pipeline stage.
-}
-
-// formatOutput returns a single stdout line for a file outcome.
-// verb is one of "COPY", "SKIP", "DUPE", "ERR ".
-// source is the relative path from dirA (displayed on the left).
-// detail is the destination path or reason (displayed on the right).
-func formatOutput(verb, source, detail string) string {
-	return fmt.Sprintf("%s %s -> %s\n", verb, source, detail)
 }
 
 // Run executes the full sort pipeline, selecting sequential or concurrent
@@ -200,11 +206,12 @@ func Run(opts SortOptions) (SortResult, error) {
 	// ------------------------------------------------------------------
 	// 5. Process files (sequential or concurrent).
 	// ------------------------------------------------------------------
+	fmtr := NewFormatter(opts.ColorOutput)
 	var result SortResult
 	if cfg.Workers > 1 {
-		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw)
+		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
 	} else {
-		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw)
+		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
 	}
 
 	// ------------------------------------------------------------------
@@ -239,7 +246,7 @@ func Run(opts SortOptions) (SortResult, error) {
 // runSequential processes all discovered files one at a time.
 func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
 
 	var result SortResult
 	db := opts.DB
@@ -247,9 +254,13 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	// Maps checksum → relative destination of the first completed file.
 	memSeen := make(map[string]string)
 
+	cfg := opts.Config
+
 	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
 	for _, sf := range skipped {
-		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
+		if cfg.Verbosity >= 0 {
+			_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", sf.Path, sf.Reason))
+		}
 		lw.WriteEntry(domain.LedgerEntry{
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
@@ -283,7 +294,9 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 		if db != nil {
 			processed, checkErr := db.CheckSourceProcessed(df.Path)
 			if checkErr != nil {
-				_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, checkErr.Error()))
+				if cfg.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", df.RelPath, checkErr.Error()))
+				}
 				result.Errors++
 				emit(opts.EventBus, progress.Event{
 					Kind:      progress.EventFileError,
@@ -297,7 +310,9 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			}
 			if processed {
 				const reason = "previously imported"
-				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
+				if cfg.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", df.RelPath, reason))
+				}
 				lw.WriteEntry(domain.LedgerEntry{
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
@@ -323,13 +338,48 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			WorkerID: -1,
 		})
 
-		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen)
+		fileStart := time.Now()
+		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen, fmtr)
 		if err != nil {
+			var dfs *dateFilterSkip
+			if errors.As(err, &dfs) {
+				// Date filter skip — not an error.
+				if cfg.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", df.RelPath, dfs.reason))
+					if cfg.Verbosity >= 1 {
+						_, _ = fmt.Fprintf(out, "  (%s)\n", time.Since(fileStart).Truncate(time.Millisecond))
+					}
+				}
+				lw.WriteEntry(domain.LedgerEntry{
+					Path:   df.RelPath,
+					Status: domain.LedgerStatusSkip,
+					Reason: dfs.reason,
+				})
+				if db != nil {
+					_ = db.UpdateFileStatus(fileID, "skipped",
+						archivedb.WithSkipReason(dfs.reason),
+						archivedb.WithCaptureDate(dfs.captureDate))
+				}
+				result.Skipped++
+				emit(opts.EventBus, progress.Event{
+					Kind:      progress.EventFileSkipped,
+					RelPath:   df.RelPath,
+					Reason:    dfs.reason,
+					WorkerID:  -1,
+					Completed: result.Skipped + result.Processed + result.Errors,
+				})
+				continue
+			}
 			result.Errors++
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
 			}
-			_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, err.Error()))
+			if cfg.Verbosity >= 0 {
+				_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", df.RelPath, err.Error()))
+				if cfg.Verbosity >= 1 {
+					_, _ = fmt.Fprintf(out, "  (%s)\n", time.Since(fileStart).Truncate(time.Millisecond))
+				}
+			}
 			lw.WriteEntry(domain.LedgerEntry{
 				Path:   df.RelPath,
 				Status: domain.LedgerStatusError,
@@ -347,6 +397,9 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 		}
 
 		result.Processed++
+		if cfg.Verbosity >= 1 {
+			_, _ = fmt.Fprintf(out, "  (%s)\n", time.Since(fileStart).Truncate(time.Millisecond))
+		}
 		if isDup {
 			result.Duplicates++
 			emit(opts.EventBus, progress.Event{
@@ -394,6 +447,7 @@ func processFile(
 	dirA, dirB string,
 	out io.Writer,
 	memSeen map[string]string,
+	fmtr *Formatter,
 ) (*domain.LedgerEntry, bool, error) {
 	cfg := opts.Config
 	db := opts.DB
@@ -414,6 +468,20 @@ func processFile(
 		CaptureDate: captureDate,
 		WorkerID:    -1,
 	})
+
+	// --- Date filter gate ---
+	if cfg.Since != nil && captureDate.Before(*cfg.Since) {
+		return nil, false, &dateFilterSkip{
+			reason:      "outside date range: before " + cfg.Since.Format("2006-01-02"),
+			captureDate: captureDate,
+		}
+	}
+	if cfg.Before != nil && captureDate.After(*cfg.Before) {
+		return nil, false, &dateFilterSkip{
+			reason:      "outside date range: after " + cfg.Before.Truncate(24*time.Hour).Format("2006-01-02"),
+			captureDate: captureDate,
+		}
+	}
 
 	// --- Hash media payload ---
 	rc, err := df.Handler.HashableReader(df.Path)
@@ -458,8 +526,10 @@ func processFile(
 				archivedb.WithIsDuplicate(true))
 		}
 		matchDetail := existingDestForLedger
-		_, _ = fmt.Fprint(out, formatOutput("DUPE", df.RelPath,
-			fmt.Sprintf("matches %s", matchDetail)))
+		if cfg.Verbosity >= 0 {
+			_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", df.RelPath,
+				fmt.Sprintf("matches %s", matchDetail)))
+		}
 		le := &domain.LedgerEntry{
 			Path:     df.RelPath,
 			Status:   domain.LedgerStatusDuplicate,
@@ -476,10 +546,12 @@ func processFile(
 	absDest := filepath.Join(dirB, relDest)
 
 	if cfg.DryRun {
-		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, relDest)
-		// Emit sidecar association lines even in dry-run (no files copied).
-		dryTags := resolveTags(cfg, captureDate)
-		emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg)
+		if cfg.Verbosity >= 0 {
+			_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, relDest)
+			// Emit sidecar association lines even in dry-run (no files copied).
+			dryTags := resolveTags(cfg, captureDate)
+			emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg)
+		}
 		if db != nil {
 			_ = db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithDestination(absDest, relDest),
@@ -553,7 +625,9 @@ func processFile(
 			sidecarDest := absDest + sc.Ext
 			sidecarRel := relDest + sc.Ext
 			if err := copypkg.CopySidecar(sc.Path, sidecarDest); err != nil {
-				_, _ = fmt.Fprintf(out, "  WARNING  sidecar carry failed for %s: %v\n", sc.RelPath, err)
+				if cfg.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("sidecar carry failed for %s: %v", sc.RelPath, err)))
+				}
 				emit(opts.EventBus, progress.Event{
 					Kind:           progress.EventSidecarFailed,
 					RelPath:        df.RelPath,
@@ -587,7 +661,9 @@ func processFile(
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "tag_failed", archivedb.WithError(err.Error()))
 			}
-			_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n", df.RelPath, err)
+			if cfg.Verbosity >= 0 {
+				_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("tag failed for %s: %v", df.RelPath, err)))
+			}
 			// Tag failure is non-fatal: file is copied and verified.
 		} else {
 			if db != nil {
@@ -646,17 +722,19 @@ func processFile(
 	}
 
 	// --- Emit output line after outcome is known ---
-	if isDuplicate {
-		matchDetail := existingDestForLedger
-		if matchDetail == "" {
-			matchDetail = relDest
+	if cfg.Verbosity >= 0 {
+		if isDuplicate {
+			matchDetail := existingDestForLedger
+			if matchDetail == "" {
+				matchDetail = relDest
+			}
+			_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", df.RelPath,
+				fmt.Sprintf("matches %s", matchDetail)))
+			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
+		} else {
+			_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", df.RelPath, relDest))
+			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
 		}
-		_, _ = fmt.Fprint(out, formatOutput("DUPE", df.RelPath,
-			fmt.Sprintf("matches %s", matchDetail)))
-		emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
-	} else {
-		_, _ = fmt.Fprint(out, formatOutput("COPY", df.RelPath, relDest))
-		emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
 	}
 
 	// Build ledger entry.

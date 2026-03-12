@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -58,6 +59,39 @@ func runSort(cmd *cobra.Command, args []string) error {
 	cfg, err := resolveConfig()
 	if err != nil {
 		return err
+	}
+
+	// ------------------------------------------------------------------
+	// 1b. Check for source-local config (.pixe.yaml in dirA).
+	// ------------------------------------------------------------------
+	sourceConfig := filepath.Join(cfg.Source, ".pixe.yaml")
+	if _, statErr := os.Stat(sourceConfig); statErr == nil {
+		localViper := viper.New()
+		localViper.SetConfigFile(sourceConfig)
+		if readErr := localViper.ReadInConfig(); readErr == nil {
+			fmt.Fprintln(os.Stderr, "Using source config:", sourceConfig)
+			mergeSourceConfig(localViper, cmd)
+			// Re-resolve to pick up merged values.
+			cfg, err = resolveConfig()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 1c. Load named profile (--profile), if specified.
+	// Profile priority: CLI flags > source config > profile > global config.
+	// ------------------------------------------------------------------
+	if profileName := viper.GetString("profile"); profileName != "" {
+		if err := loadProfile(profileName, cmd); err != nil {
+			return err
+		}
+		// Re-resolve to pick up profile values.
+		cfg, err = resolveConfig()
+		if err != nil {
+			return err
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -108,7 +142,10 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	runID := uuid.New().String()
 
-	useProgress := viper.GetBool("progress") && isatty.IsTerminal(os.Stdout.Fd())
+	// Detect TTY and color support.
+	isTTY := isatty.IsTerminal(os.Stdout.Fd())
+	_, noColor := os.LookupEnv("NO_COLOR")
+	useProgress := viper.GetBool("progress") && isTTY
 
 	opts := pipeline.SortOptions{
 		Config:       cfg,
@@ -119,6 +156,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		PixeVersion:  Version(),
 		DB:           db,
 		RunID:        runID,
+		ColorOutput:  isTTY && !noColor && cfg.Verbosity >= 0,
 	}
 
 	var result pipeline.SortResult
@@ -178,6 +216,8 @@ func init() {
 	sortCmd.Flags().Bool("no-carry-sidecars", false, "disable carrying pre-existing .aae and .xmp sidecar files from source to destination")
 	sortCmd.Flags().Bool("overwrite-sidecar-tags", false, "when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them")
 	sortCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
+	sortCmd.Flags().String("since", "", `only process files with capture date on or after this date (format: YYYY-MM-DD)`)
+	sortCmd.Flags().String("before", "", `only process files with capture date on or before this date (format: YYYY-MM-DD)`)
 
 	// Mark required flags (--source defaults to cwd; --dest has no default).
 	_ = sortCmd.MarkFlagRequired("dest")
@@ -195,4 +235,6 @@ func init() {
 	_ = viper.BindPFlag("no_carry_sidecars", sortCmd.Flags().Lookup("no-carry-sidecars"))
 	_ = viper.BindPFlag("overwrite_sidecar_tags", sortCmd.Flags().Lookup("overwrite-sidecar-tags"))
 	_ = viper.BindPFlag("progress", sortCmd.Flags().Lookup("progress"))
+	_ = viper.BindPFlag("since", sortCmd.Flags().Lookup("since"))
+	_ = viper.BindPFlag("before", sortCmd.Flags().Lookup("before"))
 }

@@ -115,16 +115,16 @@ type workerFinalResult struct {
 //	  - send final result to doneCh
 func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
 
 	ctx := context.Background()
-	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
+	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw, fmtr)
 }
 
 // runConcurrentCtx is the context-aware implementation, used by tests.
 func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
 
 	// Wrap out in a mutex so concurrent workers don't race on writes.
 	sw := &syncWriter{w: out}
@@ -140,7 +140,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 
 	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
 	for _, sf := range skipped {
-		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
+		if opts.Config.Verbosity >= 0 {
+			_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", sf.Path, sf.Reason))
+		}
 		lw.WriteEntry(domain.LedgerEntry{
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
@@ -173,7 +175,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 		if db != nil {
 			processed, checkErr := db.CheckSourceProcessed(df.Path)
 			if checkErr != nil {
-				_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, checkErr.Error()))
+				if opts.Config.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", df.RelPath, checkErr.Error()))
+				}
 				result.Errors++
 				emit(opts.EventBus, progress.Event{
 					Kind:      progress.EventFileError,
@@ -187,7 +191,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			}
 			if processed {
 				const reason = "previously imported"
-				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
+				if opts.Config.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", df.RelPath, reason))
+				}
 				lw.WriteEntry(domain.LedgerEntry{
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
@@ -225,7 +231,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			runWorker(ctx, id, workCh, resultCh, assignChs[id], doneCh, opts, dirB, out)
+			runWorker(ctx, id, workCh, resultCh, assignChs[id], doneCh, opts, dirB, out, fmtr)
 		}(i)
 	}
 	go func() {
@@ -262,12 +268,41 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				goto done
 			}
 			if wr.err != nil {
+				var dfs *dateFilterSkip
+				if errors.As(wr.err, &dfs) {
+					// Date filter skip — not an error.
+					if opts.Config.Verbosity >= 0 {
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", wr.df.RelPath, dfs.reason))
+					}
+					lw.WriteEntry(domain.LedgerEntry{
+						Path:   wr.df.RelPath,
+						Status: domain.LedgerStatusSkip,
+						Reason: dfs.reason,
+					})
+					if db != nil {
+						_ = db.UpdateFileStatus(wr.fileID, "skipped",
+							archivedb.WithSkipReason(dfs.reason),
+							archivedb.WithCaptureDate(dfs.captureDate))
+					}
+					result.Skipped++
+					emit(opts.EventBus, progress.Event{
+						Kind:      progress.EventFileSkipped,
+						RelPath:   wr.df.RelPath,
+						Reason:    dfs.reason,
+						WorkerID:  wr.workerID,
+						Completed: result.Skipped + result.Processed + result.Errors,
+					})
+					completed++
+					continue
+				}
 				if db != nil {
 					_ = db.UpdateFileStatus(wr.fileID, "failed",
 						archivedb.WithError(wr.err.Error()))
 				}
 				result.Errors++
-				_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, wr.err.Error()))
+				if opts.Config.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", wr.df.RelPath, wr.err.Error()))
+				}
 				lw.WriteEntry(domain.LedgerEntry{
 					Path:   wr.df.RelPath,
 					Status: domain.LedgerStatusError,
@@ -293,7 +328,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				if err != nil {
 					_ = db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error()))
 					result.Errors++
-					_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, err.Error()))
+					if opts.Config.Verbosity >= 0 {
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", wr.df.RelPath, err.Error()))
+					}
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:   wr.df.RelPath,
 						Status: domain.LedgerStatusError,
@@ -336,7 +373,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			}
 			if fr.err != nil {
 				result.Errors++
-				_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, fr.err.Error()))
+				if opts.Config.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", fr.df.RelPath, fr.err.Error()))
+				}
 				lw.WriteEntry(domain.LedgerEntry{
 					Path:   fr.df.RelPath,
 					Status: domain.LedgerStatusError,
@@ -360,8 +399,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				result.Processed++
 				result.Duplicates++
 				matchDetail := fr.existingDestForLedger
-				_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
-					fmt.Sprintf("matches %s", matchDetail)))
+				if opts.Config.Verbosity >= 0 {
+					_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", fr.df.RelPath,
+						fmt.Sprintf("matches %s", matchDetail)))
+				}
 				lw.WriteEntry(domain.LedgerEntry{
 					Path:     fr.df.RelPath,
 					Status:   domain.LedgerStatusDuplicate,
@@ -396,7 +437,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						if dedupErr != nil {
 							result.Errors++
 							errMsg := fmt.Sprintf("dedup check: %v", dedupErr)
-							_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
+							if opts.Config.Verbosity >= 0 {
+								_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", fr.df.RelPath, errMsg))
+							}
 							lw.WriteEntry(domain.LedgerEntry{
 								Path:   fr.df.RelPath,
 								Status: domain.LedgerStatusError,
@@ -416,7 +459,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 									archivedb.WithError(renErr.Error()))
 								result.Errors++
 								errMsg := fmt.Sprintf("relocate duplicate: %v", renErr)
-								_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
+								if opts.Config.Verbosity >= 0 {
+									_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", fr.df.RelPath, errMsg))
+								}
 								lw.WriteEntry(domain.LedgerEntry{
 									Path:   fr.df.RelPath,
 									Status: domain.LedgerStatusError,
@@ -451,13 +496,15 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				result.Processed++
 				if finalIsDup {
 					result.Duplicates++
-					matchDetail := finalExistingDest
-					if matchDetail == "" {
-						matchDetail = finalRelDest
+					if opts.Config.Verbosity >= 0 {
+						matchDetail := finalExistingDest
+						if matchDetail == "" {
+							matchDetail = finalRelDest
+						}
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", fr.df.RelPath,
+							fmt.Sprintf("matches %s", matchDetail)))
+						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
 					}
-					_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
-						fmt.Sprintf("matches %s", matchDetail)))
-					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusDuplicate,
@@ -477,8 +524,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						Completed:   result.Skipped + result.Processed + result.Errors,
 					})
 				} else {
-					_, _ = fmt.Fprint(out, formatOutput("COPY", fr.df.RelPath, finalRelDest))
-					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
+					if opts.Config.Verbosity >= 0 {
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", fr.df.RelPath, finalRelDest))
+						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
+					}
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusCopy,
@@ -514,6 +563,7 @@ func runWorker(ctx context.Context, id int,
 	opts SortOptions,
 	dirB string,
 	out io.Writer,
+	fmtr *Formatter,
 ) {
 	db := opts.DB
 
@@ -556,6 +606,29 @@ func runWorker(ctx context.Context, id int,
 				CaptureDate: captureDate,
 				WorkerID:    id,
 			})
+
+			// --- Date filter gate ---
+			cfg := opts.Config
+			if cfg.Since != nil && captureDate.Before(*cfg.Since) {
+				resultCh <- workResult{
+					df: item.df, fileID: item.fileID, workerID: id,
+					err: &dateFilterSkip{
+						reason:      "outside date range: before " + cfg.Since.Format("2006-01-02"),
+						captureDate: captureDate,
+					},
+				}
+				continue
+			}
+			if cfg.Before != nil && captureDate.After(*cfg.Before) {
+				resultCh <- workResult{
+					df: item.df, fileID: item.fileID, workerID: id,
+					err: &dateFilterSkip{
+						reason:      "outside date range: after " + cfg.Before.Truncate(24*time.Hour).Format("2006-01-02"),
+						captureDate: captureDate,
+					},
+				}
+				continue
+			}
 
 			// --- Hash ---
 			rc, err := item.df.Handler.HashableReader(item.df.Path)
@@ -617,9 +690,11 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			if opts.Config.DryRun {
-				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, assign.relDest)
-				dryTags := resolveTags(opts.Config, captureDate)
-				emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config)
+				if opts.Config.Verbosity >= 0 {
+					_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, assign.relDest)
+					dryTags := resolveTags(opts.Config, captureDate)
+					emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config)
+				}
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "complete",
 						archivedb.WithDestination(assign.absDest, assign.relDest),
@@ -726,8 +801,9 @@ func runWorker(ctx context.Context, id int,
 					sidecarDest := assign.absDest + sc.Ext
 					sidecarRel := assign.relDest + sc.Ext
 					if err := copypkg.CopySidecar(sc.Path, sidecarDest); err != nil {
-						_, _ = fmt.Fprintf(out, "  WARNING  sidecar carry failed for %s: %v\n",
-							sc.RelPath, err)
+						if opts.Config.Verbosity >= 0 {
+							_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("sidecar carry failed for %s: %v", sc.RelPath, err)))
+						}
 						emit(opts.EventBus, progress.Event{
 							Kind:           progress.EventSidecarFailed,
 							RelPath:        item.df.RelPath,
@@ -761,8 +837,9 @@ func runWorker(ctx context.Context, id int,
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tag_failed", archivedb.WithError(err.Error()))
 					}
-					_, _ = fmt.Fprintf(out, "  WARNING  tag failed for %s: %v\n",
-						item.df.RelPath, err)
+					if opts.Config.Verbosity >= 0 {
+						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("tag failed for %s: %v", item.df.RelPath, err)))
+					}
 				} else {
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tagged")
