@@ -64,6 +64,7 @@ var _ domain.FileTypeHandler = (*Handler)(nil)
 // anselsAdams is the fallback date when no EXIF date can be extracted.
 var anselsAdams = time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
 
+// exifDateFormat is the EXIF date/time string format.
 const exifDateFormat = "2006:01:02 15:04:05"
 
 // Handler implements domain.FileTypeHandler for Canon CR3 RAW images.
@@ -201,8 +202,11 @@ type sectionReadCloser struct {
 	Closer io.Closer
 }
 
+// Read implements io.Reader by reading from a bounded file section.
 func (s *sectionReadCloser) Read(p []byte) (int, error) { return s.Reader.Read(p) }
-func (s *sectionReadCloser) Close() error               { return s.Closer.Close() }
+
+// Close implements io.Closer by closing the underlying file.
+func (s *sectionReadCloser) Close() error { return s.Closer.Close() }
 
 // isobmffBox represents a single ISOBMFF box header.
 type isobmffBox struct {
@@ -435,6 +439,7 @@ type stblData struct {
 	stscEntries []stscEntry
 }
 
+// stscEntry represents a sample-to-chunk table entry in an ISOBMFF track.
 type stscEntry struct {
 	firstChunk      uint32
 	samplesPerChunk uint32

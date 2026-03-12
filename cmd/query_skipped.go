@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// querySkippedCmd is the "pixe query skipped" subcommand.
 var querySkippedCmd = &cobra.Command{
 	Use:   "skipped",
 	Short: "List all files that were skipped during sorting",
@@ -29,6 +30,7 @@ var querySkippedCmd = &cobra.Command{
 	RunE:  runQuerySkipped,
 }
 
+// runQuerySkipped is the RunE handler for the "query skipped" subcommand.
 func runQuerySkipped(_ *cobra.Command, _ []string) error {
 	files, err := queryDB.AllSkipped()
 	if err != nil {

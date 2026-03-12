@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// queryInventoryCmd is the "pixe query inventory" subcommand.
 var queryInventoryCmd = &cobra.Command{
 	Use:   "inventory",
 	Short: "List all canonical files in the archive",
@@ -29,6 +30,7 @@ var queryInventoryCmd = &cobra.Command{
 	RunE:  runQueryInventory,
 }
 
+// runQueryInventory is the RunE handler for the "query inventory" subcommand.
 func runQueryInventory(_ *cobra.Command, _ []string) error {
 	entries, err := queryDB.ArchiveInventory()
 	if err != nil {

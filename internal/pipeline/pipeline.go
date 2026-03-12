@@ -47,10 +47,14 @@ import (
 // SortOptions holds the resolved runtime options for a sort run.
 // It is constructed by the CLI layer and passed into Run.
 type SortOptions struct {
-	Config       *config.AppConfig
-	Hasher       *hash.Hasher
-	Registry     *discovery.Registry
-	RunTimestamp string // e.g. "20260306_103000"
+	// Config is the resolved application configuration.
+	Config *config.AppConfig
+	// Hasher computes content checksums for deduplication and verification.
+	Hasher *hash.Hasher
+	// Registry maps file extensions to their FileTypeHandler implementations.
+	Registry *discovery.Registry
+	// RunTimestamp is the formatted timestamp for this run, used in duplicate directory naming (e.g., "20260306_103000").
+	RunTimestamp string
 	// Output is where progress lines are written. Defaults to os.Stdout.
 	Output io.Writer
 	// PixeVersion is the version string stamped into ledgers.
@@ -76,10 +80,10 @@ func emit(bus *progress.Bus, e progress.Event) {
 
 // SortResult summarises the outcome of a completed sort run.
 type SortResult struct {
-	Processed  int
-	Duplicates int
-	Skipped    int
-	Errors     int
+	Processed  int // Processed is the total number of files that completed the pipeline.
+	Duplicates int // Duplicates is the number of files identified as content duplicates.
+	Skipped    int // Skipped is the number of files skipped (previously imported or unsupported).
+	Errors     int // Errors is the number of files that failed at some pipeline stage.
 }
 
 // formatOutput returns a single stdout line for a file outcome.

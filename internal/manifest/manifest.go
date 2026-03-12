@@ -94,8 +94,8 @@ func Load(dirB string) (*domain.Manifest, error) {
 // LedgerContents holds the parsed contents of a JSONL ledger file.
 // Used by tests to verify ledger output after a sort run.
 type LedgerContents struct {
-	Header  domain.LedgerHeader
-	Entries []domain.LedgerEntry
+	Header  domain.LedgerHeader  // Header is the run-level metadata from the first line of the JSONL ledger.
+	Entries []domain.LedgerEntry // Entries is the list of per-file outcome records from the ledger.
 }
 
 // LoadLedger reads a JSONL ledger file and returns its parsed contents.

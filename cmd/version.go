@@ -68,6 +68,7 @@ func fullVersion() string {
 	return fmt.Sprintf("pixe v%s (commit: %s, built: %s)", version, commit, buildDate)
 }
 
+// versionCmd is the "pixe version" subcommand.
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of Pixe",

@@ -66,6 +66,7 @@ func (r *statusResult) total() int {
 		len(r.Unsorted) + len(r.Unrecognized)
 }
 
+// statusCmd is the "pixe status" subcommand.
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the sorting status of a source directory",
@@ -81,6 +82,7 @@ If no ledger exists, all recognized files are reported as unsorted.`,
 	RunE: runStatus,
 }
 
+// runStatus is the RunE handler for the status subcommand.
 func runStatus(cmd *cobra.Command, _ []string) error {
 	// ------------------------------------------------------------------
 	// 1. Read flags from Viper.

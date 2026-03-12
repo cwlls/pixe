@@ -91,39 +91,46 @@ func (s FileStatus) IsError() bool {
 // ManifestEntry tracks the full lifecycle of a single file through the
 // sort pipeline. It is serialized into dirB/.pixe/manifest.json.
 type ManifestEntry struct {
-	Source      string     `json:"source"`
-	Destination string     `json:"destination,omitempty"`
-	Checksum    string     `json:"checksum,omitempty"`
-	Status      FileStatus `json:"status"`
-	ExtractedAt *time.Time `json:"extracted_at,omitempty"`
-	CopiedAt    *time.Time `json:"copied_at,omitempty"`
-	VerifiedAt  *time.Time `json:"verified_at,omitempty"`
-	TaggedAt    *time.Time `json:"tagged_at,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	Source      string     `json:"source"`                 // Source is the absolute path to the file in dirA.
+	Destination string     `json:"destination,omitempty"`  // Destination is the relative path within dirB where the file was copied.
+	Checksum    string     `json:"checksum,omitempty"`     // Checksum is the hex-encoded hash of the media payload.
+	Status      FileStatus `json:"status"`                 // Status is the terminal pipeline state (e.g., "complete", "failed").
+	ExtractedAt *time.Time `json:"extracted_at,omitempty"` // ExtractedAt is when metadata extraction completed.
+	CopiedAt    *time.Time `json:"copied_at,omitempty"`    // CopiedAt is when the file copy completed.
+	VerifiedAt  *time.Time `json:"verified_at,omitempty"`  // VerifiedAt is when post-copy hash verification completed.
+	TaggedAt    *time.Time `json:"tagged_at,omitempty"`    // TaggedAt is when metadata tagging completed.
+	Error       string     `json:"error,omitempty"`        // Error is the error message if the file failed at any stage.
 }
 
 // Manifest is the top-level operational journal written to
 // dirB/.pixe/manifest.json. It is created at the start of a sort run
 // and updated after each file completes a pipeline stage.
 type Manifest struct {
-	Version     int              `json:"version"`
-	PixeVersion string           `json:"pixe_version"`
-	Source      string           `json:"source"`
-	Destination string           `json:"destination"`
-	Algorithm   string           `json:"algorithm"`
-	StartedAt   time.Time        `json:"started_at"`
-	Workers     int              `json:"workers"`
-	Files       []*ManifestEntry `json:"files"`
+	Version     int              `json:"version"`      // Version is the manifest schema version.
+	PixeVersion string           `json:"pixe_version"` // PixeVersion is the Pixe binary version that produced this manifest.
+	Source      string           `json:"source"`       // Source is the absolute path to dirA.
+	Destination string           `json:"destination"`  // Destination is the absolute path to dirB.
+	Algorithm   string           `json:"algorithm"`    // Algorithm is the hash algorithm used (e.g., "sha1", "sha256").
+	StartedAt   time.Time        `json:"started_at"`   // StartedAt is the ISO 8601 UTC timestamp of when the sort run started.
+	Workers     int              `json:"workers"`      // Workers is the number of concurrent workers used for this run.
+	Files       []*ManifestEntry `json:"files"`        // Files is the list of all files processed in this run.
 }
 
 // Ledger status constants identify the outcome of a single file in the ledger.
 // These are distinct from FileStatus (which tracks pipeline stages) — ledger
 // statuses are the four user-visible outcomes written to .pixe_ledger.json.
 const (
-	LedgerStatusCopy      = "copy"
-	LedgerStatusSkip      = "skip"
+	// LedgerStatusCopy indicates the file was successfully copied to the archive.
+	LedgerStatusCopy = "copy"
+
+	// LedgerStatusSkip indicates the file was skipped (previously imported or unsupported format).
+	LedgerStatusSkip = "skip"
+
+	// LedgerStatusDuplicate indicates the file is a content duplicate of an already-archived file.
 	LedgerStatusDuplicate = "duplicate"
-	LedgerStatusError     = "error"
+
+	// LedgerStatusError indicates the file failed at some pipeline stage.
+	LedgerStatusError = "error"
 )
 
 // LedgerEntry records the outcome of a single file discovered in dirA.

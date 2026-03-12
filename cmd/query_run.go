@@ -25,6 +25,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/archivedb"
 )
 
+// queryRunCmd is the "pixe query run <id>" subcommand.
 var queryRunCmd = &cobra.Command{
 	Use:   "run <id>",
 	Short: "Show details for a specific sort run",
@@ -36,6 +37,7 @@ If the prefix matches more than one run, an error is returned.`,
 	RunE: runQueryRun,
 }
 
+// runQueryRun is the RunE handler for the "query run <id>" subcommand.
 func runQueryRun(_ *cobra.Command, args []string) error {
 	prefix := args[0]
 
@@ -71,6 +73,7 @@ func runQueryRun(_ *cobra.Command, args []string) error {
 	return printRunTable(run, files)
 }
 
+// printRunTable writes run detail results as a human-readable table.
 func printRunTable(run *archivedb.Run, files []*archivedb.FileRecord) error {
 	w := os.Stdout
 
@@ -141,6 +144,7 @@ func printRunTable(run *archivedb.Run, files []*archivedb.FileRecord) error {
 	return nil
 }
 
+// printRunJSON writes run detail results as a JSON object.
 func printRunJSON(run *archivedb.Run, files []*archivedb.FileRecord) error {
 	type runJSON struct {
 		ID          string  `json:"id"`

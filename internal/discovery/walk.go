@@ -26,10 +26,10 @@ import (
 
 // DiscoveredFile pairs a source path with its resolved FileTypeHandler.
 type DiscoveredFile struct {
-	Path     string // absolute path for file I/O
-	RelPath  string // relative path from dirA for display and ledger
-	Handler  domain.FileTypeHandler
-	Sidecars []SidecarFile // pre-existing sidecars from dirA (may be empty)
+	Path     string                 // absolute path for file I/O
+	RelPath  string                 // relative path from dirA for display and ledger
+	Handler  domain.FileTypeHandler // resolved handler for this file type
+	Sidecars []SidecarFile          // pre-existing sidecars from dirA (may be empty)
 }
 
 // SkippedFile records a file that could not be classified or was intentionally

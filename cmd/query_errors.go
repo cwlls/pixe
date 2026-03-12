@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// queryErrorsCmd is the "pixe query errors" subcommand.
 var queryErrorsCmd = &cobra.Command{
 	Use:   "errors",
 	Short: "List all files that encountered errors during sorting",
@@ -28,6 +29,7 @@ var queryErrorsCmd = &cobra.Command{
 	RunE:  runQueryErrors,
 }
 
+// runQueryErrors is the RunE handler for the "query errors" subcommand.
 func runQueryErrors(_ *cobra.Command, _ []string) error {
 	files, err := queryDB.FilesWithErrors()
 	if err != nil {

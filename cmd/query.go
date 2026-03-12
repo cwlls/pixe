@@ -39,6 +39,7 @@ var (
 	jsonOut bool
 )
 
+// queryCmd is the "pixe query" parent command.
 var queryCmd = &cobra.Command{
 	Use:   "query",
 	Short: "Query the archive database",

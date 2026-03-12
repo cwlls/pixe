@@ -60,6 +60,7 @@ import (
 // anselsAdams is the fallback date when no EXIF date can be extracted.
 var anselsAdams = time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
 
+// exifDateFormat is the EXIF date/time string format.
 const exifDateFormat = "2006:01:02 15:04:05"
 
 // TIFF IFD tag IDs used for sensor data and preview extraction.
@@ -178,6 +179,9 @@ type multiSectionReader struct {
 	multi io.Reader
 }
 
+// newMultiSectionReader returns an io.ReadCloser that reads sequentially
+// across multiple byte ranges within a single file, used to stream
+// non-contiguous raw sensor data strips for hashing.
 func newMultiSectionReader(f *os.File, offsets, byteCounts []int64) *multiSectionReader {
 	readers := make([]io.Reader, len(offsets))
 	for i := range offsets {
@@ -189,8 +193,11 @@ func newMultiSectionReader(f *os.File, offsets, byteCounts []int64) *multiSectio
 	}
 }
 
+// Read implements io.Reader by reading sequentially across multiple file sections.
 func (m *multiSectionReader) Read(p []byte) (int, error) { return m.multi.Read(p) }
-func (m *multiSectionReader) Close() error               { return m.file.Close() }
+
+// Close implements io.Closer by closing the underlying file.
+func (m *multiSectionReader) Close() error { return m.file.Close() }
 
 // ifdValues holds the parsed values of a single TIFF IFD that we care about.
 type ifdValues struct {

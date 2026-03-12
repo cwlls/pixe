@@ -36,8 +36,11 @@ import (
 )
 
 const (
-	pixeDir        = ".pixe"
-	manifestFile   = "manifest.json"
+	// pixeDir is the name of the Pixe metadata directory within dirB.
+	pixeDir = ".pixe"
+	// manifestFile is the filename of the legacy JSON manifest.
+	manifestFile = "manifest.json"
+	// migratedSuffix is appended to the manifest filename after migration.
 	migratedSuffix = ".migrated"
 )
 

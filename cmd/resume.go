@@ -42,6 +42,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/pipeline"
 )
 
+// resumeCmd is the "pixe resume" subcommand.
 var resumeCmd = &cobra.Command{
 	Use:   "resume",
 	Short: "Resume an interrupted sort operation using the archive database",
@@ -58,6 +59,7 @@ re-enter the pipeline from the beginning.`,
 	RunE: runResume,
 }
 
+// runResume is the RunE handler for the resume subcommand.
 func runResume(cmd *cobra.Command, args []string) error {
 	dir := viper.GetString("resume_dir")
 	if dir == "" {

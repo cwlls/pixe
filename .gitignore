@@ -26,3 +26,6 @@ go.work
 
 # Go dist files
 dist/
+
+# private analysis
+analysis/

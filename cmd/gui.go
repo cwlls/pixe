@@ -27,6 +27,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/tui"
 )
 
+// guiCmd is the "pixe gui" subcommand.
 var guiCmd = &cobra.Command{
 	Use:   "gui",
 	Short: "Launch the interactive terminal UI",
@@ -43,6 +44,7 @@ Key bindings:
 	RunE: runGUI,
 }
 
+// runGUI is the RunE handler for the gui subcommand.
 func runGUI(cmd *cobra.Command, args []string) error {
 	cfg, err := resolveGUIConfig(cmd)
 	if err != nil {

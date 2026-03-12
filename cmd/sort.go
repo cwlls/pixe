@@ -33,6 +33,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/progress"
 )
 
+// sortCmd is the "pixe sort" subcommand.
 var sortCmd = &cobra.Command{
 	Use:   "sort",
 	Short: "Sort and rename media files from a source directory into an organized archive",
@@ -49,6 +50,7 @@ and a ledger is written to <source>/.pixe_ledger.json.`,
 	RunE: runSort,
 }
 
+// runSort is the RunE handler for the sort subcommand.
 func runSort(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	// 1. Resolve configuration from Viper (flags > config file > defaults).

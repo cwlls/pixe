@@ -1,5 +1,192 @@
 # Completed Features Archive
 
+## Documentation Hygiene: Godoc Completeness (19 Tasks)
+
+**Completion Date:** March 12, 2026
+
+**Status:** ✅ COMPLETE
+
+### Summary
+
+Completed comprehensive documentation audit and remediation across the entire codebase. All 19 documentation tasks were successfully implemented, bringing the project into full compliance with AGENTS.md documentation standards. Every exported symbol, unexported struct type, and interface method implementation now carries appropriate godoc comments.
+
+### Implementation Overview
+
+All 19 tasks were successfully completed:
+
+#### Package-Level Documentation (Tasks 1)
+- **`main.go`** — Added package doc comment: `// Pixe sorts photographs and raw files into a date-based archive structure.`
+- **`internal/domain/handler.go`** — Added comprehensive package doc comment for the `domain` package
+
+#### Command Variables & Handlers (Tasks 2-4)
+- **15 Cobra command variables** documented across `cmd/` package:
+  - `sortCmd`, `verifyCmd`, `statusCmd`, `cleanCmd`, `resumeCmd`, `versionCmd`, `guiCmd`
+  - `queryCmd`, `queryRunsCmd`, `queryRunCmd`, `queryFilesCmd`, `queryErrorsCmd`, `queryDuplicatesCmd`, `querySkippedCmd`, `queryInventoryCmd`
+  
+- **13 RunE handler functions** documented:
+  - `runSort`, `runVerify`, `runStatus`, `runClean`, `runResume`, `runGUI`
+  - `runQueryRuns`, `runQueryRun`, `runQueryFiles`, `runQueryErrors`, `runQueryDuplicates`, `runQuerySkipped`, `runQueryInventory`
+  
+- **6 additional functions** documented:
+  - `printFilesTable`, `printFilesJSON`, `printRunTable`, `printRunJSON`, `runQueryDuplicateList`, `runQueryDuplicatePairs`
+  
+- **6 flag variables** documented:
+  - `filesFrom`, `filesTo`, `filesImportedFrom`, `filesImportedTo`, `filesSource`, `duplicatePairs`
+
+#### Constant Documentation (Task 5)
+- **`LedgerStatus*` constants** — Replaced group comment with individual per-constant doc comments:
+  - `LedgerStatusCopy`, `LedgerStatusSkip`, `LedgerStatusDuplicate`, `LedgerStatusError`
+
+#### Struct Field Documentation (Tasks 6-10)
+- **`domain/pipeline.go`** — 17 exported struct fields across 2 structs:
+  - `ManifestEntry` (9 fields): Source, Destination, Checksum, Status, ExtractedAt, CopiedAt, VerifiedAt, TaggedAt, Error
+  - `Manifest` (8 fields): Version, PixeVersion, Source, Destination, Algorithm, StartedAt, Workers, Files
+
+- **`pipeline/pipeline.go`** — 7 exported struct fields across 2 structs:
+  - `SortOptions` (4 fields): Config, Hasher, Registry, RunTimestamp
+  - `SortResult` (4 fields): Processed, Duplicates, Skipped, Errors
+
+- **`verify/verify.go`** — 10 exported struct fields across 3 structs:
+  - `Result` (3 fields): Verified, Mismatches, Unrecognised
+  - `FileResult` (3 fields): Path, Expected, Actual
+  - `Options` (4 fields): Dir, Hasher, Registry, Output
+
+- **`manifest/manifest.go`** — 2 exported struct fields:
+  - `LedgerContents` (2 fields): Header, Entries
+
+- **`domain/handler.go`** — 2 exported struct fields:
+  - `MagicSignature` (2 fields): Offset, Bytes
+
+#### Handler Package Documentation (Tasks 11-14)
+- **`exifDateFormat` constants** — Standardized doc comments across 3 handlers:
+  - `internal/handler/heic/heic.go`
+  - `internal/handler/tiffraw/tiffraw.go`
+  - `internal/handler/cr3/cr3.go`
+
+- **Interface method implementations** — Added doc comments to 4 methods:
+  - `multiSectionReader.Read()` and `Close()` in `tiffraw.go`
+  - `sectionReadCloser.Read()` and `Close()` in `cr3.go`
+
+- **Unexported struct types** — Added doc comments to 2 structs:
+  - `sampleLocation` in `mp4.go`
+  - `stscEntry` in `cr3.go`
+
+- **Unexported constructors** — Added doc comment to `newMultiSectionReader()` in `tiffraw.go`
+
+#### Code Refactoring (Task 15)
+- **`mp4.buildMinimalMP4()`** — Moved from production code (`mp4.go`) to test file (`mp4_test.go`)
+  - Function is test-only helper; now properly located
+  - Added necessary imports (`bytes`, `encoding/binary`) to test file
+  - Removed from production code
+
+#### Cross-Package Documentation (Tasks 16-18)
+- **`dblocator/filesystem_windows.go`** — Added doc comment to `isNetworkMount()` function
+- **`discovery/walk.go`** — Added inline doc comment to `DiscoveredFile.Handler` field
+- **`migrate/migrate.go`** — Added per-constant doc comments to 3 unexported constants:
+  - `pixeDir`, `manifestFile`, `migratedSuffix`
+
+#### Test Fixes (Task 19)
+- **`cmd/status_test.go`** — Fixed mismatched comment: `// fixturesDir` → `// statusFixturesDir`
+
+### Files Modified
+
+**Core packages:**
+- `main.go` — Package doc comment
+- `internal/domain/handler.go` — Package doc comment, field comments
+- `internal/domain/pipeline.go` — Constant comments, field comments
+- `cmd/sort.go`, `cmd/verify.go`, `cmd/status.go`, `cmd/clean.go`, `cmd/resume.go`, `cmd/version.go`, `cmd/gui.go` — Command variable and function doc comments
+- `cmd/query.go`, `cmd/query_runs.go`, `cmd/query_run.go`, `cmd/query_files.go`, `cmd/query_errors.go`, `cmd/query_duplicates.go`, `cmd/query_skipped.go`, `cmd/query_inventory.go` — Command and function doc comments
+
+**Internal packages:**
+- `internal/pipeline/pipeline.go` — Struct field comments
+- `internal/verify/verify.go` — Struct field comments
+- `internal/manifest/manifest.go` — Struct field comments
+- `internal/handler/heic/heic.go`, `internal/handler/tiffraw/tiffraw.go`, `internal/handler/cr3/cr3.go` — Constant and method comments
+- `internal/handler/mp4/mp4.go`, `internal/handler/mp4/mp4_test.go` — Function relocation
+- `internal/dblocator/filesystem_windows.go` — Function doc comment
+- `internal/discovery/walk.go` — Field comment
+- `internal/migrate/migrate.go` — Constant comments
+- `cmd/status_test.go` — Comment fix
+
+### Quality Assurance
+
+✅ `make check` → All formatting, vet, and unit tests pass
+✅ `make lint` → 0 issues (golangci-lint)
+✅ All 28 test packages pass
+✅ No regressions in existing functionality
+✅ Full AGENTS.md compliance achieved
+
+### Verification
+
+✅ All 19 tasks marked complete in PLAN.md
+✅ All 30 files modified with appropriate documentation
+✅ Full test suite passes: `make check && make lint`
+✅ Zero documentation violations remaining
+✅ Ready for production use
+
+---
+
+## Uppercase Extension Test Coverage (5 Tests)
+
+**Completion Date:** March 12, 2026
+
+**Status:** ✅ COMPLETE
+
+### Summary
+
+Added comprehensive test coverage for uppercase-extension source files (e.g., `photo.JPG`, `IMG_0001.JPEG`). The feature was already working correctly via `strings.ToLower` in the fast-path handler lookup, but lacked explicit test validation. This work closes a coverage gap and provides regression protection.
+
+### Implementation Overview
+
+All 5 tests were successfully added:
+
+#### Unit Tests — Discovery Package (3 tests)
+
+- **`TestRegistry_uppercaseExtension_detected`** — Table-driven test covering JPG, JPEG, DNG, NEF, MP4, MOV extensions
+  - Proves `Registry.Detect()` fast-path lookup is case-insensitive via `strings.ToLower`
+  - Validates that uppercase extensions resolve to the correct handler
+
+- **`TestWalk_uppercaseExtensionDiscovered`** — File classification test
+  - Verifies `photo.JPG` with valid JPEG magic lands in `discovered`, not `skipped`
+  - Confirms magic-based validation works for uppercase extensions
+
+- **`TestWalk_mixedCaseExtensions`** — Mixed-case batch test
+  - Confirms `lower.jpg`, `upper.JPG`, `mixed.Jpg` all discovered correctly
+  - Validates case-insensitive matching across multiple files
+
+#### Integration Tests — Full Pipeline (2 tests)
+
+- **`TestIntegration_UppercaseExtension`** — Real fixture test
+  - Uses `IMG_0001.JPG` fixture with valid JPEG data
+  - Verifies: processed=1, correct date path, destination ext=`.jpg` (normalized to lowercase)
+  - Confirms end-to-end pipeline handles uppercase extensions
+
+- **`TestIntegration_UppercaseExtension_MixedBatch`** — Multi-file batch test
+  - Three files: `a.jpg`, `b.JPG`, `c.JPEG`
+  - Verifies: all processed, all destinations have lowercase extensions
+  - Validates batch processing consistency
+
+### Files Modified
+
+- `internal/discovery/discovery_test.go` — Added 3 unit tests
+- `internal/integration/integration_test.go` — Added 2 integration tests
+
+### Quality Assurance
+
+✅ `make lint` → 0 issues
+✅ `make test-all` → all packages pass
+✅ No regressions in existing functionality
+✅ Coverage gap closed
+
+### Verification
+
+✅ All 5 tests added and passing
+✅ No lint issues introduced
+✅ Full test suite passes
+✅ Ready for production use
+
+---
+
 ## Progress Tracking & TUI Feature (17 Tasks)
 
 **Completion Date:** March 11, 2026
@@ -350,6 +537,80 @@ Section 4.12 of `.state/ARCHITECTURE.md` documents the complete feature:
 ✅ All 22 tasks marked complete in PLAN.md
 ✅ Architecture documentation complete and accurate
 ✅ All required files created and implemented
+✅ Full test suite passes
+✅ No lint issues
+✅ Ready for production use
+
+---
+
+## GUI Flag Handling & Settings Editor (2 Bug Fixes)
+
+**Completion Date:** March 11, 2026
+
+**Status:** ✅ COMPLETE
+
+### Summary
+
+Two critical bugs in the `pixe gui` command were identified and fixed:
+
+1. **Viper pflag collision** — Both `sortCmd` and `guiCmd` called `viper.BindPFlag("dest", ...)` on the global Viper instance, causing the last `init()` to win. Flags passed to `pixe gui` (e.g., `--dest /path`) were silently ignored.
+
+2. **Missing settings editor** — The `[e]` key was advertised in the UI but never implemented. Users had no in-TUI way to change source or destination directories.
+
+### Implementation Overview
+
+#### Bug 1: Viper pflag Collision Fix
+- **Root cause:** Global Viper instance stores only one pflag per key. When `guiCmd.init()` ran after `sortCmd.init()`, it overwrote the pflag bindings, causing `--dest` and other flags to be ignored in GUI mode.
+- **Solution:** Implemented `resolveGUIConfig(*cobra.Command)` in `cmd/gui.go` that reads flag values directly from the cobra flag set, bypassing Viper entirely.
+- **Changes:**
+  - Removed all `viper.BindPFlag()` calls from `gui.go`'s `init()` function
+  - Added `resolveGUIConfig()` helper that extracts flag values from `cmd.Flags()` and populates `*config.AppConfig`
+  - Updated `runGUI()` to call `resolveGUIConfig()` instead of `resolveConfig()`
+  - Result: `pixe gui --dest /path` now correctly passes the destination to the TUI
+
+#### Bug 2: Settings Editor Implementation
+- **Root cause:** The `[e]` key hint was shown in `viewConfigure()` but no handler existed. The feature was never implemented.
+- **Solution:** Added a full settings editor state to `SortModel` with interactive text input fields.
+- **Changes:**
+  - Added `sortStateEdit` state to `SortModel` state machine
+  - Implemented two `textinput.Model` fields for Source and Destination paths
+  - Key bindings:
+    - `[e]` — Enter edit mode from configure state
+    - `Tab` / `Shift+Tab` — Cycle focus between Source and Destination fields
+    - `Enter` — Save changes and return to configure state
+    - `Esc` — Cancel without saving
+  - Updated `viewConfigure()` to always show `[e] Edit Settings` hint
+  - Integrated with `SortModel.Update()` to handle edit state transitions
+  - Added `viewEdit()` function to render the editor UI with styled text input fields
+
+#### Testing
+- **`cmd/gui_test.go`** (new) — Tests for `resolveGUIConfig()` flag resolution
+- **`internal/tui/tui_test.go`** (updated) — Added tests for edit state transitions and text input handling
+- **`internal/tui/sort.go`** (updated) — Full state machine integration
+
+#### Dependencies
+- Added transitive dependency: `github.com/atotto/clipboard` (required by `bubbles/textinput`)
+- Updated `go.mod` and `go.sum`
+
+### Files Modified
+
+- `cmd/gui.go` — Removed Viper bindings, added `resolveGUIConfig()`, updated `runGUI()`
+- `cmd/gui_test.go` — New file with flag resolution tests
+- `internal/tui/sort.go` — Added `sortStateEdit`, text input fields, edit state handling, `viewEdit()`
+- `internal/tui/tui_test.go` — Added edit state transition tests
+- `go.mod` / `go.sum` — Added clipboard transitive dependency
+
+### Quality Assurance
+
+✅ `make lint` → 0 issues
+✅ `make test-all` → all packages pass
+✅ `pixe gui --dest /path` now correctly receives the flag
+✅ `[e]` key now opens interactive settings editor
+✅ No regressions in existing functionality
+
+### Verification
+
+✅ Both bugs fixed and verified
 ✅ Full test suite passes
 ✅ No lint issues
 ✅ Ready for production use

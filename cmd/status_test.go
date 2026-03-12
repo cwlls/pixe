@@ -35,7 +35,7 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-// fixturesDir returns the path to the JPEG test fixtures.
+// statusFixturesDir returns the path to the JPEG test fixtures.
 func statusFixturesDir() string {
 	return filepath.Join("..", "internal", "handler", "jpeg", "testdata")
 }

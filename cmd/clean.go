@@ -34,6 +34,7 @@ import (
 //	YYYYMMDD_HHMMSS_<hex_checksum>.<media_ext>.xmp
 var pixeXMPPattern = regexp.MustCompile(`^\d{8}_\d{6}_[0-9a-f]+\..+\.xmp$`)
 
+// cleanCmd is the "pixe clean" subcommand.
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Remove orphaned temp files and compact the archive database",
@@ -63,6 +64,7 @@ type cleanResult struct {
 	VacuumReason     string
 }
 
+// runClean is the RunE handler for the clean subcommand.
 func runClean(cmd *cobra.Command, _ []string) error {
 	dir := viper.GetString("clean_dir")
 	dbPath := viper.GetString("clean_db_path")

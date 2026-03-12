@@ -55,6 +55,7 @@ import (
 // anselsAdams is the fallback date when no EXIF date can be extracted.
 var anselsAdams = time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
 
+// exifDateFormat is the EXIF date/time string format.
 const exifDateFormat = "2006:01:02 15:04:05"
 
 // Handler implements domain.FileTypeHandler for HEIC/HEIF images.

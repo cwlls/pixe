@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// queryDuplicatesCmd is the "pixe query duplicates" subcommand.
 var queryDuplicatesCmd = &cobra.Command{
 	Use:   "duplicates",
 	Short: "List all duplicate files in the archive",
@@ -30,8 +31,10 @@ Use --pairs to show each duplicate alongside the original file it duplicates.`,
 	RunE: runQueryDuplicates,
 }
 
+// duplicatePairs enables paired output showing each duplicate alongside its original.
 var duplicatePairs bool
 
+// runQueryDuplicates is the RunE handler for the "query duplicates" subcommand.
 func runQueryDuplicates(_ *cobra.Command, _ []string) error {
 	if duplicatePairs {
 		return runQueryDuplicatePairs()
@@ -39,6 +42,7 @@ func runQueryDuplicates(_ *cobra.Command, _ []string) error {
 	return runQueryDuplicateList()
 }
 
+// runQueryDuplicateList lists all duplicate files without pairing.
 func runQueryDuplicateList() error {
 	files, err := queryDB.AllDuplicates()
 	if err != nil {
@@ -100,6 +104,7 @@ func runQueryDuplicateList() error {
 	return nil
 }
 
+// runQueryDuplicatePairs lists each duplicate alongside its original.
 func runQueryDuplicatePairs() error {
 	pairs, err := queryDB.DuplicatePairs()
 	if err != nil {

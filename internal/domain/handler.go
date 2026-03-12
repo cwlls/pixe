@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package domain defines shared types used across internal packages,
+// including the FileTypeHandler interface, pipeline status types,
+// and ledger/manifest structures.
 package domain
 
 import (
@@ -22,8 +25,8 @@ import (
 // MagicSignature defines a byte pattern at a specific file offset used to
 // verify a file's true type independent of its extension.
 type MagicSignature struct {
-	Offset int
-	Bytes  []byte
+	Offset int    // Offset is the byte position in the file where the signature starts.
+	Bytes  []byte // Bytes is the expected byte sequence at the given offset.
 }
 
 // MetadataTags holds optional tags to be injected into destination files

@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// queryRunsCmd is the "pixe query runs" subcommand.
 var queryRunsCmd = &cobra.Command{
 	Use:   "runs",
 	Short: "List all sort runs recorded in the archive database",
@@ -28,6 +29,7 @@ var queryRunsCmd = &cobra.Command{
 	RunE:  runQueryRuns,
 }
 
+// runQueryRuns is the RunE handler for the "query runs" subcommand.
 func runQueryRuns(_ *cobra.Command, _ []string) error {
 	summaries, err := queryDB.ListRuns()
 	if err != nil {

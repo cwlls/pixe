@@ -34,25 +34,25 @@ import (
 
 // Result holds the outcome of a verify run.
 type Result struct {
-	Verified     int
-	Mismatches   int
-	Unrecognised int
+	Verified     int // Verified is the number of files whose checksums matched.
+	Mismatches   int // Mismatches is the number of files whose checksums did not match.
+	Unrecognised int // Unrecognised is the number of files not parseable by any handler.
 }
 
 // FileResult is the per-file outcome emitted to the output writer.
 type FileResult struct {
-	Path     string
+	Path     string // Path is the relative path of the file within dirB.
 	Status   string // "OK", "MISMATCH", "UNRECOGNISED"
-	Expected string
-	Actual   string
+	Expected string // Expected is the checksum parsed from the filename.
+	Actual   string // Actual is the checksum recomputed from the file's data.
 }
 
 // Options configures a verify run.
 type Options struct {
-	Dir      string
-	Hasher   *hash.Hasher
-	Registry *discovery.Registry
-	Output   io.Writer
+	Dir      string              // Dir is the destination directory (dirB) to verify.
+	Hasher   *hash.Hasher        // Hasher computes content checksums for verification.
+	Registry *discovery.Registry // Registry maps file extensions to their FileTypeHandler implementations.
+	Output   io.Writer           // Output is where per-file result lines are written.
 	// EventBus, when non-nil, receives structured progress events alongside
 	// the plain-text Output writer. Both can be active simultaneously.
 	// When nil, no events are emitted (existing behaviour is unchanged).

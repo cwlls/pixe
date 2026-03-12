@@ -30,6 +30,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/verify"
 )
 
+// verifyCmd is the "pixe verify" subcommand.
 var verifyCmd = &cobra.Command{
 	Use:   "verify",
 	Short: "Verify the integrity of a sorted archive by recomputing checksums",
@@ -42,6 +43,7 @@ Exit code 1 means one or more mismatches were detected.`,
 	RunE: runVerify,
 }
 
+// runVerify is the RunE handler for the verify subcommand.
 func runVerify(cmd *cobra.Command, args []string) error {
 	dir := viper.GetString("verify_dir")
 	algorithm := viper.GetString("algorithm")

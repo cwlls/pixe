@@ -15,6 +15,8 @@
 package mp4
 
 import (
+	"bytes"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +25,55 @@ import (
 
 	"github.com/cwlls/pixe-go/internal/domain"
 )
+
+// buildMinimalMP4 creates a minimal structurally-valid MP4 for testing.
+// It contains an ftyp box and a minimal moov/mvhd with the given creation time.
+func buildMinimalMP4(creationTimeSecs uint32) []byte {
+	var buf bytes.Buffer
+
+	// ftyp box
+	ftypData := []byte{
+		0x00, 0x00, 0x00, 0x18, // size = 24
+		0x66, 0x74, 0x79, 0x70, // "ftyp"
+		0x6d, 0x70, 0x34, 0x32, // major brand "mp42"
+		0x00, 0x00, 0x00, 0x00, // minor version
+		0x6d, 0x70, 0x34, 0x32, // compat "mp42"
+		0x69, 0x73, 0x6f, 0x6d, // compat "isom"
+	}
+	buf.Write(ftypData)
+
+	// mvhd box (version 0, 108 bytes total)
+	mvhdPayload := make([]byte, 100)
+	// FullBox: version (1 byte) + flags (3 bytes) = 0x00000000
+	binary.BigEndian.PutUint32(mvhdPayload[0:4], 0)                 // version=0, flags=0
+	binary.BigEndian.PutUint32(mvhdPayload[4:8], creationTimeSecs)  // creation time
+	binary.BigEndian.PutUint32(mvhdPayload[8:12], creationTimeSecs) // modification time
+	binary.BigEndian.PutUint32(mvhdPayload[8:12], 1000)             // timescale
+	binary.BigEndian.PutUint32(mvhdPayload[12:16], 0)               // duration
+	binary.BigEndian.PutUint32(mvhdPayload[16:20], 0x00010000)      // rate 1.0
+	binary.BigEndian.PutUint16(mvhdPayload[20:22], 0x0100)          // volume 1.0
+	// matrix identity at offset 36
+	binary.BigEndian.PutUint32(mvhdPayload[36:40], 0x00010000)
+	binary.BigEndian.PutUint32(mvhdPayload[52:56], 0x00010000)
+	binary.BigEndian.PutUint32(mvhdPayload[68:72], 0x40000000)
+	// next track ID
+	binary.BigEndian.PutUint32(mvhdPayload[96:100], 1)
+
+	mvhdBox := make([]byte, 8+len(mvhdPayload))
+	binary.BigEndian.PutUint32(mvhdBox[0:4], uint32(len(mvhdBox)))
+	copy(mvhdBox[4:8], []byte("mvhd"))
+	copy(mvhdBox[8:], mvhdPayload)
+
+	// moov box wrapping mvhd
+	moovSize := uint32(8 + len(mvhdBox))
+	moovBox := make([]byte, moovSize)
+	binary.BigEndian.PutUint32(moovBox[0:4], moovSize)
+	copy(moovBox[4:8], []byte("moov"))
+	copy(moovBox[8:], mvhdBox)
+
+	buf.Write(moovBox)
+	return buf.Bytes()
+}
 
 // writeFixture writes data to dir/name and returns the path.
 func writeFixture(t *testing.T, dir, name string, data []byte) string {

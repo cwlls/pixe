@@ -20,6 +20,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// isNetworkMount returns true if the given path resides on a network
+// filesystem on Windows.
 func isNetworkMount(path string) (bool, error) {
 	if len(path) >= 2 && path[0] == '\\' && path[1] == '\\' {
 		return true, nil

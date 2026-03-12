@@ -24,6 +24,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/archivedb"
 )
 
+// queryFilesCmd is the "pixe query files" subcommand.
 var queryFilesCmd = &cobra.Command{
 	Use:   "files",
 	Short: "Search for files in the archive by date or source",
@@ -40,13 +41,19 @@ If only --to is set, --from defaults to 1900-01-01.`,
 }
 
 var (
-	filesFrom         string
-	filesTo           string
+	// filesFrom is the start of the capture date range filter.
+	filesFrom string
+	// filesTo is the end of the capture date range filter.
+	filesTo string
+	// filesImportedFrom is the start of the import date range filter.
 	filesImportedFrom string
-	filesImportedTo   string
-	filesSource       string
+	// filesImportedTo is the end of the import date range filter.
+	filesImportedTo string
+	// filesSource filters results to files imported from this source directory.
+	filesSource string
 )
 
+// runQueryFiles is the RunE handler for the "query files" subcommand.
 func runQueryFiles(_ *cobra.Command, _ []string) error {
 	// Determine which filter mode is active.
 	hasCapture := filesFrom != "" || filesTo != ""
@@ -132,6 +139,7 @@ func parseDateRange(from, to string) (time.Time, time.Time, error) {
 	return start, end, nil
 }
 
+// printFilesTable writes file query results as a human-readable table.
 func printFilesTable(files []*archivedb.FileRecord) error {
 	if len(files) == 0 {
 		_, _ = fmt.Fprintln(os.Stdout, "No files found.")
@@ -181,6 +189,7 @@ func printFilesTable(files []*archivedb.FileRecord) error {
 	return nil
 }
 
+// printFilesJSON writes file query results as a JSON object.
 func printFilesJSON(files []*archivedb.FileRecord) error {
 	type fileJSON struct {
 		SourcePath  string  `json:"source_path"`

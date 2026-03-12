@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Pixe sorts photographs and raw files into a date-based archive structure.
 package main
 
 import "github.com/cwlls/pixe-go/cmd"
