@@ -4,6 +4,45 @@
 
 ---
 
+## [Unreleased] -- Remediation Wave 3 & 4 Complete
+
+### Security & Stability Fixes
+
+- **Fixed Windows path separator bug in file extension detection** — A custom `fileExt` function was copy-pasted across 10 files and only checked for `/` as a separator, breaking on Windows paths with dots in directory names (e.g., `C:\photos\no-ext-dir.backup\IMG_0001`). Extracted shared `fileutil.Ext()` using `filepath.Ext` for cross-platform correctness.
+
+- **Eliminated template injection risk in copyright rendering** — Replaced `text/template` with simple `strings.ReplaceAll` for `{{.Year}}` substitution. Removed unnecessary template parsing complexity and eliminated duplicate `renderCopyright` implementations.
+
+- **XML-escaped user input in XMP template generation** — Copyright and camera owner strings are now XML-escaped before XMP template rendering, preventing malformed XML from special characters (`<`, `>`, `&`, `"`).
+
+- **Added symlink detection to discovery walk** — Symlinks are now explicitly detected and skipped with logged reason, preventing accidental processing of files outside the source directory.
+
+### Performance Improvements
+
+- **Streamed JPEG SOS payload extraction** — Replaced `os.ReadFile` (which loaded entire JPEG into memory) with `io.ReadSeeker`-based streaming. Marker headers are scanned sequentially; only the SOS-to-EOI section is hashed. Reduces memory footprint for large panoramic JPEGs (200+ MB) by orders of magnitude.
+
+- **Streamed MP4 keyframe extraction** — Replaced buffering all keyframes into `bytes.Buffer` with `io.MultiReader` over `io.SectionReader` instances. Eliminates hundreds of megabytes of memory usage for 4K video with many keyframes.
+
+### Code Quality & Maintainability
+
+- **Added compile-time interface checks** — JPEG, HEIC, and MP4 handlers now include `var _ domain.FileTypeHandler = (*Handler)(nil)` to catch interface drift at compile time.
+
+- **Documented intermediate DB status updates as best-effort** — Added explanatory comments at `db.UpdateFileStatus` call sites in worker goroutines, clarifying that intermediate state tracking is observational and non-fatal. Coordinator owns terminal states.
+
+- **Refactored `scanFileWithSource` to eliminate duplication** — Removed ~70 lines of duplicated scan logic by reusing `scanFileRow` helper, reducing maintenance burden.
+
+- **Fixed sidecar display year cosmetic bug** — Capture date now flows through `workerFinalResult` struct to coordinator, enabling correct `{{.Year}}` resolution in sidecar lines (was resolving to year 1 due to `time.Time{}`).
+
+- **Added durability guarantee in copy operation** — `out.Sync()` now called before `out.Close()` in `copy.Execute()` to ensure data is flushed to stable storage before returning.
+
+### Testing & Validation
+
+- All 12 remediation tasks (Tasks 1–12) implemented and validated
+- Full test suite passes with `-race` flag
+- `make check` (fmt-check + vet + unit tests) clean
+- Zero lint warnings, zero vet warnings
+
+---
+
 ## [2.0.4] -- 2026-03-12
 
 ### Test Coverage

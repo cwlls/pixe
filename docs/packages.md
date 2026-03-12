@@ -79,4 +79,6 @@ This page is generated from the Go package doc comments in the source tree. Each
 **`cmd`** — Package cmd provides the Cobra CLI commands for Pixe.
 
 **`internal/docgen`** — Package main implements the docgen tool that injects generated content into documentation files using marker-based replacement.
+
+**`internal/fileutil`** — Package fileutil provides shared file-path utilities used across handler and discovery packages.
 <!-- pixe:end:package-list -->
