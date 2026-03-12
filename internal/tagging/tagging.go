@@ -17,10 +17,14 @@
 //
 // Template support:
 //
-//	The Copyright field supports Go text/template syntax. The only variable
-//	currently exposed is {{.Year}}, which expands to the 4-digit capture year.
+//	The Copyright field supports a single placeholder: {{.Year}}, which
+//	expands to the 4-digit capture year via strings.ReplaceAll.
 //	Example: "Copyright {{.Year}} My Family, all rights reserved"
 //	→ "Copyright 2021 My Family, all rights reserved"
+//
+//	Unknown placeholders (e.g. {{.Foo}}) are preserved as-is in the output.
+//	This is intentionally simpler and safer than text/template evaluation,
+//	which could execute arbitrary method calls on the data context.
 //
 // Dispatch strategy:
 //
@@ -32,36 +36,24 @@ package tagging
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/cwlls/pixe-go/internal/domain"
 	"github.com/cwlls/pixe-go/internal/xmp"
 )
 
-// copyrightData is the template execution context.
-type copyrightData struct {
-	Year int
-}
-
-// RenderCopyright executes tmplStr as a Go text/template with the capture
-// year derived from date. Returns the rendered string, or tmplStr unchanged
-// if it contains no template directives or if parsing/execution fails.
+// RenderCopyright substitutes {{.Year}} in tmplStr with the 4-digit capture
+// year derived from date. All other content is returned unchanged.
+//
+// This replaces the previous text/template implementation to eliminate the
+// risk of template injection from user-supplied copyright strings.
 func RenderCopyright(tmplStr string, date time.Time) string {
 	if tmplStr == "" {
 		return ""
 	}
-	tmpl, err := template.New("copyright").Parse(tmplStr)
-	if err != nil {
-		// Malformed template — return raw string rather than failing.
-		return tmplStr
-	}
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, copyrightData{Year: date.Year()}); err != nil {
-		return tmplStr
-	}
-	return buf.String()
+	return strings.ReplaceAll(tmplStr, "{{.Year}}", strconv.Itoa(date.Year()))
 }
 
 // Apply persists metadata tags for the file at destPath. The strategy

@@ -27,8 +27,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
-	"text/template"
 	"time"
 
 	"github.com/cwlls/pixe-go/internal/archivedb"
@@ -179,7 +177,7 @@ func Run(opts SortOptions) (SortResult, error) {
 	// ------------------------------------------------------------------
 	// 4. Open streaming ledger writer (nil in dry-run — no ledger written).
 	// ------------------------------------------------------------------
-	var lw *manifest.LedgerWriter
+	var slw *manifest.SafeLedgerWriter
 	if !cfg.DryRun {
 		header := domain.LedgerHeader{
 			Version:     4,
@@ -190,11 +188,12 @@ func Run(opts SortOptions) (SortResult, error) {
 			Destination: dirB,
 			Recursive:   cfg.Recursive,
 		}
-		var lwErr error
-		lw, lwErr = manifest.NewLedgerWriter(dirA, header)
+		rawLW, lwErr := manifest.NewLedgerWriter(dirA, header)
 		if lwErr != nil {
 			_, _ = fmt.Fprintf(out, "WARNING: could not open ledger in %s: %v\n", dirA, lwErr)
-			// lw stays nil — processing continues without a ledger.
+			// slw stays nil — processing continues without a ledger.
+		} else {
+			slw = manifest.NewSafeLedgerWriter(rawLW, out)
 		}
 	}
 
@@ -203,15 +202,15 @@ func Run(opts SortOptions) (SortResult, error) {
 	// ------------------------------------------------------------------
 	var result SortResult
 	if cfg.Workers > 1 {
-		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
+		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw)
 	} else {
-		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
+		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw)
 	}
 
 	// ------------------------------------------------------------------
 	// 6. Finalise: close ledger, mark run complete in DB.
 	// ------------------------------------------------------------------
-	if err := lw.Close(); err != nil {
+	if err := slw.Close(); err != nil {
 		_, _ = fmt.Fprintf(out, "WARNING: could not close ledger: %v\n", err)
 	}
 	if db != nil {
@@ -240,7 +239,7 @@ func Run(opts SortOptions) (SortResult, error) {
 // runSequential processes all discovered files one at a time.
 func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.LedgerWriter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter) SortResult {
 
 	var result SortResult
 	db := opts.DB
@@ -251,7 +250,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
 	for _, sf := range skipped {
 		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
-		_ = lw.WriteEntry(domain.LedgerEntry{
+		lw.WriteEntry(domain.LedgerEntry{
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
 			Reason: sf.Reason,
@@ -299,7 +298,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			if processed {
 				const reason = "previously imported"
 				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
-				_ = lw.WriteEntry(domain.LedgerEntry{
+				lw.WriteEntry(domain.LedgerEntry{
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
 					Reason: reason,
@@ -331,7 +330,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 				_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
 			}
 			_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, err.Error()))
-			_ = lw.WriteEntry(domain.LedgerEntry{
+			lw.WriteEntry(domain.LedgerEntry{
 				Path:   df.RelPath,
 				Status: domain.LedgerStatusError,
 				Reason: err.Error(),
@@ -377,7 +376,7 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			if db == nil {
 				memSeen[le.Checksum] = le.Destination
 			}
-			_ = lw.WriteEntry(*le)
+			lw.WriteEntry(*le)
 		}
 	}
 
@@ -700,32 +699,13 @@ func emitSidecarLines(out io.Writer, sidecars []discovery.SidecarFile, parentRel
 	}
 }
 
-// resolveTags renders the Copyright template and returns a MetadataTags value.
+// resolveTags renders the Copyright placeholder and returns a MetadataTags value.
 func resolveTags(cfg *config.AppConfig, captureDate time.Time) domain.MetadataTags {
 	tags := domain.MetadataTags{
 		CameraOwner: cfg.CameraOwner,
 	}
 	if cfg.Copyright != "" {
-		tags.Copyright = renderCopyright(cfg.Copyright, captureDate)
+		tags.Copyright = tagging.RenderCopyright(cfg.Copyright, captureDate)
 	}
 	return tags
-}
-
-// copyrightData is the template context for Copyright rendering.
-type copyrightData struct {
-	Year int
-}
-
-// renderCopyright executes the copyright template string with the capture year.
-// On template error the raw string is returned unchanged.
-func renderCopyright(tmplStr string, date time.Time) string {
-	tmpl, err := template.New("copyright").Parse(tmplStr)
-	if err != nil {
-		return tmplStr
-	}
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, copyrightData{Year: date.Year()}); err != nil {
-		return tmplStr
-	}
-	return buf.String()
 }

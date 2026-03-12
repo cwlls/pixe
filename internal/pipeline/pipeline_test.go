@@ -32,6 +32,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
+	"github.com/cwlls/pixe-go/internal/tagging"
 )
 
 // TestMain pins the locale to English so that month directory assertions are
@@ -1329,9 +1330,9 @@ func TestRenderCopyright(t *testing.T) {
 	}
 	for _, tc := range cases {
 		date := time.Date(tc.year, 1, 1, 0, 0, 0, 0, time.UTC)
-		got := renderCopyright(tc.tmpl, date)
+		got := tagging.RenderCopyright(tc.tmpl, date)
 		if got != tc.want {
-			t.Errorf("renderCopyright(%q, %d) = %q, want %q", tc.tmpl, tc.year, got, tc.want)
+			t.Errorf("tagging.RenderCopyright(%q, %d) = %q, want %q", tc.tmpl, tc.year, got, tc.want)
 		}
 	}
 }
