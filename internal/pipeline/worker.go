@@ -86,8 +86,9 @@ type workerFinalResult struct {
 	isDuplicate           bool
 	existingDestForLedger string
 	verifiedAt            time.Time
-	skipCopy              bool     // true when the worker skipped I/O due to --skip-duplicates
-	carriedSidecarRels    []string // dest_rel paths of successfully carried sidecars
+	captureDate           time.Time // used by coordinator to resolve copyright year in sidecar lines
+	skipCopy              bool      // true when the worker skipped I/O due to --skip-duplicates
+	carriedSidecarRels    []string  // dest_rel paths of successfully carried sidecars
 	err                   error
 }
 
@@ -114,7 +115,7 @@ type workerFinalResult struct {
 //	  - send final result to doneCh
 func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.LedgerWriter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter) SortResult {
 
 	ctx := context.Background()
 	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw)
@@ -123,7 +124,7 @@ func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
 // runConcurrentCtx is the context-aware implementation, used by tests.
 func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.LedgerWriter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter) SortResult {
 
 	// Wrap out in a mutex so concurrent workers don't race on writes.
 	sw := &syncWriter{w: out}
@@ -140,7 +141,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 	// --- Emit SKIP lines for discovery-phase skips (unsupported, dotfiles, etc.) ---
 	for _, sf := range skipped {
 		_, _ = fmt.Fprint(out, formatOutput("SKIP", sf.Path, sf.Reason))
-		_ = lw.WriteEntry(domain.LedgerEntry{
+		lw.WriteEntry(domain.LedgerEntry{
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
 			Reason: sf.Reason,
@@ -187,7 +188,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if processed {
 				const reason = "previously imported"
 				_, _ = fmt.Fprint(out, formatOutput("SKIP", df.RelPath, reason))
-				_ = lw.WriteEntry(domain.LedgerEntry{
+				lw.WriteEntry(domain.LedgerEntry{
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
 					Reason: reason,
@@ -267,7 +268,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				}
 				result.Errors++
 				_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, wr.err.Error()))
-				_ = lw.WriteEntry(domain.LedgerEntry{
+				lw.WriteEntry(domain.LedgerEntry{
 					Path:   wr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: wr.err.Error(),
@@ -293,7 +294,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					_ = db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error()))
 					result.Errors++
 					_, _ = fmt.Fprint(out, formatOutput("ERR ", wr.df.RelPath, err.Error()))
-					_ = lw.WriteEntry(domain.LedgerEntry{
+					lw.WriteEntry(domain.LedgerEntry{
 						Path:   wr.df.RelPath,
 						Status: domain.LedgerStatusError,
 						Reason: err.Error(),
@@ -336,7 +337,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if fr.err != nil {
 				result.Errors++
 				_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, fr.err.Error()))
-				_ = lw.WriteEntry(domain.LedgerEntry{
+				lw.WriteEntry(domain.LedgerEntry{
 					Path:   fr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: fr.err.Error(),
@@ -361,7 +362,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				matchDetail := fr.existingDestForLedger
 				_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
 					fmt.Sprintf("matches %s", matchDetail)))
-				_ = lw.WriteEntry(domain.LedgerEntry{
+				lw.WriteEntry(domain.LedgerEntry{
 					Path:     fr.df.RelPath,
 					Status:   domain.LedgerStatusDuplicate,
 					Checksum: fr.checksum,
@@ -396,7 +397,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							result.Errors++
 							errMsg := fmt.Sprintf("dedup check: %v", dedupErr)
 							_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
-							_ = lw.WriteEntry(domain.LedgerEntry{
+							lw.WriteEntry(domain.LedgerEntry{
 								Path:   fr.df.RelPath,
 								Status: domain.LedgerStatusError,
 								Reason: errMsg,
@@ -416,7 +417,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 								result.Errors++
 								errMsg := fmt.Sprintf("relocate duplicate: %v", renErr)
 								_, _ = fmt.Fprint(out, formatOutput("ERR ", fr.df.RelPath, errMsg))
-								_ = lw.WriteEntry(domain.LedgerEntry{
+								lw.WriteEntry(domain.LedgerEntry{
 									Path:   fr.df.RelPath,
 									Status: domain.LedgerStatusError,
 									Reason: errMsg,
@@ -456,8 +457,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					}
 					_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
 						fmt.Sprintf("matches %s", matchDetail)))
-					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, time.Time{}), opts.Config)
-					_ = lw.WriteEntry(domain.LedgerEntry{
+					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
+					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusDuplicate,
 						Checksum:    fr.checksum,
@@ -477,8 +478,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					})
 				} else {
 					_, _ = fmt.Fprint(out, formatOutput("COPY", fr.df.RelPath, finalRelDest))
-					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, time.Time{}), opts.Config)
-					_ = lw.WriteEntry(domain.LedgerEntry{
+					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
+					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusCopy,
 						Checksum:    fr.checksum,
@@ -539,6 +540,12 @@ func runWorker(ctx context.Context, id int,
 				resultCh <- workResult{df: item.df, fileID: item.fileID, workerID: id, err: err}
 				continue
 			}
+			// Best-effort intermediate status update. Workers write intermediate
+			// states (extracted, hashed, copied, verified) directly to the DB;
+			// the coordinator owns terminal states (complete, failed, skipped).
+			// Errors are intentionally discarded — intermediate tracking is
+			// observational and not required for pipeline correctness. The SQLite
+			// busy timeout (5 s) handles contention from concurrent workers.
 			if db != nil {
 				_ = db.UpdateFileStatus(item.fileID, "extracted",
 					archivedb.WithCaptureDate(captureDate))
@@ -603,6 +610,7 @@ func runWorker(ctx context.Context, id int,
 					relDest:               assign.relDest,
 					isDuplicate:           true,
 					existingDestForLedger: assign.existingDestForLedger,
+					captureDate:           captureDate,
 					skipCopy:              true,
 				}
 				continue
@@ -622,6 +630,7 @@ func runWorker(ctx context.Context, id int,
 					checksum: checksum, relDest: assign.relDest,
 					isDuplicate:           assign.isDuplicate,
 					existingDestForLedger: assign.existingDestForLedger,
+					captureDate:           captureDate,
 					verifiedAt:            time.Now().UTC(),
 				}
 				continue
@@ -773,6 +782,7 @@ func runWorker(ctx context.Context, id int,
 				relDest:               assign.relDest,
 				isDuplicate:           assign.isDuplicate,
 				existingDestForLedger: assign.existingDestForLedger,
+				captureDate:           captureDate,
 				verifiedAt:            verifiedAt,
 				carriedSidecarRels:    carriedSidecarRels,
 			}

@@ -34,8 +34,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/cwlls/pixe-go/internal/domain"
 )
@@ -179,6 +181,52 @@ func (lw *LedgerWriter) Close() error {
 		return nil
 	}
 	return lw.f.Close()
+}
+
+// SafeLedgerWriter wraps a LedgerWriter and tracks write health.
+// On the first write error it logs a single warning to the provided io.Writer
+// and suppresses subsequent per-entry warnings. Ledger failure is non-fatal —
+// the archive database is the primary record; the ledger is the user-facing
+// audit trail.
+//
+// SafeLedgerWriter is safe for concurrent use from multiple goroutines.
+type SafeLedgerWriter struct {
+	lw     *LedgerWriter
+	out    io.Writer
+	mu     sync.Mutex
+	failed bool
+}
+
+// NewSafeLedgerWriter wraps lw with first-failure error tracking. Warnings
+// are written to out. If lw is nil (dry-run mode) all writes are no-ops.
+func NewSafeLedgerWriter(lw *LedgerWriter, out io.Writer) *SafeLedgerWriter {
+	return &SafeLedgerWriter{lw: lw, out: out}
+}
+
+// WriteEntry delegates to the underlying LedgerWriter. On the first error,
+// a warning is printed to out. Subsequent errors are silently absorbed.
+func (sw *SafeLedgerWriter) WriteEntry(entry domain.LedgerEntry) {
+	if sw == nil || sw.lw == nil {
+		return
+	}
+	if err := sw.lw.WriteEntry(entry); err != nil {
+		sw.mu.Lock()
+		defer sw.mu.Unlock()
+		if !sw.failed {
+			sw.failed = true
+			_, _ = fmt.Fprintf(sw.out,
+				"WARNING: ledger write failed (further warnings suppressed): %v\n", err)
+		}
+	}
+}
+
+// Close flushes and closes the underlying LedgerWriter.
+// If sw is nil the call is a no-op and returns nil.
+func (sw *SafeLedgerWriter) Close() error {
+	if sw == nil || sw.lw == nil {
+		return nil
+	}
+	return sw.lw.Close()
 }
 
 // atomicWriteJSON marshals v to indented JSON and writes it to target
