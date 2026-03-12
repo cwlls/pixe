@@ -16,6 +16,7 @@ package archivedb
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,35 +24,37 @@ import (
 
 // FileRecord represents a row in the files table.
 type FileRecord struct {
-	ID          int64
-	RunID       string
-	SourcePath  string
-	DestPath    *string // nil until copied
-	DestRel     *string // nil until copied
-	Checksum    *string // nil until hashed
-	Status      string
-	IsDuplicate bool
-	CaptureDate *time.Time
-	FileSize    *int64
-	ExtractedAt *time.Time
-	HashedAt    *time.Time
-	CopiedAt    *time.Time
-	VerifiedAt  *time.Time
-	TaggedAt    *time.Time
-	Error       *string
-	SkipReason  *string // non-nil when status = "skipped"
+	ID              int64
+	RunID           string
+	SourcePath      string
+	DestPath        *string // nil until copied
+	DestRel         *string // nil until copied
+	Checksum        *string // nil until hashed
+	Status          string
+	IsDuplicate     bool
+	CaptureDate     *time.Time
+	FileSize        *int64
+	ExtractedAt     *time.Time
+	HashedAt        *time.Time
+	CopiedAt        *time.Time
+	VerifiedAt      *time.Time
+	TaggedAt        *time.Time
+	Error           *string
+	SkipReason      *string // non-nil when status = "skipped"
+	CarriedSidecars *string // JSON array of sidecar dest_rel paths, or nil
 }
 
 // updateParams holds the optional fields that can be set during a status update.
 type updateParams struct {
-	checksum    *string
-	destPath    *string
-	destRel     *string
-	captureDate *time.Time
-	fileSize    *int64
-	errMsg      *string
-	isDuplicate *bool
-	skipReason  *string
+	checksum        *string
+	destPath        *string
+	destRel         *string
+	captureDate     *time.Time
+	fileSize        *int64
+	errMsg          *string
+	isDuplicate     *bool
+	skipReason      *string
+	carriedSidecars *string
 }
 
 // UpdateOption configures optional fields on a file status update.
@@ -93,6 +96,20 @@ func WithIsDuplicate(dup bool) UpdateOption {
 // WithSkipReason sets the skip_reason field on a file status update.
 func WithSkipReason(reason string) UpdateOption {
 	return func(p *updateParams) { p.skipReason = &reason }
+}
+
+// WithCarriedSidecars sets the carried_sidecars field on a file status update.
+// paths is the list of sidecar destination relative paths. When empty, the
+// field is left unchanged (no update is emitted).
+func WithCarriedSidecars(paths []string) UpdateOption {
+	return func(p *updateParams) {
+		if len(paths) == 0 {
+			return
+		}
+		data, _ := json.Marshal(paths)
+		s := string(data)
+		p.carriedSidecars = &s
+	}
 }
 
 // InsertFile creates a new file record with status "pending".
@@ -229,6 +246,10 @@ func (db *DB) UpdateFileStatus(fileID int64, status string, opts ...UpdateOption
 		setClauses = append(setClauses, "skip_reason = ?")
 		args = append(args, *p.skipReason)
 	}
+	if p.carriedSidecars != nil {
+		setClauses = append(setClauses, "carried_sidecars = ?")
+		args = append(args, *p.carriedSidecars)
+	}
 
 	args = append(args, fileID)
 	q := fmt.Sprintf("UPDATE files SET %s WHERE id = ?", strings.Join(setClauses, ", "))
@@ -347,7 +368,7 @@ func (db *DB) GetFilesByRun(runID string) ([]*FileRecord, error) {
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
-		       skip_reason
+		       skip_reason, carried_sidecars
 		FROM files WHERE run_id = ?
 		ORDER BY id`
 
@@ -368,7 +389,7 @@ func (db *DB) GetIncompleteFiles(runID string) ([]*FileRecord, error) {
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
-		       skip_reason
+		       skip_reason, carried_sidecars
 		FROM files
 		WHERE run_id = ?
 		  AND status NOT IN ('complete', 'failed', 'mismatch', 'tag_failed', 'duplicate', 'skipped')
@@ -405,7 +426,7 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 	var destPath, destRel, checksum, captureDate sql.NullString
 	var fileSize sql.NullInt64
 	var extractedAt, hashedAt, copiedAt, verifiedAt, taggedAt sql.NullString
-	var errMsg, skipReason sql.NullString
+	var errMsg, skipReason, carriedSidecars sql.NullString
 	var isDupInt int
 
 	err := s.Scan(
@@ -426,6 +447,7 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 		&taggedAt,
 		&errMsg,
 		&skipReason,
+		&carriedSidecars,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("archivedb: scan file row: %w", err)
@@ -450,6 +472,9 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 	}
 	if skipReason.Valid {
 		f.SkipReason = &skipReason.String
+	}
+	if carriedSidecars.Valid {
+		f.CarriedSidecars = &carriedSidecars.String
 	}
 
 	parseOptTime := func(ns sql.NullString, fieldName string) (*time.Time, error) {

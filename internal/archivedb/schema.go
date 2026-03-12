@@ -21,7 +21,7 @@ import (
 )
 
 // schemaVersion is the current schema version.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // schemaDDL contains all CREATE TABLE and CREATE INDEX statements.
 // Every statement uses IF NOT EXISTS so the function is idempotent.
@@ -60,15 +60,16 @@ CREATE TABLE IF NOT EXISTS files (
             'failed', 'mismatch', 'tag_failed', 'duplicate',
             'skipped'
         )),
-    is_duplicate  INTEGER NOT NULL DEFAULT 0,
-    capture_date  TEXT,
-    file_size     INTEGER,
-    extracted_at  TEXT,
-    hashed_at     TEXT,
-    copied_at     TEXT,
-    verified_at   TEXT,
-    tagged_at     TEXT,
-    error         TEXT
+    is_duplicate      INTEGER NOT NULL DEFAULT 0,
+    capture_date      TEXT,
+    file_size         INTEGER,
+    extracted_at      TEXT,
+    hashed_at         TEXT,
+    copied_at         TEXT,
+    verified_at       TEXT,
+    tagged_at         TEXT,
+    error             TEXT,
+    carried_sidecars  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_checksum ON files(checksum) WHERE status = 'complete';
@@ -159,6 +160,24 @@ func (db *DB) migrateSchema() error {
 		_, _ = db.conn.Exec(
 			`INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)`,
 			2, time.Now().UTC().Format(time.RFC3339),
+		)
+	}
+
+	// v2 → v3: add carried_sidecars to files.
+	if currentVersion < 3 {
+		migrations := []string{
+			`ALTER TABLE files ADD COLUMN carried_sidecars TEXT`,
+		}
+		for _, m := range migrations {
+			if _, err := db.conn.Exec(m); err != nil {
+				if !strings.Contains(err.Error(), "duplicate column") {
+					return fmt.Errorf("archivedb: migrate v2→v3: %w", err)
+				}
+			}
+		}
+		_, _ = db.conn.Exec(
+			`INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)`,
+			3, time.Now().UTC().Format(time.RFC3339),
 		)
 	}
 

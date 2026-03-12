@@ -123,8 +123,9 @@ func Run(opts SortOptions) (SortResult, error) {
 	// 2. Walk dirA.
 	// ------------------------------------------------------------------
 	walkOpts := discovery.WalkOptions{
-		Recursive: cfg.Recursive,
-		Ignore:    ignore.New(cfg.Ignore),
+		Recursive:     cfg.Recursive,
+		Ignore:        ignore.New(cfg.Ignore),
+		CarrySidecars: cfg.CarrySidecars,
 	}
 	discovered, skipped, err := discovery.Walk(dirA, opts.Registry, walkOpts)
 	if err != nil {
@@ -375,6 +376,9 @@ func processFile(
 
 	if cfg.DryRun {
 		_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, relDest)
+		// Emit sidecar association lines even in dry-run (no files copied).
+		dryTags := resolveTags(cfg, captureDate)
+		emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg)
 		if db != nil {
 			_ = db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithDestination(absDest, relDest),
@@ -418,10 +422,28 @@ func processFile(
 		_ = db.UpdateFileStatus(fileID, "verified")
 	}
 
+	// --- Carry sidecars (after verify, before tag) ---
+	var carriedSidecarRels []string // dest_rel paths of successfully carried sidecars
+	var carriedXMPAbs string        // absolute dest path of carried .xmp (for tag merge)
+	if cfg.CarrySidecars && len(df.Sidecars) > 0 {
+		for _, sc := range df.Sidecars {
+			sidecarDest := absDest + sc.Ext
+			sidecarRel := relDest + sc.Ext
+			if err := copypkg.CopySidecar(sc.Path, sidecarDest); err != nil {
+				_, _ = fmt.Fprintf(out, "  WARNING  sidecar carry failed for %s: %v\n", sc.RelPath, err)
+				continue
+			}
+			carriedSidecarRels = append(carriedSidecarRels, sidecarRel)
+			if sc.Ext == ".xmp" {
+				carriedXMPAbs = sidecarDest
+			}
+		}
+	}
+
 	// --- Tag (optional) ---
 	tags := resolveTags(cfg, captureDate)
 	if !tags.IsEmpty() {
-		if err := tagging.Apply(absDest, df.Handler, tags); err != nil {
+		if err := tagging.ApplyWithSidecars(absDest, df.Handler, tags, carriedXMPAbs, cfg.OverwriteSidecarTags); err != nil {
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "tag_failed", archivedb.WithError(err.Error()))
 			}
@@ -440,7 +462,8 @@ func processFile(
 			// Pre-copy dedup already determined this is a duplicate.
 			// No race check needed — just mark complete.
 			_ = db.UpdateFileStatus(fileID, "complete",
-				archivedb.WithIsDuplicate(true))
+				archivedb.WithIsDuplicate(true),
+				archivedb.WithCarriedSidecars(carriedSidecarRels))
 		} else {
 			// Atomically check for a cross-process race: another pixe process may
 			// have completed the same checksum while we were copying.
@@ -461,13 +484,19 @@ func processFile(
 				// Update DB record with the new duplicate destination.
 				_ = db.UpdateFileStatus(fileID, "complete",
 					archivedb.WithDestination(dupAbsDest, dupRelDest),
-					archivedb.WithIsDuplicate(true))
+					archivedb.WithIsDuplicate(true),
+					archivedb.WithCarriedSidecars(carriedSidecarRels))
 				relDest = dupRelDest
 				isDuplicate = true
 				existingDestForLedger = existingDest
+			} else {
+				// Non-race path: CompleteFileWithDedupCheck set status='complete'.
+				// Update carried_sidecars if any were carried.
+				if len(carriedSidecarRels) > 0 {
+					_ = db.UpdateFileStatus(fileID, "complete",
+						archivedb.WithCarriedSidecars(carriedSidecarRels))
+				}
 			}
-			// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
-			// No further DB update needed for the non-race path.
 		}
 	}
 
@@ -479,8 +508,10 @@ func processFile(
 		}
 		_, _ = fmt.Fprint(out, formatOutput("DUPE", df.RelPath,
 			fmt.Sprintf("matches %s", matchDetail)))
+		emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
 	} else {
 		_, _ = fmt.Fprint(out, formatOutput("COPY", df.RelPath, relDest))
+		emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
 	}
 
 	// Build ledger entry.
@@ -490,6 +521,7 @@ func processFile(
 			Status:      domain.LedgerStatusDuplicate,
 			Checksum:    checksum,
 			Destination: relDest,
+			Sidecars:    carriedSidecarRels,
 			Matches:     existingDestForLedger,
 		}
 		return le, true, nil
@@ -501,8 +533,25 @@ func processFile(
 		Checksum:    checksum,
 		Destination: relDest,
 		VerifiedAt:  &verifiedAt,
+		Sidecars:    carriedSidecarRels,
 	}
 	return le, false, nil
+}
+
+// emitSidecarLines writes +sidecar output lines for each sidecar associated
+// with a discovered file. Called after the parent COPY/DUPE line is emitted.
+func emitSidecarLines(out io.Writer, sidecars []discovery.SidecarFile, parentRelDest string, tags domain.MetadataTags, cfg *config.AppConfig) {
+	if !cfg.CarrySidecars || len(sidecars) == 0 {
+		return
+	}
+	for _, sc := range sidecars {
+		sidecarRel := parentRelDest + sc.Ext
+		suffix := ""
+		if sc.Ext == ".xmp" && !tags.IsEmpty() {
+			suffix = " (merge tags)"
+		}
+		_, _ = fmt.Fprintf(out, "     +sidecar %s -> %s%s\n", sc.RelPath, sidecarRel, suffix)
+	}
 }
 
 // resolveTags renders the Copyright template and returns a MetadataTags value.

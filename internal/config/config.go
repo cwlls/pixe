@@ -68,4 +68,16 @@ type AppConfig struct {
 	// is always ignored regardless of this list — that is handled in the
 	// ignore package, not here.
 	Ignore []string
+
+	// CarrySidecars controls whether pre-existing sidecar files (.aae, .xmp)
+	// in dirA are carried alongside their parent media file to dirB.
+	// Default is true (enabled). Set to false via --no-carry-sidecars.
+	CarrySidecars bool
+
+	// OverwriteSidecarTags controls the merge behaviour when Pixe injects
+	// metadata tags into a carried .xmp sidecar that already contains those
+	// fields. When false (default), existing values in the source .xmp are
+	// preserved (source is authoritative). When true, Pixe's configured
+	// --copyright and --camera-owner values replace existing values.
+	OverwriteSidecarTags bool
 }

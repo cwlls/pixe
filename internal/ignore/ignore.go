@@ -85,7 +85,7 @@ func (m *Matcher) PushScope(basePath, pixeignorePath string) bool {
 	if err != nil {
 		return false // file not found or unreadable — not an error
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var patterns []string
 	scanner := bufio.NewScanner(f)

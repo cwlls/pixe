@@ -85,7 +85,8 @@ type workerFinalResult struct {
 	isDuplicate           bool
 	existingDestForLedger string
 	verifiedAt            time.Time
-	skipCopy              bool // true when the worker skipped I/O due to --skip-duplicates
+	skipCopy              bool     // true when the worker skipped I/O due to --skip-duplicates
+	carriedSidecarRels    []string // dest_rel paths of successfully carried sidecars
 	err                   error
 }
 
@@ -332,12 +333,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				finalRelDest := fr.relDest
 				finalIsDup := fr.isDuplicate
 				finalExistingDest := fr.existingDestForLedger
+				finalSidecars := fr.carriedSidecarRels
 
 				if db != nil {
 					if finalIsDup {
 						// Pre-copy dedup — just mark complete.
 						_ = db.UpdateFileStatus(fr.fileID, "complete",
-							archivedb.WithIsDuplicate(true))
+							archivedb.WithIsDuplicate(true),
+							archivedb.WithCarriedSidecars(finalSidecars))
 					} else {
 						// Atomic post-copy dedup re-check to handle cross-process races.
 						existingDest, dedupErr := db.CompleteFileWithDedupCheck(fr.fileID, fr.checksum)
@@ -375,10 +378,17 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							}
 							_ = db.UpdateFileStatus(fr.fileID, "complete",
 								archivedb.WithDestination(dupAbsDest, dupRelDest),
-								archivedb.WithIsDuplicate(true))
+								archivedb.WithIsDuplicate(true),
+								archivedb.WithCarriedSidecars(finalSidecars))
 							finalRelDest = dupRelDest
 							finalIsDup = true
 							finalExistingDest = existingDest
+						} else {
+							// Non-race path: update carried_sidecars if any.
+							if len(finalSidecars) > 0 {
+								_ = db.UpdateFileStatus(fr.fileID, "complete",
+									archivedb.WithCarriedSidecars(finalSidecars))
+							}
 						}
 						// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
 					}
@@ -398,21 +408,25 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					}
 					_, _ = fmt.Fprint(out, formatOutput("DUPE", fr.df.RelPath,
 						fmt.Sprintf("matches %s", matchDetail)))
+					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, time.Time{}), opts.Config)
 					_ = lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusDuplicate,
 						Checksum:    fr.checksum,
 						Destination: finalRelDest,
+						Sidecars:    finalSidecars,
 						Matches:     finalExistingDest,
 					})
 				} else {
 					_, _ = fmt.Fprint(out, formatOutput("COPY", fr.df.RelPath, finalRelDest))
+					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, time.Time{}), opts.Config)
 					_ = lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusCopy,
 						Checksum:    fr.checksum,
 						Destination: finalRelDest,
 						VerifiedAt:  &fr.verifiedAt,
+						Sidecars:    finalSidecars,
 					})
 				}
 			}
@@ -512,6 +526,8 @@ func runWorker(ctx context.Context, id int,
 
 			if opts.Config.DryRun {
 				_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, assign.relDest)
+				dryTags := resolveTags(opts.Config, captureDate)
+				emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config)
 				if db != nil {
 					_ = db.UpdateFileStatus(item.fileID, "complete",
 						archivedb.WithDestination(assign.absDest, assign.relDest),
@@ -597,10 +613,29 @@ func runWorker(ctx context.Context, id int,
 				_ = db.UpdateFileStatus(item.fileID, "verified")
 			}
 
+			// --- Carry sidecars (after verify, before tag) ---
+			var carriedSidecarRels []string
+			var carriedXMPAbs string
+			if opts.Config.CarrySidecars && len(item.df.Sidecars) > 0 {
+				for _, sc := range item.df.Sidecars {
+					sidecarDest := assign.absDest + sc.Ext
+					sidecarRel := assign.relDest + sc.Ext
+					if err := copypkg.CopySidecar(sc.Path, sidecarDest); err != nil {
+						_, _ = fmt.Fprintf(out, "  WARNING  sidecar carry failed for %s: %v\n",
+							sc.RelPath, err)
+						continue
+					}
+					carriedSidecarRels = append(carriedSidecarRels, sidecarRel)
+					if sc.Ext == ".xmp" {
+						carriedXMPAbs = sidecarDest
+					}
+				}
+			}
+
 			// --- Tag ---
 			tags := resolveTags(opts.Config, captureDate)
 			if !tags.IsEmpty() {
-				if err := tagging.Apply(assign.absDest, item.df.Handler, tags); err != nil {
+				if err := tagging.ApplyWithSidecars(assign.absDest, item.df.Handler, tags, carriedXMPAbs, opts.Config.OverwriteSidecarTags); err != nil {
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tag_failed", archivedb.WithError(err.Error()))
 					}
@@ -621,6 +656,7 @@ func runWorker(ctx context.Context, id int,
 				isDuplicate:           assign.isDuplicate,
 				existingDestForLedger: assign.existingDestForLedger,
 				verifiedAt:            verifiedAt,
+				carriedSidecarRels:    carriedSidecarRels,
 			}
 		}
 	}

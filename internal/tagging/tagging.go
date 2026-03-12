@@ -72,7 +72,26 @@ func RenderCopyright(tmplStr string, date time.Time) string {
 //   - MetadataNone:    no-op, returns nil
 //
 // Returns nil immediately when tags.IsEmpty().
+// Apply is a convenience wrapper around ApplyWithSidecars with no carried XMP.
 func Apply(destPath string, handler domain.FileTypeHandler, tags domain.MetadataTags) error {
+	return ApplyWithSidecars(destPath, handler, tags, "", false)
+}
+
+// ApplyWithSidecars persists metadata tags, accounting for a carried source
+// .xmp sidecar. When carriedXMP is non-empty and the handler declares
+// MetadataSidecar, Pixe merges tags into the existing carried sidecar instead
+// of generating a new one from the template.
+//
+//   - MetadataEmbed:   calls handler.WriteMetadataTags (carriedXMP is ignored)
+//   - MetadataSidecar: merges into carriedXMP if non-empty; otherwise generates
+//     a new XMP sidecar via xmp.WriteSidecar
+//   - MetadataNone:    no-op, returns nil
+//
+// overwrite controls the merge behaviour: when false (default), existing values
+// in the source .xmp are preserved; when true, Pixe's values replace them.
+//
+// Returns nil immediately when tags.IsEmpty().
+func ApplyWithSidecars(destPath string, handler domain.FileTypeHandler, tags domain.MetadataTags, carriedXMP string, overwrite bool) error {
 	if tags.IsEmpty() {
 		return nil
 	}
@@ -82,8 +101,16 @@ func Apply(destPath string, handler domain.FileTypeHandler, tags domain.Metadata
 			return fmt.Errorf("tagging: embed metadata in %q: %w", destPath, err)
 		}
 	case domain.MetadataSidecar:
-		if err := xmp.WriteSidecar(destPath, tags); err != nil {
-			return fmt.Errorf("tagging: write sidecar for %q: %w", destPath, err)
+		if carriedXMP != "" {
+			// Merge into the carried source .xmp sidecar.
+			if err := xmp.MergeTags(carriedXMP, tags, overwrite); err != nil {
+				return fmt.Errorf("tagging: merge tags into carried sidecar %q: %w", carriedXMP, err)
+			}
+		} else {
+			// No carried sidecar — generate from template (existing behaviour).
+			if err := xmp.WriteSidecar(destPath, tags); err != nil {
+				return fmt.Errorf("tagging: write sidecar for %q: %w", destPath, err)
+			}
 		}
 	case domain.MetadataNone:
 		// No tagging for this format.

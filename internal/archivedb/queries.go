@@ -105,7 +105,7 @@ func (db *DB) FilesBySource(sourceDir string) ([]*FileRecord, error) {
 		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum,
 		       f.status, f.is_duplicate, f.capture_date, f.file_size,
 		       f.extracted_at, f.hashed_at, f.copied_at, f.verified_at, f.tagged_at, f.error,
-		       f.skip_reason
+		       f.skip_reason, f.carried_sidecars
 		FROM files f
 		JOIN runs r ON r.id = f.run_id
 		WHERE r.source = ?
@@ -127,7 +127,7 @@ func (db *DB) FilesByCaptureDateRange(start, end time.Time) ([]*FileRecord, erro
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
-		       skip_reason
+		       skip_reason, carried_sidecars
 		FROM files
 		WHERE status = 'complete'
 		  AND capture_date IS NOT NULL
@@ -154,7 +154,7 @@ func (db *DB) FilesByImportDateRange(start, end time.Time) ([]*FileRecord, error
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
-		       skip_reason
+		       skip_reason, carried_sidecars
 		FROM files
 		WHERE verified_at IS NOT NULL
 		  AND verified_at >= ?
@@ -181,7 +181,7 @@ func (db *DB) FilesWithErrors() ([]*FileWithSource, error) {
 		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum,
 		       f.status, f.is_duplicate, f.capture_date, f.file_size,
 		       f.extracted_at, f.hashed_at, f.copied_at, f.verified_at, f.tagged_at, f.error,
-		       f.skip_reason,
+		       f.skip_reason, f.carried_sidecars,
 		       r.source AS run_source
 		FROM files f
 		JOIN runs r ON r.id = f.run_id
@@ -214,7 +214,7 @@ func (db *DB) AllDuplicates() ([]*FileRecord, error) {
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
-		       skip_reason
+		       skip_reason, carried_sidecars
 		FROM files
 		WHERE is_duplicate = 1
 		ORDER BY id`
@@ -303,7 +303,7 @@ func (db *DB) AllSkipped() ([]*FileRecord, error) {
 		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
-		       skip_reason
+		       skip_reason, carried_sidecars
 		FROM files
 		WHERE status = 'skipped'
 		ORDER BY id`
@@ -481,7 +481,7 @@ func scanFileWithSource(rows *sql.Rows) (*FileWithSource, error) {
 	var destPath, destRel, checksum, captureDate sql.NullString
 	var fileSize sql.NullInt64
 	var extractedAt, hashedAt, copiedAt, verifiedAt, taggedAt sql.NullString
-	var errMsg, skipReason sql.NullString
+	var errMsg, skipReason, carriedSidecars sql.NullString
 	var isDupInt int
 
 	if err := rows.Scan(
@@ -502,6 +502,7 @@ func scanFileWithSource(rows *sql.Rows) (*FileWithSource, error) {
 		&taggedAt,
 		&errMsg,
 		&skipReason,
+		&carriedSidecars,
 		&fws.RunSource,
 	); err != nil {
 		return nil, fmt.Errorf("archivedb: scan file with source: %w", err)
@@ -526,6 +527,9 @@ func scanFileWithSource(rows *sql.Rows) (*FileWithSource, error) {
 	}
 	if skipReason.Valid {
 		f.SkipReason = &skipReason.String
+	}
+	if carriedSidecars.Valid {
+		f.CarriedSidecars = &carriedSidecars.String
 	}
 
 	parseOptTime := func(ns sql.NullString, fieldName string) (*time.Time, error) {

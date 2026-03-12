@@ -1601,7 +1601,7 @@ func TestMigrateSchema_v1ToV2_filesColumn(t *testing.T) {
 }
 
 // TestMigrateSchema_v1ToV2_schemaVersionRow verifies that after migration
-// the schema_version table has a row with version=2.
+// the schema_version table has a row with the current schema version (3).
 func TestMigrateSchema_v1ToV2_schemaVersionRow(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "v1ver.db")
@@ -1619,8 +1619,8 @@ func TestMigrateSchema_v1ToV2_schemaVersionRow(t *testing.T) {
 	if err := db.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if maxVersion != 2 {
-		t.Errorf("MAX(version) = %d, want 2", maxVersion)
+	if maxVersion != 3 {
+		t.Errorf("MAX(version) = %d, want 3", maxVersion)
 	}
 }
 
@@ -1684,7 +1684,7 @@ func TestMigrateSchema_v1ToV2_idempotent(t *testing.T) {
 	}
 	_ = db1.Close()
 
-	// Second open — already at v2, should be a no-op.
+	// Second open — already at v3, should be a no-op.
 	db2, err := Open(path)
 	if err != nil {
 		t.Fatalf("second Open (idempotent): %v", err)
@@ -1695,8 +1695,8 @@ func TestMigrateSchema_v1ToV2_idempotent(t *testing.T) {
 	if err := db2.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if maxVersion != 2 {
-		t.Errorf("MAX(version) = %d, want 2 after idempotent open", maxVersion)
+	if maxVersion != 3 {
+		t.Errorf("MAX(version) = %d, want 3 after idempotent open", maxVersion)
 	}
 }
 

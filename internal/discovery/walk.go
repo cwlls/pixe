@@ -26,13 +26,14 @@ import (
 
 // DiscoveredFile pairs a source path with its resolved FileTypeHandler.
 type DiscoveredFile struct {
-	Path    string // absolute path for file I/O
-	RelPath string // relative path from dirA for display and ledger
-	Handler domain.FileTypeHandler
+	Path     string // absolute path for file I/O
+	RelPath  string // relative path from dirA for display and ledger
+	Handler  domain.FileTypeHandler
+	Sidecars []SidecarFile // pre-existing sidecars from dirA (may be empty)
 }
 
 // SkippedFile records a file that could not be classified or was intentionally
-// excluded from processing. Path is relative to dirA.
+// excluded from processing.
 type SkippedFile struct {
 	Path   string // relative path from dirA
 	Reason string // human-readable reason
@@ -49,6 +50,13 @@ type WalkOptions struct {
 	// If nil, only the hardcoded ledger-file exclusion applies (handled inside
 	// the ignore package's zero-value Matcher).
 	Ignore *ignore.Matcher
+
+	// CarrySidecars, when true, causes Walk to perform a second pass after
+	// classification, associating recognized sidecar files (.aae, .xmp) with
+	// their parent media files by stem matching. Matched sidecars are removed
+	// from the skipped list and attached to their parent DiscoveredFile.
+	// When false, sidecars remain in the skipped list as "unsupported format".
+	CarrySidecars bool
 }
 
 // Walk discovers files in dirA, classifies each regular file using the
@@ -180,6 +188,11 @@ func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []Discovered
 		for range scopeStack {
 			opts.Ignore.PopScope()
 		}
+	}
+
+	// Second pass: associate sidecar files with their parent media files.
+	if err == nil && opts.CarrySidecars {
+		discovered, skipped = associateSidecars(discovered, skipped)
 	}
 
 	return discovered, skipped, err

@@ -134,6 +134,7 @@ type LedgerEntry struct {
 	Checksum    string     `json:"checksum,omitempty"`    // hex hash (copy, duplicate)
 	Destination string     `json:"destination,omitempty"` // relative path in dirB (copy, duplicate)
 	VerifiedAt  *time.Time `json:"verified_at,omitempty"` // ISO 8601 UTC (copy only)
+	Sidecars    []string   `json:"sidecars,omitempty"`    // carried sidecar dest_rel paths (copy only)
 	Matches     string     `json:"matches,omitempty"`     // existing file path (duplicate only)
 	Reason      string     `json:"reason,omitempty"`      // explanation (skip, error)
 }

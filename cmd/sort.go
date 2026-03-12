@@ -64,17 +64,19 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// 1. Resolve configuration from Viper (flags > config file > defaults).
 	// ------------------------------------------------------------------
 	cfg := &config.AppConfig{
-		Source:         viper.GetString("source"),
-		Destination:    viper.GetString("dest"),
-		Workers:        viper.GetInt("workers"),
-		Algorithm:      viper.GetString("algorithm"),
-		Copyright:      viper.GetString("copyright"),
-		CameraOwner:    viper.GetString("camera_owner"),
-		DryRun:         viper.GetBool("dry_run"),
-		DBPath:         viper.GetString("db_path"),
-		Recursive:      viper.GetBool("recursive"),
-		SkipDuplicates: viper.GetBool("skip_duplicates"),
-		Ignore:         viper.GetStringSlice("ignore"),
+		Source:               viper.GetString("source"),
+		Destination:          viper.GetString("dest"),
+		Workers:              viper.GetInt("workers"),
+		Algorithm:            viper.GetString("algorithm"),
+		Copyright:            viper.GetString("copyright"),
+		CameraOwner:          viper.GetString("camera_owner"),
+		DryRun:               viper.GetBool("dry_run"),
+		DBPath:               viper.GetString("db_path"),
+		Recursive:            viper.GetBool("recursive"),
+		SkipDuplicates:       viper.GetBool("skip_duplicates"),
+		Ignore:               viper.GetStringSlice("ignore"),
+		CarrySidecars:        !viper.GetBool("no_carry_sidecars"),
+		OverwriteSidecarTags: viper.GetBool("overwrite_sidecar_tags"),
 	}
 
 	// ------------------------------------------------------------------
@@ -209,6 +211,8 @@ func init() {
 	sortCmd.Flags().BoolP("recursive", "r", false, "recursively process subdirectories of --source")
 	sortCmd.Flags().Bool("skip-duplicates", false, "skip copying duplicate files instead of copying to duplicates/ directory")
 	sortCmd.Flags().StringArray("ignore", nil, `glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")`)
+	sortCmd.Flags().Bool("no-carry-sidecars", false, "disable carrying pre-existing .aae and .xmp sidecar files from source to destination")
+	sortCmd.Flags().Bool("overwrite-sidecar-tags", false, "when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them")
 
 	// Mark required flags (--source defaults to cwd; --dest has no default).
 	_ = sortCmd.MarkFlagRequired("dest")
@@ -223,4 +227,6 @@ func init() {
 	_ = viper.BindPFlag("recursive", sortCmd.Flags().Lookup("recursive"))
 	_ = viper.BindPFlag("skip_duplicates", sortCmd.Flags().Lookup("skip-duplicates"))
 	_ = viper.BindPFlag("ignore", sortCmd.Flags().Lookup("ignore"))
+	_ = viper.BindPFlag("no_carry_sidecars", sortCmd.Flags().Lookup("no-carry-sidecars"))
+	_ = viper.BindPFlag("overwrite_sidecar_tags", sortCmd.Flags().Lookup("overwrite-sidecar-tags"))
 }
