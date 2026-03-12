@@ -482,7 +482,17 @@ func processFile(
 				archivedb.WithDestination(absDest, relDest),
 				archivedb.WithIsDuplicate(isDuplicate))
 		}
-		return nil, isDuplicate, nil
+		if isDuplicate {
+			le := &domain.LedgerEntry{
+				Path:        df.RelPath,
+				Status:      domain.LedgerStatusDuplicate,
+				Checksum:    checksum,
+				Destination: relDest,
+				Matches:     existingDestForLedger,
+			}
+			return le, true, nil
+		}
+		return nil, false, nil
 	}
 
 	// --- Copy (atomic: write to temp file) ---

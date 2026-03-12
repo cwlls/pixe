@@ -4,6 +4,14 @@
 
 ---
 
+## [2.0.1] -- 2026-03-11
+
+### Bug Fixes
+
+- **Fixed nil pointer dereference panic in dry-run duplicate detection** — When `--dry-run` was enabled and a duplicate file was detected, `processFile` returned `(nil, true, nil)`. The caller in `runSequential` dereferenced `le.Matches` and `le.Destination` without a nil guard, causing a SIGSEGV panic in `TestIntegration_SQLite_DryRun`. Now, when a duplicate is detected in dry-run mode, a proper `*domain.LedgerEntry` is constructed with `Status: LedgerStatusDuplicate`, `Destination`, and `Matches` populated, preventing the panic.
+
+---
+
 ## [2.0.0] -- 2026-03-11
 
 ### Added
