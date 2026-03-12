@@ -418,6 +418,61 @@ func TestExtractFormats_excludesTiffraw(t *testing.T) {
 	}
 }
 
+func TestExtractFormats_excludesHandlertest(t *testing.T) {
+	root := repoRoot(t)
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	fn := extractFormats("markdown")
+	result, err := fn()
+	if err != nil {
+		t.Fatalf("extractFormats: %v", err)
+	}
+
+	if strings.Contains(strings.ToLower(result), "handlertest") {
+		t.Errorf("format table should not contain handlertest (test infrastructure)")
+	}
+}
+
+func TestExtractFormats_tiffrawHandlersShowSidecar(t *testing.T) {
+	root := repoRoot(t)
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	fn := extractFormats("markdown")
+	result, err := fn()
+	if err != nil {
+		t.Fatalf("extractFormats: %v", err)
+	}
+
+	// All TIFF-based handlers inherit MetadataSidecar from tiffraw.Base.
+	// The docgen extractor must detect this via the tiffraw import, not a
+	// direct MetadataSupport() func decl (which doesn't exist in their files).
+	tiffHandlers := []string{"ARW", "CR2", "DNG", "NEF", "PEF"}
+	lines := strings.Split(result, "\n")
+	for _, handler := range tiffHandlers {
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, handler) {
+				found = true
+				if !strings.Contains(line, "XMP sidecar") {
+					t.Errorf("handler %s row missing 'XMP sidecar': %q", handler, line)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Errorf("handler %s not found in format table", handler)
+		}
+	}
+}
+
 func TestExtractFormats_deterministic(t *testing.T) {
 	root := repoRoot(t)
 	orig, _ := os.Getwd()

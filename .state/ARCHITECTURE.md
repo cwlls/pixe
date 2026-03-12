@@ -3852,6 +3852,8 @@ Emit as a table row per handler.
 <!-- pixe:end:format-table -->
 ```
 
+**Implementation note (resolved):** The `extractFormats` function in `internal/docgen/extract.go` correctly handles inherited `MetadataSupport()` methods from embedded `tiffraw.Base`. TIFF-based handlers (ARW, CR2, DNG, NEF, PEF) inherit `MetadataSupport() → domain.MetadataSidecar` via struct embedding. The extraction logic detects this by checking whether the handler's source file imports the `tiffraw` package; if so, it sets `Metadata = "XMP sidecar"`. The `handlertest` package (test infrastructure) is excluded from the format table output. The CI workflow includes `fetch-tags: true` in the `actions/checkout@v4` step to ensure `git describe --tags` returns the correct version during documentation generation.
+
 #### 15.4.5 Package Reference (Developer Documentation)
 
 **Source:** All packages under `internal/` and `cmd/` — package-level `// Package` doc comments.

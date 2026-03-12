@@ -392,18 +392,17 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 ## Supported File Types
 
 <!-- pixe:begin:format-table -->
-| Format      | Extensions   | Metadata      |
-| ----------- | ------------ | ------------- |
-| ARW         | .arw         |               |
-| CR2         | .cr2         |               |
-| CR3         | .cr3         | XMP sidecar   |
-| DNG         | .dng         |               |
-| HANDLERTEST |              |               |
-| HEIC        | .heic, .heif | XMP sidecar   |
-| JPEG        | .jpg, .jpeg  | Embedded EXIF |
-| MP4/MOV     | .mp4, .mov   | XMP sidecar   |
-| NEF         | .nef         |               |
-| PEF         | .pef         |               |
+| Format  | Extensions   | Metadata      |
+| ------- | ------------ | ------------- |
+| ARW     | .arw         | XMP sidecar   |
+| CR2     | .cr2         | XMP sidecar   |
+| CR3     | .cr3         | XMP sidecar   |
+| DNG     | .dng         | XMP sidecar   |
+| HEIC    | .heic, .heif | XMP sidecar   |
+| JPEG    | .jpg, .jpeg  | Embedded EXIF |
+| MP4/MOV | .mp4, .mov   | XMP sidecar   |
+| NEF     | .nef         | XMP sidecar   |
+| PEF     | .pef         | XMP sidecar   |
 <!-- pixe:end:format-table -->
 
 ### Date Fallback Chain

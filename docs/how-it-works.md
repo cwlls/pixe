@@ -164,12 +164,12 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
     <tr>
       <td>ARW</td>
       <td>.arw</td>
-      <td></td>
+      <td>XMP sidecar</td>
     </tr>
     <tr>
       <td>CR2</td>
       <td>.cr2</td>
-      <td></td>
+      <td>XMP sidecar</td>
     </tr>
     <tr>
       <td>CR3</td>
@@ -179,12 +179,7 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
     <tr>
       <td>DNG</td>
       <td>.dng</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>HANDLERTEST</td>
-      <td></td>
-      <td></td>
+      <td>XMP sidecar</td>
     </tr>
     <tr>
       <td>HEIC</td>
@@ -204,12 +199,12 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
     <tr>
       <td>NEF</td>
       <td>.nef</td>
-      <td></td>
+      <td>XMP sidecar</td>
     </tr>
     <tr>
       <td>PEF</td>
       <td>.pef</td>
-      <td></td>
+      <td>XMP sidecar</td>
     </tr>
   </tbody>
 </table>

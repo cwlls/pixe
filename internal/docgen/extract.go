@@ -366,8 +366,8 @@ func extractFormats(format string) func() (string, error) {
 				continue
 			}
 			name := entry.Name()
-			if name == "tiffraw" {
-				continue // shared base, not user-facing
+			if name == "tiffraw" || name == "handlertest" {
+				continue // shared base and test infra, not user-facing
 			}
 
 			info, err := parseHandlerPackage(filepath.Join(handlerDir, name), name)
@@ -440,6 +440,20 @@ func parseHandlerPackage(dir, pkgName string) (HandlerInfo, error) {
 		}
 		return true
 	})
+
+	// If no MetadataSupport method was found in this file, check if the
+	// handler embeds tiffraw.Base (detected by importing the tiffraw package).
+	// tiffraw.Base.MetadataSupport() always returns domain.MetadataSidecar,
+	// so any handler that imports tiffraw inherits "XMP sidecar" capability.
+	if info.Metadata == "" {
+		for _, imp := range f.Imports {
+			path := strings.Trim(imp.Path.Value, `"`)
+			if strings.HasSuffix(path, "/handler/tiffraw") {
+				info.Metadata = "XMP sidecar"
+				break
+			}
+		}
+	}
 
 	return info, nil
 }

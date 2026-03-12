@@ -34,6 +34,10 @@
 
 - **Added durability guarantee in copy operation** — `out.Sync()` now called before `out.Close()` in `copy.Execute()` to ensure data is flushed to stable storage before returning.
 
+- **Fixed docgen format table extraction for inherited metadata capabilities** — The `extractFormats` function in `internal/docgen/extract.go` now correctly detects inherited `MetadataSupport()` methods from embedded `tiffraw.Base`. TIFF-based handlers (ARW, CR2, DNG, NEF, PEF) inherit `MetadataSidecar` capability via struct embedding; the extraction logic checks for `tiffraw` package imports to identify this pattern. Also excluded `handlertest` (test infrastructure) from the format table output. Added two new tests: `TestExtractFormats_tiffrawHandlersShowSidecar` and `TestExtractFormats_excludesHandlertest`.
+
+- **Fixed CI documentation check race condition** — Added `fetch-tags: true` to the `actions/checkout@v4` step in the CI test job. Without this, shallow clones (depth=1) exclude git tags, causing `git describe --tags` to fail and `extractVersion()` to return `"dev"` instead of the real version. This made `docs-check` always report stale docs in CI even when freshly regenerated locally.
+
 ### Testing & Validation
 
 - All 12 remediation tasks (Tasks 1–12) implemented and validated
