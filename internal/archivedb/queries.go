@@ -417,6 +417,9 @@ func (db *DB) ArchiveStats() (*ArchiveStats, error) {
 // complete, non-duplicate files. The result maps extension (e.g., ".jpg")
 // to count, ordered by count descending.
 func (db *DB) FormatBreakdown() ([]FormatCount, error) {
+	// INSTR finds the first dot in dest_rel. Pathbuilder-generated filenames
+	// have the form YYYY/MM-Mon/YYYYMMDD_HHMMSS_<hex>.<ext> — exactly one dot
+	// per filename — so INSTR gives the correct extension in all real cases.
 	const q = `
 		SELECT LOWER(SUBSTR(dest_rel, INSTR(dest_rel, '.'))) AS ext,
 		       COUNT(*) AS cnt

@@ -25,9 +25,6 @@ import (
 	"github.com/cwlls/pixe-go/internal/handler/handlertest"
 )
 
-// Compile-time interface check.
-var _ domain.FileTypeHandler = (*Handler)(nil)
-
 func TestHandler(t *testing.T) {
 	handlertest.RunSuite(t, handlertest.SuiteConfig{
 		NewHandler: func() domain.FileTypeHandler { return New() },

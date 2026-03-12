@@ -15,7 +15,7 @@
 | 9   | Register new handlers in CLI + tests              | 9        | @developer | [x]    | 6, 7, 8    | Wave 2                                   |
 | 10  | E2 — Config profiles (`--profile`)                | 10       | @developer | [x]    | 4          | Wave 3 (depends on config auto-discovery)|
 | 11  | Integration tests for new features                | 11       | @tester    | [x]    | 1–10       | Wave 4 — complete                        |
-| 12  | Commit all changes                                | 12       | @committer | [~]    | 11         | Wave 5 — in-process                      |
+| 12  | Commit all changes                                | 12       | @committer | [x]    | 11         | Wave 5 — complete                        |
 
 ---
 

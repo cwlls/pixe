@@ -16,6 +16,7 @@ package pipeline
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -33,10 +34,12 @@ type Formatter struct {
 
 // NewFormatter creates a Formatter. When color is true, status verbs are
 // rendered with Lip Gloss adaptive colors using a forced TrueColor profile.
+// os.Stdout is passed to the renderer so termenv can probe the terminal's
+// dark/light background preference for AdaptiveColor selection.
 func NewFormatter(color bool) *Formatter {
 	f := &Formatter{color: color}
 	if color {
-		r := lipgloss.NewRenderer(nil)
+		r := lipgloss.NewRenderer(os.Stdout)
 		r.SetColorProfile(termenv.TrueColor)
 		f.renderer = r
 	}

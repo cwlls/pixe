@@ -85,10 +85,10 @@ func printStatsHuman(out io.Writer, dir string, stats *archivedb.ArchiveStats, b
 	_, _ = fmt.Fprintf(out, "Files:       %s (%s)\n", formatCount(stats.Complete), formatBytes(stats.TotalSize))
 	_, _ = fmt.Fprintf(out, "Duplicates:  %s\n", formatCount(stats.Duplicates))
 
-	errors := stats.Failed + stats.Mismatches + stats.TagFailed
-	if errors > 0 {
+	errCount := stats.Failed + stats.Mismatches + stats.TagFailed
+	if errCount > 0 {
 		_, _ = fmt.Fprintf(out, "Errors:      %s (%d failed, %d mismatch, %d tag_failed)\n",
-			formatCount(errors), stats.Failed, stats.Mismatches, stats.TagFailed)
+			formatCount(errCount), stats.Failed, stats.Mismatches, stats.TagFailed)
 	} else {
 		_, _ = fmt.Fprintf(out, "Errors:      0\n")
 	}
