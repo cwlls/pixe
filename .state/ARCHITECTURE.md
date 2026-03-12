@@ -32,6 +32,9 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **Hashing** | `crypto/sha1` (default), `crypto/sha256`, others via `crypto` stdlib | Configurable algorithm, SHA-1 default for filename brevity |
 | **Persistence** | SQLite database (CGo-free: `modernc.org/sqlite`) | Cumulative registry, concurrent-safe, queryable; see Section 8 |
 | **Glob Matching** | `bmatcuk/doublestar/v4` | `**` recursive globs, `{alt}` alternatives; superset of `filepath.Match`; see Section 4.11 |
+| **TUI Framework** | `charmbracelet/bubbletea` | Elm-architecture TUI framework; powers CLI progress bars (Section 12) and interactive TUI (Section 13) |
+| **TUI Components** | `charmbracelet/bubbles` | Pre-built components: progress bars, viewports, spinners, key bindings, help |
+| **TUI Styling** | `charmbracelet/lipgloss` | Terminal styling with adaptive colors; respects user's terminal color scheme |
 
 ---
 
@@ -2898,7 +2901,724 @@ gem "kramdown-parser-gfm"
 
 ---
 
-## 11. Open Questions & Future Considerations
+## 11. Pipeline Event Bus
+
+### 11.1 Overview
+
+The pipeline event bus is a **structured event channel** that decouples the sort/verify pipelines from their output presentation. Instead of writing directly to an `io.Writer` via `fmt.Fprintf`, the pipeline emits typed event structs onto a channel. Consumers — the plain-text CLI writer, the CLI progress bar, or the full TUI — subscribe to this channel and render events in their own way.
+
+This is the foundational layer that enables both the opt-in CLI progress bars (Section 12) and the interactive TUI (Section 13) without modifying the pipeline's core logic.
+
+### 11.2 Design Principles
+
+1. **Non-breaking adoption.** The existing `io.Writer`-based output continues to work. The event bus is an **addition**, not a replacement. When no event subscriber is configured, the pipeline falls back to the current `fmt.Fprintf(out, ...)` behaviour. This means all existing tests, piped output, and scripted workflows are unaffected.
+2. **Typed events, not strings.** Events carry structured data (file path, status, checksum, duration, error, worker ID). Consumers format this data however they choose. The pipeline never formats presentation strings — it emits facts.
+3. **Unidirectional flow.** Events flow from the pipeline to consumers. Consumers never send commands back through the event bus. Pipeline control (pause, cancel) uses `context.Context`, not the event channel.
+4. **Non-blocking sends.** The pipeline must never block on a slow consumer. Events are sent on a buffered channel. If the buffer is full, the event is dropped. Correctness is in the database and ledger — the event bus is for observation, not for the audit trail.
+
+### 11.3 Event Types
+
+```go
+package progress
+
+import "time"
+
+// EventKind identifies the type of pipeline event.
+type EventKind int
+
+const (
+    // Discovery phase events.
+    EventDiscoverStart  EventKind = iota // Walk began; Total field set.
+    EventDiscoverDone                    // Walk complete; Total, Skipped fields set.
+
+    // Per-file lifecycle events.
+    EventFileStart                       // File processing began.
+    EventFileExtracted                   // Date extracted.
+    EventFileHashed                      // Checksum computed.
+    EventFileCopied                      // Temp file written.
+    EventFileVerified                    // Hash verified, promoted to canonical path.
+    EventFileTagged                      // Metadata written (embed or sidecar).
+    EventFileComplete                    // Terminal success state.
+    EventFileDuplicate                   // File identified as duplicate.
+    EventFileSkipped                     // File skipped (previously imported or unsupported).
+    EventFileError                       // File failed at some stage.
+
+    // Sidecar events.
+    EventSidecarCarried                  // Sidecar file copied alongside parent.
+    EventSidecarFailed                   // Sidecar carry failed (non-fatal).
+
+    // Run-level events.
+    EventRunComplete                     // All files processed; summary fields set.
+
+    // Verify-specific events.
+    EventVerifyStart                     // Verify walk began.
+    EventVerifyOK                        // File checksum matches.
+    EventVerifyMismatch                  // File checksum does not match.
+    EventVerifyUnrecognised              // File not parseable by any handler.
+    EventVerifyDone                      // Verify complete.
+)
+
+// Event is the universal pipeline event. Not all fields are populated for
+// every EventKind — consumers check the Kind and read the relevant fields.
+type Event struct {
+    Kind      EventKind
+    Timestamp time.Time
+
+    // File identity.
+    RelPath  string // relative path from dirA (sort) or dirB (verify).
+    AbsPath  string // absolute path for consumers that need it.
+    WorkerID int    // which worker is handling this file (-1 for coordinator).
+
+    // Pipeline progress.
+    Total     int // total files discovered (set on EventDiscoverDone).
+    Completed int // files finished so far (incremented on terminal events).
+    Skipped   int // files skipped during discovery.
+
+    // File outcome data (populated progressively).
+    Checksum    string
+    Destination string // relative path within dirB.
+    CaptureDate time.Time
+    FileSize    int64
+
+    // Duplicate info.
+    IsDuplicate bool
+    MatchesDest string // dest of the existing file this one matches.
+
+    // Skip/error info.
+    Reason string // skip reason or error message.
+    Err    error  // underlying error (EventFileError, EventVerifyMismatch).
+
+    // Verify-specific.
+    ExpectedChecksum string
+    ActualChecksum   string
+
+    // Sidecar info.
+    SidecarRelPath string
+    SidecarExt     string
+
+    // Summary (EventRunComplete / EventVerifyDone).
+    Summary *RunSummary
+}
+
+// RunSummary aggregates the final counts for a completed run.
+type RunSummary struct {
+    Processed    int
+    Duplicates   int
+    Skipped      int
+    Errors       int
+    Duration     time.Duration
+    // Verify-specific.
+    Verified     int
+    Mismatches   int
+    Unrecognised int
+}
+```
+
+### 11.4 Event Bus Interface
+
+```go
+package progress
+
+// Bus is the event distribution mechanism. The pipeline calls Emit for each
+// event; consumers receive events from the channel returned by Subscribe.
+type Bus struct {
+    ch     chan Event
+    closed chan struct{}
+}
+
+// NewBus creates a Bus with the given buffer size. A buffer of 256 is
+// recommended — large enough to absorb bursts from concurrent workers
+// without blocking, small enough to bound memory.
+func NewBus(bufferSize int) *Bus
+
+// Emit sends an event to all subscribers. If the buffer is full, the event
+// is dropped (non-blocking). The pipeline must never stall on a slow consumer.
+func (b *Bus) Emit(e Event)
+
+// Events returns the receive-only channel for consumers to range over.
+// The channel is closed when Close is called.
+func (b *Bus) Events() <-chan Event
+
+// Close signals that no more events will be emitted. Consumers ranging
+// over Events() will exit their loop.
+func (b *Bus) Close()
+```
+
+### 11.5 Integration with `SortOptions` and `VerifyOptions`
+
+The event bus is an **optional** field on the existing options structs. When nil, the pipeline uses the current `io.Writer` path unchanged.
+
+```go
+// SortOptions gains one new field:
+type SortOptions struct {
+    // ... existing fields ...
+
+    // EventBus, when non-nil, receives structured progress events.
+    // The plain-text Output writer is still used for the audit log
+    // when EventBus is set — both can be active simultaneously.
+    EventBus *progress.Bus
+}
+```
+
+```go
+// verify.Options gains one new field:
+type Options struct {
+    // ... existing fields ...
+    EventBus *progress.Bus
+}
+```
+
+**Emission points in the pipeline:**
+
+The pipeline code gains `emit()` helper calls at each stage transition. These are additive — the existing `fmt.Fprintf(out, ...)` calls remain in place. The emit calls are guarded by a nil check:
+
+```go
+// In pipeline.go or worker.go:
+func emit(bus *progress.Bus, e progress.Event) {
+    if bus != nil {
+        e.Timestamp = time.Now()
+        bus.Emit(e)
+    }
+}
+```
+
+This means every `fmt.Fprintf(out, formatOutput(...))` call is paired with a corresponding `emit(bus, Event{...})` call. The `io.Writer` path is the audit trail; the event bus is the observation channel.
+
+### 11.6 Plain-Text Writer as Event Consumer
+
+To demonstrate the pattern and prepare for eventual removal of inline `fmt.Fprintf` calls, a `PlainWriter` consumer is provided:
+
+```go
+package progress
+
+// PlainWriter consumes events and writes the traditional plain-text output
+// (COPY, SKIP, DUPE, ERR lines) to an io.Writer. It is the default consumer
+// when no TUI or progress bar is active.
+type PlainWriter struct {
+    w io.Writer
+}
+
+func NewPlainWriter(w io.Writer) *PlainWriter
+
+// Run reads events from the bus and writes formatted output until the
+// channel is closed. Intended to be called in a goroutine.
+func (pw *PlainWriter) Run(events <-chan Event)
+```
+
+**Migration path:** In the first implementation, the pipeline retains its inline `fmt.Fprintf` calls AND emits events. The `PlainWriter` is not yet wired in as the sole output path — it exists as a reference implementation and for testing. A future refactor can remove the inline writes and route all output through the event bus, but this is not required for the initial TUI work.
+
+### 11.7 Package Layout
+
+```
+internal/
+└── progress/
+    ├── event.go          ← Event, EventKind, RunSummary types
+    ├── bus.go            ← Bus implementation (channel, Emit, Close)
+    ├── plainwriter.go    ← PlainWriter consumer (traditional CLI output)
+    └── progress_test.go  ← Bus tests (non-blocking emit, close semantics)
+```
+
+The `progress` package has **zero dependencies** on any Charm library. It is pure Go stdlib. The Charm dependencies are confined to the `cli` and `tui` packages that consume events (Sections 12 and 13).
+
+---
+
+## 12. CLI Progress Bars
+
+### 12.1 Overview
+
+The CLI progress bar is an **opt-in enhancement** to the standard `pixe sort` and `pixe verify` commands. When activated, it replaces the scrolling per-file text output with a compact, live-updating progress display rendered using the Bubbles `progress` component from the Charm ecosystem. The plain-text per-file log continues to be written to the JSONL ledger and the archive database — the progress bar affects only what the user sees on screen during the run.
+
+### 12.2 Activation
+
+| Method | Behavior |
+|---|---|
+| `--progress` flag | Enables the progress bar display. Available on `pixe sort` and `pixe verify`. |
+| Default (no flag) | Traditional scrolling text output (unchanged). |
+| Piped stdout | Progress bar is automatically disabled even if `--progress` is set. Detection via `mattn/go-isatty` (already an indirect dependency). |
+
+The `--progress` flag is a simple boolean. There is no `--no-progress` inverse — the default is off.
+
+### 12.3 Visual Design
+
+The progress bar follows the terminal's current color scheme. No hardcoded colors — Lip Gloss adaptive colors are used so the display works on both light and dark terminals.
+
+**Layout during a sort run:**
+
+```
+pixe sort ─ /Users/wells/photos → /Users/wells/archive
+
+  Total   ████████████████░░░░░░░░░░░░░░░░  1,247 / 3,891  (32.0%)  ETA 2m14s
+  Current extracting IMG_5678.jpg
+
+  copied 1,180 │ duplicates 42 │ skipped 15 │ errors 2
+```
+
+**Layout during a verify run:**
+
+```
+pixe verify ─ /Users/wells/archive
+
+  Total   ████████████████████░░░░░░░░░░░░  8,421 / 12,634  (66.7%)  ETA 45s
+
+  verified 8,400 │ mismatches 2 │ unrecognised 19
+```
+
+**Components:**
+
+| Element | Implementation |
+|---|---|
+| Header line | Static — command name, source/dest paths. Lip Gloss styled (dim). |
+| Total progress bar | Bubbles `progress.Model`. Percentage derived from `Completed / Total`. |
+| ETA | Computed from elapsed time and completion ratio. Updated every second. |
+| Current file | The `RelPath` from the most recent `EventFileStart`. Truncated to terminal width. |
+| Status counters | Live-updated from terminal events. Lip Gloss styled with adaptive colors. |
+
+### 12.4 Architecture
+
+The CLI progress bar is a **lightweight Bubble Tea program** — it uses the Bubble Tea runtime for its update loop and terminal control (alternate screen is NOT used; the progress bar renders inline), but the "model" is minimal: it subscribes to the event bus and updates counters.
+
+```go
+package cli
+
+import (
+    tea "github.com/charmbracelet/bubbletea"
+    "github.com/charmbracelet/bubbles/progress"
+    "github.com/charmbracelet/lipgloss"
+)
+
+// ProgressModel is the Bubble Tea model for the inline CLI progress bar.
+type ProgressModel struct {
+    bus         *progress.Bus
+    bar         progress.Model
+    total       int
+    completed   int
+    copied      int
+    duplicates  int
+    skipped     int
+    errors      int
+    currentFile string
+    startedAt   time.Time
+    width       int
+    done        bool
+}
+```
+
+**Integration with `cmd/sort.go`:**
+
+When `--progress` is set and stdout is a TTY:
+
+1. Create the event bus: `bus := progress.NewBus(256)`
+2. Set `opts.EventBus = bus` on the `SortOptions`.
+3. Create the Bubble Tea program with `ProgressModel`.
+4. Run the pipeline in a goroutine.
+5. Run the Bubble Tea program on the main goroutine (it owns the terminal).
+6. When the pipeline completes, it closes the bus, which sends a final message to the Bubble Tea model, causing it to return `tea.Quit`.
+
+```go
+// In cmd/sort.go, within runSort():
+if showProgress && isatty.IsTerminal(os.Stdout.Fd()) {
+    bus := progress.NewBus(256)
+    opts.EventBus = bus
+    opts.Output = io.Discard // suppress inline text when progress bar is active
+
+    model := cli.NewProgressModel(bus, cfg.Source, cfg.Destination)
+    p := tea.NewProgram(model)
+
+    go func() {
+        result, err = pipeline.Run(opts)
+        bus.Close()
+    }()
+
+    if _, runErr := p.Run(); runErr != nil {
+        return fmt.Errorf("progress display: %w", runErr)
+    }
+}
+```
+
+**Key design point:** When the progress bar is active, `opts.Output` is set to `io.Discard`. The per-file text lines are suppressed — the user sees only the progress bar. The ledger and database continue to record everything. After the Bubble Tea program exits, the final summary line is printed normally.
+
+### 12.5 Verify Integration
+
+The same `ProgressModel` is reused for `pixe verify`, with a different header and counter labels. The model accepts a `mode` parameter (`"sort"` or `"verify"`) that controls which counters are displayed.
+
+### 12.6 New Dependencies
+
+| Package | Version | Purpose |
+|---|---|---|
+| `github.com/charmbracelet/bubbletea` | latest stable | Bubble Tea runtime for the progress bar update loop |
+| `github.com/charmbracelet/bubbles` | latest stable | `progress` component (the actual bar widget) |
+| `github.com/charmbracelet/lipgloss` | latest stable | Styling (adaptive colors, alignment, borders) |
+| `github.com/mattn/go-isatty` | (already indirect) | TTY detection for auto-disabling progress bar |
+
+### 12.7 New Flags
+
+| Command | Flag | Default | Description |
+|---|---|---|---|
+| `pixe sort` | `--progress` | `false` | Show a live progress bar instead of per-file text output. Auto-disabled when stdout is not a TTY. |
+| `pixe verify` | `--progress` | `false` | Same behavior for verify runs. |
+
+### 12.8 Package Layout
+
+```
+internal/
+└── cli/
+    ├── progress.go       ← ProgressModel (Bubble Tea model for inline progress bar)
+    ├── styles.go         ← Lip Gloss styles (adaptive colors, no hardcoded palette)
+    └── progress_test.go  ← Model update tests
+```
+
+The `cli` package depends on Bubble Tea, Bubbles, and Lip Gloss. It consumes events from `internal/progress` but has no dependency on the `tui` package (Section 13).
+
+---
+
+## 13. TUI Application (`pixe gui`)
+
+### 13.1 Overview
+
+`pixe gui` launches an interactive terminal application built with Bubble Tea. It provides a tabbed interface for the three primary operations — **Sort**, **Verify**, and **Status** — with live progress visualization, scrollable activity logs, and detailed error inspection. The TUI is a self-contained Cobra subcommand that composes the same internal packages used by the CLI commands.
+
+### 13.2 Command Signature
+
+```bash
+pixe gui [--source <dirA>] [--dest <dirB>] [options]
+```
+
+The `gui` command accepts the same flags as `sort` (source, dest, workers, algorithm, copyright, camera-owner, recursive, ignore, etc.) for pre-configuration. Flags that are not provided can be configured interactively within the TUI before starting a run.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source` / `-s` | cwd | Pre-set the source directory. |
+| `--dest` / `-d` | (none) | Pre-set the destination directory. |
+| All `sort` flags | (same defaults) | Pre-configure sort options. |
+
+### 13.3 Visual Design
+
+The TUI uses the terminal's native color scheme via Lip Gloss **adaptive colors** (`lipgloss.AdaptiveColor`). No hardcoded hex values — the interface adapts to light and dark terminals automatically. Styling uses subtle borders, dim text for secondary information, and the terminal's accent/highlight colors for active elements.
+
+#### 13.3.1 Overall Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  pixe gui                                              [Sort] [Verify] [Status]  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  (active tab content — see below)                                       │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ? help  tab switch  q quit                                             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Header bar:** Application name on the left, tab buttons on the right. Active tab is highlighted.
+- **Content area:** Fills the remaining terminal height. Content varies by tab.
+- **Footer bar:** Context-sensitive key bindings. Updates based on active tab and state.
+
+#### 13.3.2 Sort Tab
+
+The Sort tab has three states: **configure**, **running**, and **complete**.
+
+**Configure state** — Shown before a sort run starts. Displays the current configuration and a "Start Sort" action:
+
+```
+  Source:      /Users/wells/photos
+  Destination: /Users/wells/archive
+  Workers:     8  │  Algorithm: sha1  │  Recursive: yes
+  Copyright:   Copyright {{.Year}} My Family
+  Camera Owner: Wells Family
+
+  [s] Start Sort    [e] Edit Settings
+```
+
+If `--dest` was not provided on the command line, the configure state prompts for it before enabling the start action.
+
+**Running state** — Active during a sort run. Three panes arranged vertically:
+
+```
+  Total   ████████████████░░░░░░░░░░░░░░░░  1,247 / 3,891  (32.0%)  ETA 2m14s
+  ─────────────────────────────────────────────────────────────────────────
+  copied 1,180 │ duplicates 42 │ skipped 15 │ errors 2
+  ─────────────────────────────────────────────────────────────────────────
+  COPY IMG_0001.jpg → 2021/12-Dec/20211225_062223_7d97e98f...jpg
+  COPY IMG_0002.jpg → 2022/02-Feb/20220202_123101_447d3060...jpg
+  DUPE IMG_0042.jpg → matches 2022/02-Feb/20220202...jpg
+  COPY IMG_0043.jpg → 2022/02-Feb/20220202_130000_e5f6a7b8...jpg
+  ERR  corrupt.jpg  → EXIF parse failed: truncated IFD at offset 0x1A
+  COPY IMG_0044.jpg → 2022/03-Mar/20220316_232122_321c7d6f...jpg
+  │ (scrollable — j/k or arrow keys)
+  ─────────────────────────────────────────────────────────────────────────
+  Worker 1: hashing  IMG_5678.jpg
+  Worker 2: copying  DSC_9012.nef
+  Worker 3: verifying IMG_3456.heic
+  Worker 4: idle
+```
+
+| Pane | Content | Interaction |
+|---|---|---|
+| **Progress** (top) | Bubbles progress bar, ETA, status counters. | Read-only. |
+| **Activity log** (middle) | Scrollable viewport of per-file outcome lines. Most recent at bottom. | `j`/`k` or `↑`/`↓` to scroll. `f` to filter by status (COPY/DUPE/ERR). `G` to jump to bottom (follow mode). |
+| **Workers** (bottom) | Per-worker current activity. One line per worker showing stage + filename. | Read-only. Collapses to a single summary line when terminal height is small. |
+
+**Error inspection:** When the activity log cursor is on an `ERR` line, pressing `Enter` opens a detail overlay showing the full error message, file path, and the pipeline stage where it failed. Press `Esc` to dismiss.
+
+**Complete state** — Shown after the run finishes:
+
+```
+  Sort complete ─ 3,891 files in 4m32s
+
+  copied 3,832 │ duplicates 42 │ skipped 15 │ errors 2
+
+  COPY  3,832  ████████████████████████████████████████████  98.5%
+  DUPE     42  █░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   1.1%
+  SKIP     15  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0.4%
+  ERR       2  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   0.1%
+
+  [Enter] View activity log    [e] View errors    [n] New sort    [q] Quit
+```
+
+#### 13.3.3 Verify Tab
+
+Similar to Sort but simpler — no configuration state, just a directory picker and run/complete states.
+
+**Running state:**
+
+```
+  Total   ████████████████████░░░░░░░░░░░░  8,421 / 12,634  (66.7%)  ETA 45s
+  ─────────────────────────────────────────────────────────────────────────
+  verified 8,400 │ mismatches 2 │ unrecognised 19
+  ─────────────────────────────────────────────────────────────────────────
+    OK          2024/07-Jul/20240715_143022_abc12345...jpg
+    OK          2024/07-Jul/20240715_150100_def67890...jpg
+    MISMATCH    2024/08-Aug/20240820_091500_1a2b3c4d...mp4
+      expected: 1a2b3c4d...  actual: 9f8e7d6c...
+    OK          2024/08-Aug/20240820_100000_e5f6a7b8...jpg
+  │ (scrollable)
+```
+
+**Complete state:**
+
+```
+  Verify complete ─ 12,634 files in 6m18s
+
+  verified 12,613 │ mismatches 2 │ unrecognised 19
+
+  [Enter] View details    [e] View mismatches    [n] New verify    [q] Quit
+```
+
+#### 13.3.4 Status Tab
+
+The Status tab renders the same categorized report as `pixe status`, but in an interactive, browsable format.
+
+```
+  Source: /Users/wells/photos
+  Ledger: run a1b2c3d4, 2026-03-06 10:30:00 UTC (recursive: no)
+  ─────────────────────────────────────────────────────────────────────────
+  265 total │ 247 sorted │ 3 duplicates │ 1 errored │ 12 unsorted │ 2 unrecognized
+  ─────────────────────────────────────────────────────────────────────────
+
+  [1] Sorted (247)  [2] Duplicates (3)  [3] Errored (1)  [4] Unsorted (12)  [5] Unrecognized (2)
+
+  UNSORTED (12 files)                                         ← active section
+    IMG_5001.jpg
+    IMG_5002.jpg
+    vacation/IMG_6001.jpg
+    vacation/IMG_6002.jpg
+    vacation/IMG_6003.jpg
+    vacation/IMG_6004.jpg
+  │ (scrollable)
+```
+
+The user presses `1`–`5` to switch between file categories. Each category is a scrollable list. The status report is computed once when the tab is selected (or when the user presses `r` to refresh).
+
+### 13.4 Architecture
+
+#### 13.4.1 Bubble Tea Model Hierarchy
+
+The TUI uses a **nested model** pattern — a root model delegates to tab-specific sub-models:
+
+```go
+package tui
+
+// App is the root Bubble Tea model. It owns the tab bar, footer,
+// and delegates to the active tab's sub-model.
+type App struct {
+    activeTab int           // 0=Sort, 1=Verify, 2=Status
+    tabs      []string      // ["Sort", "Verify", "Status"]
+    sort      SortModel     // Sort tab sub-model
+    verify    VerifyModel   // Verify tab sub-model
+    status    StatusModel   // Status tab sub-model
+    width     int
+    height    int
+    keymap    KeyMap
+}
+```
+
+Each sub-model implements its own `Update` and `View` methods. The root `App.Update` routes key presses and window size messages to the active sub-model, and handles tab switching globally.
+
+#### 13.4.2 Event Bus Integration
+
+The Sort and Verify sub-models each own their own `progress.Bus` instance, created when a run starts. Events from the bus are fed into the Bubble Tea runtime via a `tea.Cmd` that listens on the event channel:
+
+```go
+// listenForEvents returns a tea.Cmd that waits for the next event
+// from the bus and wraps it as a tea.Msg.
+func listenForEvents(bus *progress.Bus) tea.Cmd {
+    return func() tea.Msg {
+        event, ok := <-bus.Events()
+        if !ok {
+            return busClosedMsg{}
+        }
+        return eventMsg(event)
+    }
+}
+```
+
+The sub-model's `Update` method handles `eventMsg` by updating counters, appending to the activity log viewport, and re-issuing `listenForEvents` to get the next event. This is the standard Bubble Tea pattern for channel-to-model bridging.
+
+#### 13.4.3 Pipeline Execution
+
+Sort and Verify runs execute in a **background goroutine**. The Bubble Tea program owns the main goroutine (terminal control). The pattern:
+
+```go
+func (m SortModel) startRun() tea.Cmd {
+    return func() tea.Msg {
+        bus := progress.NewBus(256)
+        m.bus = bus
+
+        go func() {
+            result, err := pipeline.Run(m.buildSortOptions(bus))
+            bus.Close()
+        }()
+
+        return runStartedMsg{bus: bus}
+    }
+}
+```
+
+The `runStartedMsg` triggers the sub-model to transition from "configure" to "running" state and begin listening for events.
+
+#### 13.4.4 Shared Components
+
+Several Bubble Tea components are shared across tabs:
+
+| Component | Bubbles Package | Used By |
+|---|---|---|
+| Progress bar | `bubbles/progress` | Sort (running), Verify (running) |
+| Viewport (scrollable log) | `bubbles/viewport` | Sort (activity log), Verify (activity log), Status (file lists) |
+| Spinner | `bubbles/spinner` | Sort (current file), Verify (current file) |
+| Key bindings/help | `bubbles/key`, `bubbles/help` | All tabs (footer) |
+
+#### 13.4.5 Status Tab Data Flow
+
+Unlike Sort and Verify (which use the event bus), the Status tab calls `discovery.Walk()` and `manifest.LoadLedger()` synchronously in a background goroutine, then sends the classified results as a single `tea.Msg` to the model. There is no streaming progress for status — the walk is fast and the result is rendered all at once.
+
+### 13.5 Key Bindings
+
+| Key | Context | Action |
+|---|---|---|
+| `Tab` / `Shift+Tab` | Global | Switch to next/previous tab |
+| `1`, `2`, `3` | Global | Jump to Sort, Verify, Status tab |
+| `q` / `Ctrl+C` | Global | Quit the TUI |
+| `?` | Global | Toggle help overlay |
+| `s` | Sort (configure) | Start sort run |
+| `e` | Sort (configure) | Edit settings (inline prompts) |
+| `j` / `k` / `↑` / `↓` | Running / Complete | Scroll activity log |
+| `G` | Running | Jump to bottom of log (follow mode) |
+| `g` | Running | Jump to top of log |
+| `f` | Running | Cycle filter: All → COPY → DUPE → ERR → SKIP → All |
+| `Enter` | Running (on ERR line) | Open error detail overlay |
+| `Esc` | Overlay open | Close overlay |
+| `1`–`5` | Status tab | Switch file category |
+| `r` | Status tab | Refresh (re-walk and re-classify) |
+| `n` | Sort/Verify (complete) | Start a new run |
+
+### 13.6 Terminal Requirements
+
+- **Minimum size:** 80 columns × 24 rows. Below this, the TUI displays a "terminal too small" message.
+- **Alternate screen:** The TUI uses Bubble Tea's alternate screen mode (`tea.WithAltScreen()`). On exit, the user's terminal is restored to its prior state.
+- **Mouse support:** Not enabled. All interaction is keyboard-driven.
+- **Color support:** Lip Gloss adaptive colors degrade gracefully. On 16-color terminals, the TUI is functional but less visually distinct. On true-color terminals, borders and highlights are crisper.
+
+### 13.7 Interaction with Existing Commands
+
+`pixe gui` is a **parallel entry point**, not a replacement. The existing `pixe sort`, `pixe verify`, and `pixe status` commands are unchanged. The TUI composes the same internal packages:
+
+| TUI Tab | Calls | Same as CLI command |
+|---|---|---|
+| Sort | `pipeline.Run()` | `pixe sort` |
+| Verify | `verify.Run()` | `pixe verify` |
+| Status | `discovery.Walk()` + `manifest.LoadLedger()` | `pixe status` |
+
+The TUI does not use Cobra to invoke subcommands — it calls the internal functions directly, bypassing the CLI layer. Configuration is resolved from the flags passed to `pixe gui` plus any interactive edits, then passed as `*config.AppConfig` to the pipeline.
+
+### 13.8 New Dependencies
+
+No additional dependencies beyond those added in Section 12. The TUI uses the same Bubble Tea, Bubbles, and Lip Gloss packages. The `viewport` and `help` components from Bubbles are the only additions (they are part of the `bubbles` module, not separate dependencies).
+
+### 13.9 Package Layout
+
+```
+internal/
+├── progress/                ← Event bus (Section 11) — no Charm deps
+│   ├── event.go
+│   ├── bus.go
+│   ├── plainwriter.go
+│   └── progress_test.go
+├── cli/                     ← CLI progress bar (Section 12) — Charm deps
+│   ├── progress.go
+│   ├── styles.go
+│   └── progress_test.go
+└── tui/                     ← Full TUI application (Section 13) — Charm deps
+    ├── app.go               ← Root App model (tab routing, layout)
+    ├── sort.go              ← SortModel (configure → running → complete)
+    ├── verify.go            ← VerifyModel (configure → running → complete)
+    ├── status.go            ← StatusModel (walk → display → filter)
+    ├── components.go        ← Shared components (styled progress bar, log viewport, error overlay)
+    ├── keymap.go            ← Key binding definitions
+    ├── styles.go            ← Lip Gloss styles (adaptive colors only)
+    └── tui_test.go          ← Model update tests
+cmd/
+├── gui.go                   ← `pixe gui` Cobra command definition
+```
+
+### 13.10 CLI Command Definition
+
+```go
+// cmd/gui.go
+
+var guiCmd = &cobra.Command{
+    Use:   "gui",
+    Short: "Launch the interactive terminal interface",
+    Long: `Launches a full-screen interactive terminal interface for sorting,
+verifying, and inspecting media archives. Provides live progress visualization,
+scrollable activity logs, and error inspection.
+
+The TUI composes the same operations as the sort, verify, and status CLI
+commands in a tabbed interface.`,
+    RunE: runGUI,
+}
+```
+
+The `runGUI` function resolves configuration from flags/Viper (same as `runSort`), constructs the `tui.App` model with the pre-resolved config, and starts the Bubble Tea program:
+
+```go
+func runGUI(cmd *cobra.Command, args []string) error {
+    cfg := resolveConfig() // shared with sort — extract to helper
+
+    app := tui.NewApp(tui.AppOptions{
+        Config:   cfg,
+        Registry: buildRegistry(),
+        // ... other shared setup
+    })
+
+    p := tea.NewProgram(app, tea.WithAltScreen())
+    _, err := p.Run()
+    return err
+}
+```
+
+---
+
+## 14. Open Questions & Future Considerations
 
 These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
@@ -2906,7 +3626,7 @@ These items are explicitly **out of scope** for the current build but are acknow
 2. ~~**CRW format** (legacy Canon pre-2004) — Excluded from current RAW support due to its obsolete proprietary format and lack of pure-Go library support. Could be revisited if demand arises.~~ no longer under consideration
 3. **MP4/MOV embedded metadata writing** — MP4 currently uses `MetadataSidecar`. A future enhancement could implement `udta/©cpy` and `udta/©own` atom writing in pure Go and promote MP4 to `MetadataEmbed`, eliminating the sidecar for video files.
 4. **HEIC embedded metadata writing** — HEIC currently uses `MetadataSidecar`. If a reliable pure-Go HEIC EXIF writer becomes available, HEIC could be promoted to `MetadataEmbed`. The `MetadataCapability` enum makes this a one-line change per handler.
-5. **Web UI / TUI** — Progress visualization beyond CLI output.
+5. ~~**Web UI / TUI** — Progress visualization beyond CLI output.~~ **Promoted to Sections 11–13.** No longer a future consideration.
 6. **Cloud storage targets** — `dirB` on S3, GCS, etc.
 7. ~~**GPS/location-based organization** — Subdirectories by location in addition to date.~~ no longer under consideration
 8. ~~**`pixe query` CLI command**~~ — **Promoted to Section 7.3.** No longer a future consideration.
