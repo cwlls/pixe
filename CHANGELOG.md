@@ -4,17 +4,65 @@
 
 ---
 
-## [Unreleased] -- Remediation Wave 3 & 4 Complete
+## [Unreleased]
+
+### Bug Fixes
+
+- **Fixed format table metadata detection for TIFF-based handlers** — The docgen `extractFormats` function only checked each handler's own source file for `MetadataSupport()`. TIFF-based handlers (ARW, CR2, DNG, NEF, PEF) inherit this method from `tiffraw.Base` via struct embedding. Added import-path fallback detection in `parseHandlerPackage` to correctly identify inherited capabilities.
+
+- **Fixed phantom `handlertest` row in format table** — The test infrastructure package was not excluded from the format table scan. Added `handlertest` to the exclusion list alongside `tiffraw`.
+
+- **Fixed CI documentation check race condition** — Added `fetch-tags: true` to `actions/checkout@v4` in the CI test job. Shallow clones (depth=1) exclude git tags, causing `git describe --tags` to fail and `extractVersion()` to return `"dev"` instead of the real version, making `docs-check` always report stale docs.
+
+### Testing
+
+- Added `TestExtractFormats_tiffrawHandlersShowSidecar` — verifies all TIFF-based handlers show "XMP sidecar"
+- Added `TestExtractFormats_excludesHandlertest` — verifies test infrastructure is excluded
+- Regenerated `README.md` and `docs/how-it-works.md` format tables with all 9 handlers and correct metadata columns
+
+---
+
+## [2.2.9] -- 2026-03-12
+
+### Testing & Validation
+
+- **Upgraded test suite from B+ to A grade** — Expanded test coverage across all packages to achieve comprehensive validation. Full test suite passes with `-race` flag; `make check` (fmt-check + vet + unit tests) clean; zero lint warnings, zero vet warnings.
+
+- **Regenerated documentation** — Updated README.md and docs/how-it-works.md to reflect current handler capabilities and metadata support matrix.
+
+---
+
+## [2.2.8] -- 2026-03-12
+
+### Chore
+
+- **CI/workflow improvements** — Updated GitHub Actions workflows and removed deprecated dispatch options.
+
+- **State cleanup** — Archived completed remediation tasks.
+
+---
+
+## [2.2.7] -- 2026-03-12
+
+### Code Quality & Maintainability
+
+- **Refactored `scanFileWithSource` to eliminate duplication** — Removed ~70 lines of duplicated scan logic by reusing `scanFileRow` helper, reducing maintenance burden.
+
+---
+
+## [2.2.6] -- 2026-03-12
+
+### Improvements
+
+- **Added durability guarantee in copy operation** — `out.Sync()` now called before `out.Close()` in `copy.Execute()` to ensure data is flushed to stable storage before returning.
+
+---
+
+## [2.2.5] -- 2026-03-12
 
 ### Security & Stability Fixes
 
-- **Fixed Windows path separator bug in file extension detection** — A custom `fileExt` function was copy-pasted across 10 files and only checked for `/` as a separator, breaking on Windows paths with dots in directory names (e.g., `C:\photos\no-ext-dir.backup\IMG_0001`). Extracted shared `fileutil.Ext()` using `filepath.Ext` for cross-platform correctness.
-
-- **Eliminated template injection risk in copyright rendering** — Replaced `text/template` with simple `strings.ReplaceAll` for `{{.Year}}` substitution. Removed unnecessary template parsing complexity and eliminated duplicate `renderCopyright` implementations.
-
 - **XML-escaped user input in XMP template generation** — Copyright and camera owner strings are now XML-escaped before XMP template rendering, preventing malformed XML from special characters (`<`, `>`, `&`, `"`).
-
-- **Added symlink detection to discovery walk** — Symlinks are now explicitly detected and skipped with logged reason, preventing accidental processing of files outside the source directory.
 
 ### Performance Improvements
 
@@ -22,28 +70,63 @@
 
 - **Streamed MP4 keyframe extraction** — Replaced buffering all keyframes into `bytes.Buffer` with `io.MultiReader` over `io.SectionReader` instances. Eliminates hundreds of megabytes of memory usage for 4K video with many keyframes.
 
+---
+
+## [2.2.4] -- 2026-03-12
+
+### Improvements
+
+- **Track and warn on ledger write failures** — Non-fatal ledger write errors are now logged as warnings and do not interrupt the sort pipeline. Coordinator continues processing while monitoring ledger health.
+
+- **Fixed sidecar display year cosmetic bug** — Capture date now flows through `workerFinalResult` struct to coordinator, enabling correct `{{.Year}}` resolution in sidecar lines (was resolving to year 1 due to `time.Time{}`).
+
+---
+
+## [2.2.3] -- 2026-03-12
+
+### Security & Stability Fixes
+
+- **Added symlink detection to discovery walk** — Symlinks are now explicitly detected and skipped with logged reason, preventing accidental processing of files outside the source directory.
+
+### Code Quality & Maintainability
+
+- **Documented intermediate DB status updates as best-effort** — Added explanatory comments at `db.UpdateFileStatus` call sites in worker goroutines, clarifying that intermediate state tracking is observational and non-fatal. Coordinator owns terminal states.
+
+---
+
+## [2.2.2] -- 2026-03-12
+
+### Security & Stability Fixes
+
+- **Eliminated template injection risk in copyright rendering** — Replaced `text/template` with simple `strings.ReplaceAll` for `{{.Year}}` substitution. Removed unnecessary template parsing complexity and eliminated duplicate `renderCopyright` implementations.
+
+---
+
+## [2.2.1] -- 2026-03-12
+
+### Security & Stability Fixes
+
+- **Fixed Windows path separator bug in file extension detection** — A custom `fileExt` function was copy-pasted across 10 files and only checked for `/` as a separator, breaking on Windows paths with dots in directory names (e.g., `C:\photos\no-ext-dir.backup\IMG_0001`). Extracted shared `fileutil.Ext()` using `filepath.Ext` for cross-platform correctness.
+
 ### Code Quality & Maintainability
 
 - **Added compile-time interface checks** — JPEG, HEIC, and MP4 handlers now include `var _ domain.FileTypeHandler = (*Handler)(nil)` to catch interface drift at compile time.
 
-- **Documented intermediate DB status updates as best-effort** — Added explanatory comments at `db.UpdateFileStatus` call sites in worker goroutines, clarifying that intermediate state tracking is observational and non-fatal. Coordinator owns terminal states.
+---
 
-- **Refactored `scanFileWithSource` to eliminate duplication** — Removed ~70 lines of duplicated scan logic by reusing `scanFileRow` helper, reducing maintenance burden.
+## [2.2.0] -- 2026-03-12
 
-- **Fixed sidecar display year cosmetic bug** — Capture date now flows through `workerFinalResult` struct to coordinator, enabling correct `{{.Year}}` resolution in sidecar lines (was resolving to year 1 due to `time.Time{}`).
+### Added
 
-- **Added durability guarantee in copy operation** — `out.Sync()` now called before `out.Close()` in `copy.Execute()` to ensure data is flushed to stable storage before returning.
+- **`docgen` tool to eliminate documentation drift** — Automated documentation generator that extracts handler metadata, format support matrix, and version information directly from source code. Regenerates README.md and docs/how-it-works.md on every build to ensure docs stay in sync with implementation.
 
-- **Fixed docgen format table extraction for inherited metadata capabilities** — The `extractFormats` function in `internal/docgen/extract.go` now correctly detects inherited `MetadataSupport()` methods from embedded `tiffraw.Base`. TIFF-based handlers (ARW, CR2, DNG, NEF, PEF) inherit `MetadataSidecar` capability via struct embedding; the extraction logic checks for `tiffraw` package imports to identify this pattern. Also excluded `handlertest` (test infrastructure) from the format table output. Added two new tests: `TestExtractFormats_tiffrawHandlersShowSidecar` and `TestExtractFormats_excludesHandlertest`.
+---
 
-- **Fixed CI documentation check race condition** — Added `fetch-tags: true` to the `actions/checkout@v4` step in the CI test job. Without this, shallow clones (depth=1) exclude git tags, causing `git describe --tags` to fail and `extractVersion()` to return `"dev"` instead of the real version. This made `docs-check` always report stale docs in CI even when freshly regenerated locally.
+## [2.1.0] -- 2026-03-12
 
-### Testing & Validation
+### Documentation
 
-- All 12 remediation tasks (Tasks 1–12) implemented and validated
-- Full test suite passes with `-race` flag
-- `make check` (fmt-check + vet + unit tests) clean
-- Zero lint warnings, zero vet warnings
+- **Comprehensive documentation across codebase** — Added detailed package comments, architectural overview, and design rationale to all major packages. Established documentation standards for future development.
 
 ---
 
