@@ -151,6 +151,63 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
 
 ### Supported file types
 
-{% include format-grid.html %}
+<!-- pixe:begin:format-table -->
+<table class="flag-table">
+  <thead>
+    <tr>
+      <th>Format</th>
+      <th>Extensions</th>
+      <th>Metadata</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>ARW</td>
+      <td>.arw</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>CR2</td>
+      <td>.cr2</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>CR3</td>
+      <td>.cr3</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
+      <td>DNG</td>
+      <td>.dng</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>HEIC</td>
+      <td>.heic, .heif</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
+      <td>JPEG</td>
+      <td>.jpg, .jpeg</td>
+      <td>Embedded EXIF</td>
+    </tr>
+    <tr>
+      <td>MP4/MOV</td>
+      <td>.mp4, .mov</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
+      <td>NEF</td>
+      <td>.nef</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>PEF</td>
+      <td>.pef</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+<!-- pixe:end:format-table -->
 
 All formats support the full pipeline: date extraction, content hashing, copy-then-verify, and metadata tagging (via embedded EXIF for JPEG, or XMP sidecar for all others).

@@ -4,27 +4,27 @@
 
 | #  | Task | Priority | Agent | Status | Depends On | Notes |
 |:---|:-----|:---------|:------|:-------|:-----------|:------|
-| 1  | Marker injection engine (`internal/docgen/inject.go`) | high | @developer | [ ] pending | — | Core infrastructure: parse markers, replace content, write-if-changed, --check mode |
-| 2  | Output formatters (`internal/docgen/formats.go`) | high | @developer | [ ] pending | — | Markdown table, HTML table, fenced code block, YAML value formatters |
-| 3  | Version extractor (`internal/docgen/extract.go`) | high | @developer | [ ] pending | 1, 2 | `git describe --tags --abbrev=0` → YAML value; also recognizes `# <!-- pixe:begin:... -->` YAML comment markers |
-| 4  | Interface extractor (`internal/docgen/extract.go`) | high | @developer | [ ] pending | 1, 2 | Parse `internal/domain/handler.go` AST for `FileTypeHandler` interface + `MetadataCapability` const block → fenced Go code block |
-| 5  | CLI flag extractor (`internal/docgen/extract.go`) | high | @developer | [ ] pending | 1, 2 | Parse `cmd/*.go` AST for Cobra `Flags().StringVarP()` / `BoolVarP()` / `IntVarP()` / `PersistentFlags().*` calls → flag table (name, short, default, description) |
-| 6  | Format table extractor (`internal/docgen/extract.go`) | high | @developer | [ ] pending | 1, 2 | Parse `internal/handler/*/` AST for `Extensions()` return slice, `MetadataSupport()` return constant, package doc comment → format table rows |
-| 7  | Package reference extractor (`internal/docgen/extract.go`) | medium | @developer | [ ] pending | 1, 2 | Parse all `internal/` and `cmd/` packages for `// Package` doc comments → grouped listing by category |
-| 8  | Query subcommand extractor (`internal/docgen/extract.go`) | medium | @developer | [ ] pending | 5 | Parse `cmd/query_*.go` for `cobra.Command` struct literals → subcommand name, description, flags |
-| 9  | Target manifest and main entry point (`internal/docgen/main.go`) | high | @developer | [ ] pending | 1–8 | Hardcoded `[]Target` mapping files to section→extractor; `--check` flag; orchestration loop |
-| 10 | Tests for injection engine | high | @developer | [ ] pending | 1 | Marker parsing, replacement, idempotency, error cases (unpaired markers, unknown sections) |
-| 11 | Tests for extractors | high | @developer | [ ] pending | 3–8 | Test each extractor against real source files; verify deterministic output |
-| 12 | Add markers to `docs/_config.yml` | medium | @developer | [ ] pending | 3 | Wrap `version:` line with `# <!-- pixe:begin:version -->` / `# <!-- pixe:end:version -->` YAML comment markers |
-| 13 | Add markers to `docs/adding-formats.md` | medium | @developer | [ ] pending | 4 | Wrap the `FileTypeHandler` interface code block with `<!-- pixe:begin:interface -->` / `<!-- pixe:end:interface -->` |
-| 14 | Add markers to `docs/commands.md` | medium | @developer | [ ] pending | 5, 8 | Wrap each command's flag table with `<!-- pixe:begin:<cmd>-flags -->` markers; wrap query subcommand table with `<!-- pixe:begin:query-subs -->` |
-| 15 | Add markers to `docs/how-it-works.md` | medium | @developer | [ ] pending | 6 | Wrap the supported file types section with `<!-- pixe:begin:format-table -->` |
-| 16 | Add markers to `README.md` | medium | @developer | [ ] pending | 5, 6, 8 | Wrap flag tables (sort, verify, resume, status, clean, gui, query), query subcommands table, and format table with markers |
-| 17 | Create `docs/packages.md` | medium | @developer | [ ] pending | 7 | New page with front matter, hand-authored intro, and `<!-- pixe:begin:package-list -->` marker block |
-| 18 | Update `docs/_data/navigation.yml` | low | @developer | [ ] pending | 17 | Reorder nav: end-user pages first, developer pages grouped, add Packages entry |
-| 19 | Add Makefile targets (`docs`, `docs-check`) | medium | @developer | [ ] pending | 9 | `make docs` → `go run ./internal/docgen`; `make docs-check` → `go run ./internal/docgen --check`; update `check` target to include `docs-check` |
-| 20 | Update CI workflow | low | @developer | [ ] pending | 19 | Add `docs-check` step to `.github/workflows/ci.yml`; remove stale `.github/workflows/pages.yml` |
-| 21 | Run `make docs` and verify end-to-end | high | @tester | [ ] pending | 9–19 | Run the tool, verify all markers are populated, verify `--check` passes, verify idempotency |
+| 1  | Marker injection engine (`internal/docgen/inject.go`) | high | @developer | [x] complete | — | Core infrastructure: parse markers, replace content, write-if-changed, --check mode |
+| 2  | Output formatters (`internal/docgen/formats.go`) | high | @developer | [x] complete | — | Markdown table, HTML table, fenced code block, YAML value formatters |
+| 3  | Version extractor (`internal/docgen/extract.go`) | high | @developer | [x] complete | 1, 2 | `git describe --tags --abbrev=0` → YAML value; also recognizes `# <!-- pixe:begin:... -->` YAML comment markers |
+| 4  | Interface extractor (`internal/docgen/extract.go`) | high | @developer | [x] complete | 1, 2 | Parse `internal/domain/handler.go` AST for `FileTypeHandler` interface + `MetadataCapability` const block → fenced Go code block |
+| 5  | CLI flag extractor (`internal/docgen/extract.go`) | high | @developer | [x] complete | 1, 2 | Parse `cmd/*.go` AST for Cobra `Flags().StringVarP()` / `BoolVarP()` / `IntVarP()` / `PersistentFlags().*` calls → flag table (name, short, default, description) |
+| 6  | Format table extractor (`internal/docgen/extract.go`) | high | @developer | [x] complete | 1, 2 | Parse `internal/handler/*/` AST for `Extensions()` return slice, `MetadataSupport()` return constant, package doc comment → format table rows |
+| 7  | Package reference extractor (`internal/docgen/extract.go`) | medium | @developer | [x] complete | 1, 2 | Parse all `internal/` and `cmd/` packages for `// Package` doc comments → grouped listing by category |
+| 8  | Query subcommand extractor (`internal/docgen/extract.go`) | medium | @developer | [x] complete | 5 | Parse `cmd/query_*.go` for `cobra.Command` struct literals → subcommand name, description, flags |
+| 9  | Target manifest and main entry point (`internal/docgen/main.go`) | high | @developer | [x] complete | 1–8 | Hardcoded `[]Target` mapping files to section→extractor; `--check` flag; orchestration loop |
+| 10 | Tests for injection engine | high | @developer | [x] complete | 1 | Marker parsing, replacement, idempotency, error cases (unpaired markers, unknown sections) |
+| 11 | Tests for extractors | high | @developer | [x] complete | 3–8 | Test each extractor against real source files; verify deterministic output |
+| 12 | Add markers to `docs/_config.yml` | medium | @developer | [x] complete | 3 | Wrap `version:` line with `# <!-- pixe:begin:version -->` / `# <!-- pixe:end:version -->` YAML comment markers |
+| 13 | Add markers to `docs/adding-formats.md` | medium | @developer | [x] complete | 4 | Wrap the `FileTypeHandler` interface code block with `<!-- pixe:begin:interface -->` / `<!-- pixe:end:interface -->` |
+| 14 | Add markers to `docs/commands.md` | medium | @developer | [x] complete | 5, 8 | Wrap each command's flag table with `<!-- pixe:begin:<cmd>-flags -->` markers; wrap query subcommand table with `<!-- pixe:begin:query-subs -->` |
+| 15 | Add markers to `docs/how-it-works.md` | medium | @developer | [x] complete | 6 | Wrap the supported file types section with `<!-- pixe:begin:format-table -->` |
+| 16 | Add markers to `README.md` | medium | @developer | [x] complete | 5, 6, 8 | Wrap flag tables (sort, verify, resume, status, clean, gui, query), query subcommands table, and format table with markers |
+| 17 | Create `docs/packages.md` | medium | @developer | [x] complete | 7 | New page with front matter, hand-authored intro, and `<!-- pixe:begin:package-list -->` marker block |
+| 18 | Update `docs/_data/navigation.yml` | low | @developer | [x] complete | 17 | Reorder nav: end-user pages first, developer pages grouped, add Packages entry |
+| 19 | Add Makefile targets (`docs`, `docs-check`) | medium | @developer | [x] complete | 9 | `make docs` → `go run ./internal/docgen`; `make docs-check` → `go run ./internal/docgen --check`; update `check` target to include `docs-check` |
+| 20 | Update CI workflow | low | @developer | [x] complete | 19 | Add `docs-check` step to `.github/workflows/ci.yml`; remove stale `.github/workflows/pages.yml` |
+| 21 | Run `make docs` and verify end-to-end | high | @tester | [x] complete | 9–19 | Run the tool, verify all markers are populated, verify `--check` passes, verify idempotency |
 
 ---
 
@@ -326,125 +326,4 @@ Test each extractor against the real codebase source files.
 
 ---
 
-### Task 12: Add markers to `docs/_config.yml`
 
-Wrap the `version:` line in `docs/_config.yml` with YAML-comment-style markers:
-
-**Before:**
-```yaml
-version: "v1.8.0"
-```
-
-**After:**
-```yaml
-# <!-- pixe:begin:version -->
-version: "v2.0.0"
-# <!-- pixe:end:version -->
-```
-
-The version value will be populated by `make docs` from the latest git tag.
-
----
-
-### Task 13: Add markers to `docs/adding-formats.md`
-
-Locate the section that reproduces the `FileTypeHandler` interface definition and wrap it with markers. The hand-authored narrative prose before and after the code block is preserved.
-
----
-
-### Task 14: Add markers to `docs/commands.md`
-
-For each command section in `commands.md`, wrap the flag table with the appropriate marker:
-- `<!-- pixe:begin:sort-flags -->` / `<!-- pixe:end:sort-flags -->`
-- `<!-- pixe:begin:verify-flags -->` / `<!-- pixe:end:verify-flags -->`
-- `<!-- pixe:begin:resume-flags -->` / `<!-- pixe:end:resume-flags -->`
-- `<!-- pixe:begin:status-flags -->` / `<!-- pixe:end:status-flags -->`
-- `<!-- pixe:begin:clean-flags -->` / `<!-- pixe:end:clean-flags -->`
-- `<!-- pixe:begin:gui-flags -->` / `<!-- pixe:end:gui-flags -->`
-- `<!-- pixe:begin:query-flags -->` / `<!-- pixe:end:query-flags -->`
-- `<!-- pixe:begin:query-subs -->` / `<!-- pixe:end:query-subs -->`
-
-Use `format=html` markers since `commands.md` uses HTML tables for the accordion styling.
-
----
-
-### Task 15: Add markers to `docs/how-it-works.md`
-
-Wrap the supported file types section with `<!-- pixe:begin:format-table -->` / `<!-- pixe:end:format-table -->`. Use `format=html` since this is a docs page.
-
----
-
-### Task 16: Add markers to `README.md`
-
-Wrap the following sections with markers (all using `format=markdown` for GFM tables):
-- Each command's flag table: `sort-flags`, `verify-flags`, `resume-flags`, `status-flags`, `clean-flags`, `gui-flags`, `query-flags`
-- Query subcommands table: `query-subs`
-- Supported File Types table: `format-table`
-
-Preserve all hand-authored narrative prose outside the markers.
-
----
-
-### Task 17: Create `docs/packages.md`
-
-Create the new developer-facing Package Reference page with:
-- Jekyll front matter: `layout: page`, `title: Package Reference`, `section_label: Developer Guide`, `permalink: /packages/`
-- Hand-authored introduction paragraph (2-3 sentences explaining the page is generated from godoc comments)
-- Single `<!-- pixe:begin:package-list -->` / `<!-- pixe:end:package-list -->` marker block
-
----
-
-### Task 18: Update `docs/_data/navigation.yml`
-
-Reorder navigation to reflect audience delineation per Architecture Section 15.12:
-- End-user: Install, Commands, How It Works, Technical
-- Developer: Adding Formats, Packages, Contributing
-- Project: Changelog
-
----
-
-### Task 19: Add Makefile targets
-
-Add to `Makefile`:
-
-```makefile
-# ---------- documentation -----------------------------------
-docs: ## Regenerate documentation from source code
-	go run ./internal/docgen
-
-docs-check: ## Check that generated docs are up to date (CI gate)
-	@go run ./internal/docgen --check
-	@echo "Documentation is up to date."
-```
-
-Update the `check` target:
-```makefile
-check: fmt-check vet test-unit docs-check ## Run fmt-check + vet + unit tests + docs-check (fast CI gate)
-```
-
-Update the `.PHONY` declaration to include `docs` and `docs-check`.
-
----
-
-### Task 20: Update CI workflow
-
-**`.github/workflows/ci.yml`:** Add a step after tests:
-```yaml
-- name: Check generated docs are up to date
-  run: go run ./internal/docgen --check
-```
-
-**`.github/workflows/pages.yml`:** Remove this file — it is stale cruft superseded by GitHub's automatic Pages deployment configured via repository settings.
-
----
-
-### Task 21: Run `make docs` and verify end-to-end
-
-End-to-end verification:
-1. Run `make docs` — all markers should be populated with extracted content.
-2. Run `make docs-check` — should exit 0 (no stale files).
-3. Run `make docs` again — no files should be written (idempotency).
-4. Manually modify a generated section — `make docs-check` should exit 1.
-5. Run `make docs` — the modification should be overwritten.
-6. Verify `make check` passes (includes `docs-check`).
-7. Verify the generated content is correct: flag tables match Cobra definitions, format table matches handler packages, interface matches `handler.go`, version matches git tag, package reference includes all packages.

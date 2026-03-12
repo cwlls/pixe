@@ -24,7 +24,8 @@ GOLANGCI    := golangci-lint
 
 # ---------- phony targets -----------------------------------
 .PHONY: help build build-debug run clean test test-unit test-integration test-all \
-        test-cover test-cover-html lint vet fmt fmt-check tidy deps check install uninstall
+        test-cover test-cover-html lint vet fmt fmt-check tidy deps check install uninstall \
+        docs docs-check
 
 # ---------- help --------------------------------------------
 help: ## Show this help message
@@ -87,7 +88,15 @@ fmt-check: ## Check formatting without modifying files (CI-safe)
 lint: ## Run golangci-lint (install: brew install golangci-lint)
 	$(GOLANGCI) run ./...
 
-check: fmt-check vet test-unit ## Run fmt-check + vet + unit tests (fast CI gate)
+check: fmt-check vet test-unit docs-check ## Run fmt-check + vet + unit tests + docs-check (fast CI gate)
+
+# ---------- documentation -----------------------------------
+docs: ## Regenerate documentation from source code
+	go run ./internal/docgen
+
+docs-check: ## Check that generated docs are up to date (CI gate)
+	@go run ./internal/docgen --check
+	@echo "Documentation is up to date."
 
 # ---------- dependencies ------------------------------------
 tidy: ## Run go mod tidy

@@ -2,7 +2,9 @@ title: Pixe
 description: Safe, deterministic photo and video sorting
 url: "https://cwlls.github.io"
 baseurl: "/pixe-go"
-version: "v1.8.0"
+# <!-- pixe:begin:version -->
+version: "v2.1.0"
+# <!-- pixe:end:version -->
 tagline: "Your originals are never touched. Every copy is verified before it counts. Interrupted runs resume exactly where they left off."
 markdown: kramdown
 kramdown:

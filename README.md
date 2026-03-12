@@ -109,22 +109,25 @@ pixe sort --dest /path/to/archive [options]
 pixe sort --source /path/to/photos --dest /path/to/archive [options]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-s, --source` | Source directory containing media files (default: current directory) |
-| `-d, --dest` | Destination directory for the organized archive (required) |
-| `-w, --workers` | Number of concurrent workers (default: auto-detect) |
-| `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
-| `-r, --recursive` | Recursively process subdirectories of `--source` |
-| `--ignore` | Glob pattern for files to exclude (repeatable; see [Ignore Patterns](#ignore-patterns) below) |
-| `--skip-duplicates` | Skip copying duplicate files instead of copying to `duplicates/` |
-| `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
-| `--camera-owner` | Camera owner string to inject |
-| `--no-carry-sidecars` | Disable carrying pre-existing `.aae` and `.xmp` sidecar files from source to destination (carry is enabled by default) |
-| `--overwrite-sidecar-tags` | When merging tags into a carried `.xmp` sidecar, replace existing values instead of preserving them |
-| `--progress` | Show live progress bar with file count, ETA, and status counters (only activates when stdout is a TTY) |
-| `--dry-run` | Preview operations without copying |
-| `--db-path` | Explicit path to the SQLite archive database |
+<!-- pixe:begin:sort-flags -->
+| Flag                     | Default | Description                                                                                         |
+| ------------------------ | ------- | --------------------------------------------------------------------------------------------------- |
+| --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                             |
+| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                           |
+| -a, --algorithm          | sha1    | hash algorithm to use: sha1, sha256                                                                 |
+| -s, --source             |         | source directory containing media files to sort (default: current directory)                        |
+| -d, --dest               |         | destination directory for the organized archive (required)                                          |
+| --copyright              |         | copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"            |
+| --camera-owner           |         | camera owner string injected into destination files                                                 |
+| --dry-run                | false   | preview operations without copying any files                                                        |
+| --db-path                |         | explicit path to the SQLite archive database (overrides auto-resolution)                            |
+| -r, --recursive          | false   | recursively process subdirectories of --source                                                      |
+| --skip-duplicates        | false   | skip copying duplicate files instead of copying to duplicates/ directory                            |
+| --ignore                 |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")           |
+| --no-carry-sidecars      | false   | disable carrying pre-existing .aae and .xmp sidecar files from source to destination                |
+| --overwrite-sidecar-tags | false   | when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them |
+| --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                           |
+<!-- pixe:end:sort-flags -->
 
 #### Ignore Patterns
 
@@ -171,12 +174,15 @@ Verify the integrity of a previously sorted archive:
 pixe verify --dir /path/to/archive [options]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-d, --dir` | Archive directory to verify (required) |
-| `-w, --workers` | Number of concurrent workers (default: auto-detect) |
-| `-a, --algorithm` | Hash algorithm (must match what was used during sort) |
-| `--progress` | Show live progress bar with file count, ETA, and status counters (only activates when stdout is a TTY) |
+<!-- pixe:begin:verify-flags -->
+| Flag            | Default | Description                                                               |
+| --------------- | ------- | ------------------------------------------------------------------------- |
+| --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                   |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                 |
+| -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                       |
+| -d, --dir       |         | archive directory to verify (required)                                    |
+| --progress      | false   | show a live progress bar instead of per-file text output (requires a TTY) |
+<!-- pixe:end:verify-flags -->
 
 Exit code `0` = all verified. Exit code `1` = one or more mismatches.
 
@@ -188,10 +194,15 @@ Resume an interrupted sort operation:
 pixe resume --dir /path/to/archive
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-d, --dir` | Destination directory containing the archive database (required) |
-| `--db-path` | Explicit path to the SQLite archive database |
+<!-- pixe:begin:resume-flags -->
+| Flag            | Default | Description                                                              |
+| --------------- | ------- | ------------------------------------------------------------------------ |
+| --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                  |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                |
+| -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                      |
+| -d, --dir       |         | destination directory containing the archive database (required)         |
+| --db-path       |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+<!-- pixe:end:resume-flags -->
 
 Finds the most recent interrupted run in the archive database and re-sorts from the source directory. Files already marked complete are skipped automatically.
 
@@ -203,25 +214,29 @@ Query the archive database without modifying any files:
 pixe query <subcommand> --dir /path/to/archive [--json]
 ```
 
-| Subcommand | Description |
-|------------|-------------|
-| `runs` | List all sort runs with file counts |
-| `run <id>` | Show metadata and file list for a single run (supports short prefix) |
-| `duplicates` | List all duplicate files (`--pairs` to show originals) |
-| `errors` | List all files in error states across all runs |
-| `skipped` | List all skipped files with skip reasons |
-| `files` | Filter files by `--from`/`--to` (capture date), `--imported-from`/`--imported-to` (import date), or `--source` |
-| `inventory` | List all canonical archive files (complete, non-duplicate) |
+<!-- pixe:begin:query-subs -->
+| Subcommand | Description                                           |
+| ---------- | ----------------------------------------------------- |
+| runs       | List all sort runs recorded in the archive database   |
+| run        | Show details for a specific sort run                  |
+| duplicates | List all duplicate files in the archive               |
+| errors     | List all files that encountered errors during sorting |
+| skipped    | List all files that were skipped during sorting       |
+| files      | Search for files in the archive by date or source     |
+| inventory  | List all canonical files in the archive               |
+<!-- pixe:end:query-subs -->
 
 All subcommands accept `--json` for machine-readable output.
 
 **Persistent flags** (inherited by all subcommands):
 
-| Flag | Description |
-|------|-------------|
-| `-d, --dir` | Archive directory containing the database (required) |
-| `--db-path` | Explicit path to the SQLite archive database |
-| `--json` | Emit JSON output instead of a table |
+<!-- pixe:begin:query-flags -->
+| Flag      | Default | Description                                                              |
+| --------- | ------- | ------------------------------------------------------------------------ |
+| -d, --dir |         | archive directory containing the database (required)                     |
+| --db-path |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+| --json    | false   | emit JSON output instead of a table                                      |
+<!-- pixe:end:query-flags -->
 
 ### `pixe status`
 
@@ -235,12 +250,17 @@ pixe status [options]
 pixe status --source /path/to/photos [options]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-s, --source` | Source directory to inspect (default: current directory) |
-| `-r, --recursive` | Recursively inspect subdirectories (default: false) |
-| `--ignore` | Glob pattern for files to exclude (repeatable) |
-| `--json` | Emit JSON output instead of human-readable listing |
+<!-- pixe:begin:status-flags -->
+| Flag            | Default | Description                                                          |
+| --------------- | ------- | -------------------------------------------------------------------- |
+| --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)              |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())            |
+| -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                  |
+| -s, --source    |         | source directory to inspect (default: current directory)             |
+| -r, --recursive | false   | recursively inspect subdirectories of --source                       |
+| --ignore        |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt") |
+| --json          | false   | emit JSON output instead of a human-readable listing                 |
+<!-- pixe:end:status-flags -->
 
 **How it works:**
 
@@ -290,13 +310,15 @@ Perform maintenance on an archive: remove orphaned temp files, clean up orphaned
 pixe clean --dir /path/to/archive [options]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-d, --dir` | Destination archive directory to clean (required) |
-| `--db-path` | Explicit path to the SQLite archive database |
-| `--dry-run` | Preview what would be cleaned without modifying anything |
-| `--temp-only` | Only clean orphaned files, skip database compaction |
-| `--vacuum-only` | Only compact the database, skip file scanning |
+<!-- pixe:begin:clean-flags -->
+| Flag          | Default | Description                                              |
+| ------------- | ------- | -------------------------------------------------------- |
+| -d, --dir     |         | destination directory (dirB) to clean (required)         |
+| --db-path     |         | explicit path to the SQLite archive database             |
+| --dry-run     | false   | preview what would be cleaned without modifying anything |
+| --temp-only   | false   | only clean orphaned files, skip database compaction      |
+| --vacuum-only | false   | only compact the database, skip file scanning            |
+<!-- pixe:end:clean-flags -->
 
 **What it cleans:**
 
@@ -312,21 +334,24 @@ Launch the interactive terminal UI for sorting and verifying with live progress 
 pixe gui [options]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-s, --source` | Source directory containing media files (default: current directory) |
-| `-d, --dest` | Destination directory for the organized archive |
-| `-w, --workers` | Number of concurrent workers (default: auto-detect) |
-| `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
-| `-r, --recursive` | Recursively process subdirectories of `--source` |
-| `--ignore` | Glob pattern for files to exclude (repeatable) |
-| `--skip-duplicates` | Skip copying duplicate files instead of copying to `duplicates/` |
-| `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
-| `--camera-owner` | Camera owner string to inject |
-| `--no-carry-sidecars` | Disable carrying pre-existing `.aae` and `.xmp` sidecar files |
-| `--overwrite-sidecar-tags` | When merging tags into a carried `.xmp` sidecar, replace existing values |
-| `--dry-run` | Preview operations without copying |
-| `--db-path` | Explicit path to the SQLite archive database |
+<!-- pixe:begin:gui-flags -->
+| Flag                     | Default | Description                                                                              |
+| ------------------------ | ------- | ---------------------------------------------------------------------------------------- |
+| --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                  |
+| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                |
+| -a, --algorithm          | sha1    | hash algorithm to use: sha1, sha256                                                      |
+| -s, --source             |         | source directory containing media files (default: current directory)                     |
+| -d, --dest               |         | destination directory for the organized archive                                          |
+| --copyright              |         | copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family" |
+| --camera-owner           |         | camera owner string injected into destination files                                      |
+| --dry-run                | false   | preview operations without copying any files                                             |
+| --db-path                |         | explicit path to the SQLite archive database (overrides auto-resolution)                 |
+| -r, --recursive          | false   | recursively process subdirectories of --source                                           |
+| --skip-duplicates        | false   | skip copying duplicate files instead of copying to duplicates/ directory                 |
+| --ignore                 |         | glob pattern for files to ignore (repeatable)                                            |
+| --no-carry-sidecars      | false   | disable carrying pre-existing .aae and .xmp sidecar files                                |
+| --overwrite-sidecar-tags | false   | overwrite existing sidecar tag values instead of preserving them                         |
+<!-- pixe:end:gui-flags -->
 
 **Key bindings:**
 
@@ -366,17 +391,19 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 
 ## Supported File Types
 
-| Format | Extensions |
-|--------|------------|
-| JPEG | `.jpg`, `.jpeg` |
-| HEIC | `.heic`, `.heif` |
-| MP4/MOV | `.mp4`, `.mov` |
-| DNG | `.dng` |
-| NEF | `.nef` |
-| CR2 | `.cr2` |
-| CR3 | `.cr3` |
-| PEF | `.pef` |
-| ARW | `.arw` |
+<!-- pixe:begin:format-table -->
+| Format  | Extensions   | Metadata      |
+| ------- | ------------ | ------------- |
+| ARW     | .arw         |               |
+| CR2     | .cr2         |               |
+| CR3     | .cr3         | XMP sidecar   |
+| DNG     | .dng         |               |
+| HEIC    | .heic, .heif | XMP sidecar   |
+| JPEG    | .jpg, .jpeg  | Embedded EXIF |
+| MP4/MOV | .mp4, .mov   | XMP sidecar   |
+| NEF     | .nef         |               |
+| PEF     | .pef         |               |
+<!-- pixe:end:format-table -->
 
 ### Date Fallback Chain
 

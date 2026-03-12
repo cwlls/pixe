@@ -614,3 +614,230 @@ Two critical bugs in the `pixe gui` command were identified and fixed:
 ✅ Full test suite passes
 ✅ No lint issues
 ✅ Ready for production use
+
+---
+
+## Documentation Generation Tool (`internal/docgen`) (21 Tasks)
+
+**Completion Date:** March 12, 2026
+
+**Status:** ✅ COMPLETE
+
+### Summary
+
+The **Documentation Generation Tool** (`internal/docgen`) has been fully implemented and integrated into the pixe-go project. This tool automatically generates and maintains documentation by extracting metadata from source code and injecting it into documentation files using HTML/YAML comment markers. The tool ensures documentation stays synchronized with source code changes and provides CI validation via `make docs-check`.
+
+### Implementation Overview
+
+All 21 tasks were successfully completed:
+
+#### Core Infrastructure (Tasks 1-2)
+- **Marker Injection Engine** (`inject.go`):
+  - Parses `<!-- pixe:begin:NAME -->` / `<!-- pixe:end:NAME -->` marker pairs
+  - Supports both HTML and YAML comment variants (`# <!-- -->`)
+  - Replaces content between markers with generated output
+  - Implements write-if-changed semantics (only updates files when content differs)
+  - Supports `--check` mode for CI validation
+  - Comprehensive error handling for malformed markers
+
+- **Output Formatters** (`formats.go`):
+  - `FormatMarkdownTable()` — GitHub-Flavored Markdown tables
+  - `FormatHTMLTable()` — HTML tables with class styling
+  - `FormatGoCodeBlock()` — Fenced Go code blocks
+  - `FormatYAMLValue()` — YAML key-value pairs
+  - All formatters produce deterministic, reproducible output
+
+#### Extractors (Tasks 3-8)
+- **Version Extractor** (`extract.go`):
+  - Extracts current version from latest git tag via `git describe --tags --abbrev=0`
+  - Falls back to "dev" if no tags exist
+  - Output format: `version: "v2.0.0"` for YAML injection
+
+- **Interface Extractor** (`extract.go`):
+  - Parses `internal/domain/handler.go` AST
+  - Extracts `FileTypeHandler` interface with all 7 method signatures
+  - Extracts `MetadataCapability` type and 3 capability constants
+  - Includes all associated doc comments
+  - Output: fenced Go code block
+
+- **CLI Flag Extractor** (`extract.go`):
+  - Parses `cmd/*.go` files for Cobra flag registrations
+  - Extracts `StringVarP`, `BoolVarP`, `IntVarP`, `StringVar`, `BoolVar`, `IntVar` patterns
+  - Captures flag name, short form, default value, and description
+  - Supports both `Flags()` and `PersistentFlags()` chains
+  - Output: Markdown or HTML table with columns: Flag, Description
+
+- **Format Table Extractor** (`extract.go`):
+  - Scans `internal/handler/` packages for handler implementations
+  - Extracts `Extensions()` method return values
+  - Extracts `MetadataSupport()` method return constants
+  - Extracts package-level doc comments
+  - Maps metadata constants to human-readable labels
+  - Excludes `tiffraw` (shared base, not user-facing)
+  - Special case: MP4 handler displays as "MP4/MOV"
+  - Output: table with columns: Format, Extensions, Metadata
+
+- **Package Reference Extractor** (`extract.go`):
+  - Scans all packages under `internal/` and `cmd/`
+  - Extracts package-level doc comments
+  - Groups packages by category:
+    - Core Engine: pipeline, discovery, copy, verify, hash, pathbuilder
+    - Data & Persistence: archivedb, manifest, migrate, dblocator, domain, config
+    - File Type Handlers: handler/jpeg, handler/heic, handler/mp4, handler/tiffraw, handler/dng, handler/nef, handler/cr2, handler/cr3, handler/pef, handler/arw
+    - Metadata: tagging, xmp, ignore
+    - User Interface: progress, cli, tui
+  - Output: Markdown with grouped sections and package descriptions
+
+- **Query Subcommand Extractor** (`extract.go`):
+  - Parses `cmd/query_*.go` files for Cobra command definitions
+  - Extracts subcommand names from `Use` field
+  - Extracts descriptions from `Short` field
+  - Extracts subcommand-specific flags
+  - Output: table with columns: Subcommand, Description
+
+#### Main Entry Point (Task 9)
+- **Target Manifest** (`main.go`):
+  - Hardcoded `[]Target` mapping documentation files to extractors
+  - Targets include:
+    - `docs/_config.yml` — version marker
+    - `docs/adding-formats.md` — interface marker
+    - `docs/commands.md` — flag tables and query subcommands markers
+    - `docs/how-it-works.md` — format table marker
+    - `README.md` — all flag tables, query subcommands, and format table markers
+    - `docs/packages.md` — package reference marker
+
+- **Orchestration**:
+  - Parses `--check` flag for CI validation mode
+  - Runs all extractors for each target
+  - Injects content into files
+  - Default mode: writes files if changed, prints summary to stderr
+  - `--check` mode: compares against disk, exits 1 if stale files found
+  - Exit codes: 0 = success, 1 = stale files or fatal error
+
+#### Testing (Tasks 10-11)
+- **Injection Engine Tests** (`docgen_test.go`):
+  - `TestInjectFile_basicReplacement` — single marker pair replacement
+  - `TestInjectFile_multipleMarkers` — multiple marker pairs in one file
+  - `TestInjectFile_preservesSurroundingContent` — content outside markers untouched
+  - `TestInjectFile_idempotent` — injecting same content twice produces identical output
+  - `TestInjectFile_yamlCommentMarkers` — YAML comment variant works
+  - `TestInjectFile_unpairedBegin` — begin without end returns error
+  - `TestInjectFile_unpairedEnd` — end without begin returns error
+  - `TestInjectFile_nestedMarkers` — nested markers return error
+  - `TestInjectFile_unknownSection` — replacement for non-existent section is no-op
+  - `TestWriteIfChanged_writesWhenDifferent` — file written when content differs
+  - `TestWriteIfChanged_skipsWhenIdentical` — file skipped when content matches
+
+- **Extractor Tests** (`docgen_test.go`):
+  - `TestExtractVersion_returnsGitTag` — version matches git tag
+  - `TestExtractInterface_containsFileTypeHandler` — interface name and methods present
+  - `TestExtractInterface_containsMetadataCapability` — capability constants present
+  - `TestExtractFlags_sortCommand` — sort command flags extracted correctly
+  - `TestExtractFlags_includesShortForms` — short flag forms present
+  - `TestExtractFormats_allHandlers` — all 9 handlers present
+  - `TestExtractFormats_excludesTiffraw` — tiffraw excluded
+  - `TestExtractFormats_deterministic` — identical output on repeated runs
+  - `TestExtractPackageReference_allGroups` — all 5 groups present
+  - `TestExtractPackageReference_containsDocComments` — doc comments included
+  - `TestExtractQuerySubcommands_allSubcommands` — all 7 subcommands present
+
+#### Documentation Files Updated (Tasks 12-17)
+- **`docs/_config.yml`** — version marker with YAML comment syntax
+- **`docs/adding-formats.md`** — interface marker wrapping code block
+- **`docs/commands.md`** — flag tables and query subcommands markers (HTML format)
+- **`docs/how-it-works.md`** — format table marker (HTML format)
+- **`README.md`** — all flag tables, query subcommands, and format table markers (Markdown format)
+- **`docs/packages.md`** — newly created with package reference marker
+
+#### Build System Integration (Tasks 19)
+- **Makefile targets**:
+  - `make docs` — regenerates all documentation from source code
+  - `make docs-check` — validates documentation is up to date (CI gate)
+  - `make check` — updated to include `docs-check`
+
+#### Navigation & CI (Tasks 18, 20)
+- **`docs/_data/navigation.yml`** — reordered to reflect audience delineation:
+  - End-user: Install, Commands, How It Works, Technical
+  - Developer: Adding Formats, Packages, Contributing
+  - Project: Changelog
+
+- **`.github/workflows/ci.yml`** — added `docs-check` step to validate documentation on every push/PR
+- **`.github/workflows/pages.yml`** — removed (stale, superseded by GitHub Pages settings)
+
+#### End-to-End Verification (Task 21)
+- ✅ `make docs` — all markers populated with extracted content
+- ✅ `make docs-check` — exits 0 (no stale files)
+- ✅ `make docs` again — no files written (idempotency verified)
+- ✅ Manual modification test — `make docs-check` exits 1 as expected
+- ✅ `make docs` overwrites modifications
+- ✅ `make check` passes (includes `docs-check`)
+- ✅ Generated content verified: flag tables match Cobra definitions, format table matches handlers, interface matches source, version matches git tag, package reference complete
+
+### Files Created
+
+**New packages:**
+- `internal/docgen/` — Complete documentation generation tool
+
+**New files:**
+- `internal/docgen/main.go` — Entry point and target manifest
+- `internal/docgen/inject.go` — Marker injection engine
+- `internal/docgen/formats.go` — Output formatters
+- `internal/docgen/extract.go` — All extractors
+- `internal/docgen/docgen_test.go` — Comprehensive test suite
+- `docs/packages.md` — New developer-facing package reference page
+
+### Files Modified
+
+- `docs/_config.yml` — Added version marker
+- `docs/adding-formats.md` — Added interface marker
+- `docs/commands.md` — Added flag and query subcommands markers
+- `docs/how-it-works.md` — Added format table marker
+- `README.md` — Added all documentation markers
+- `docs/_data/navigation.yml` — Reordered navigation
+- `Makefile` — Added `docs` and `docs-check` targets, updated `check` target
+- `.github/workflows/ci.yml` — Added `docs-check` step
+- `.github/workflows/pages.yml` — Removed (stale)
+
+### Key Features
+
+✅ **Deterministic Output** — All extractors produce consistent, reproducible output  
+✅ **Idempotent** — Running `make docs` multiple times produces no changes  
+✅ **CI Integration** — `make docs-check` validates documentation is current  
+✅ **AST-Based** — Extracts from source code using Go's `go/parser` and `go/ast` packages  
+✅ **Marker Variants** — Supports both HTML (`<!-- -->`) and YAML (`# <!-- -->`) comment styles  
+✅ **Write-If-Changed** — Only updates files when content actually differs  
+✅ **Comprehensive Testing** — Full test coverage for injection engine and all extractors  
+✅ **No External Binaries** — Pure Go implementation, no `os/exec` except for `git describe`  
+
+### Architecture Documentation
+
+Section 15 of `.state/ARCHITECTURE.md` documents the complete feature:
+- **15.1** — Overview and design principles
+- **15.2** — Marker syntax and variants
+- **15.3** — Target manifest and file mapping
+- **15.4** — Extractor implementations
+- **15.5** — Output formatters
+- **15.6** — Injection engine
+- **15.7** — Package categories
+- **15.8** — CI integration
+- **15.9** — Idempotency and determinism
+- **15.10** — Testing strategy
+- **15.11** — Build system integration
+- **15.12** — Documentation audience delineation
+
+### Testing Coverage
+
+- **11 injection engine tests** covering marker parsing, replacement, idempotency, error cases
+- **11 extractor tests** covering all 6 extractors with real source files
+- **All existing tests pass** — no regressions
+
+### Verification
+
+✅ All 21 tasks marked complete in PLAN.md
+✅ Architecture documentation complete and accurate
+✅ All required files created and implemented
+✅ Full test suite passes: `make check && make test-all`
+✅ No lint issues
+✅ Documentation generation working end-to-end
+✅ CI integration validated
+✅ Ready for production use

@@ -11,44 +11,82 @@ Pixe's format support is modular. Each format is an isolated package under `inte
 
 ### The `FileTypeHandler` interface
 
+<!-- pixe:begin:interface -->
 ```go
 // MetadataCapability declares how a handler supports metadata tagging.
 type MetadataCapability int
 
 const (
-    MetadataNone    MetadataCapability = iota // skip tagging entirely
-    MetadataEmbed                             // write tags directly into the file
-    MetadataSidecar                           // write an XMP sidecar file alongside
+	// MetadataNone indicates the format cannot receive metadata at all.
+	// The pipeline skips tagging entirely for this handler.
+	MetadataNone MetadataCapability = iota
+
+	// MetadataEmbed indicates the format supports safe in-file metadata writing.
+	// The pipeline calls WriteMetadataTags to inject tags directly into the file.
+	MetadataEmbed
+
+	// MetadataSidecar indicates the format cannot safely embed metadata.
+	// The pipeline writes an XMP sidecar file alongside the destination copy.
+	MetadataSidecar
 )
 
+// FileTypeHandler is the contract every filetype module must implement.
+// The core engine is format-agnostic and interacts with all media files
+// exclusively through this interface.
+//
+// Detection strategy:
+//  1. The registry performs an initial fast-path match on file extension
+//     using Extensions().
+//  2. Magic bytes are then read from the file header and compared against
+//     MagicBytes() to confirm the type. If they do not match, the file
+//     may be reclassified or flagged as unrecognized.
+//
+// Hashable region:
+//
+//	Each handler defines what constitutes the "media payload" for its
+//	format — the bytes that are hashed and embedded in the output filename.
+//	This region excludes metadata so that metadata edits (e.g. tagging)
+//	do not invalidate the checksum.
 type FileTypeHandler interface {
-    // Detect returns true if this handler can process the given file.
-    // Detection is magic-byte verified after initial extension-based assumption.
-    Detect(filePath string) (bool, error)
+	// Detect returns true if this handler can process the given file.
+	// Implementations should verify magic bytes at the file header after
+	// the registry has already performed an extension-based pre-filter.
+	Detect(filePath string) (bool, error)
 
-    // ExtractDate returns the capture date/time from the file's metadata.
-    // Implementations define their own fallback chain per the global policy.
-    ExtractDate(filePath string) (time.Time, error)
+	// ExtractDate returns the capture date/time from the file's metadata.
+	// Each implementation defines its own format-appropriate fallback chain.
+	// The global policy is: DateTimeOriginal → CreateDate → 1902-02-20 00:00:00 UTC
+	// (Ansel Adams' birthday), making undated files immediately identifiable.
+	ExtractDate(filePath string) (time.Time, error)
 
-    // HashableReader returns an io.Reader over the media payload only,
-    // excluding metadata. The core engine hashes this stream.
-    HashableReader(filePath string) (io.Reader, error)
+	// HashableReader returns an io.Reader scoped to the media payload only,
+	// excluding all metadata. The core engine pipes this reader through the
+	// configured hash algorithm. Callers are responsible for closing any
+	// underlying file handles; implementations should return a reader that
+	// holds an open file and document that the caller must close it.
+	HashableReader(filePath string) (io.ReadCloser, error)
 
-    // MetadataSupport declares this handler's metadata tagging capability.
-    MetadataSupport() MetadataCapability
+	// MetadataSupport declares this handler's metadata tagging capability.
+	// The pipeline uses this to decide between embedded writes, XMP sidecar
+	// generation, or skipping tagging entirely.
+	MetadataSupport() MetadataCapability
 
-    // WriteMetadataTags injects metadata tags directly into the file.
-    // Only called when MetadataSupport() returns MetadataEmbed.
-    // Must be a no-op when tags.IsEmpty() is true.
-    WriteMetadataTags(filePath string, tags MetadataTags) error
+	// WriteMetadataTags injects metadata tags directly into the file.
+	// Only called when MetadataSupport() returns MetadataEmbed.
+	// Must be a no-op when tags.IsEmpty() is true.
+	WriteMetadataTags(filePath string, tags MetadataTags) error
 
-    // Extensions returns the lowercase file extensions this handler claims.
-    Extensions() []string
+	// Extensions returns the lowercase file extensions this handler claims,
+	// used for the initial fast-path detection before magic byte verification.
+	// Example: []string{".jpg", ".jpeg"}
+	Extensions() []string
 
-    // MagicBytes returns the byte signatures used to verify file type.
-    MagicBytes() []MagicSignature
+	// MagicBytes returns the byte signatures used to confirm file type.
+	// Multiple signatures may be returned for formats with variant headers.
+	MagicBytes() []MagicSignature
 }
 ```
+<!-- pixe:end:interface -->
 
 **Method-by-method:**
 

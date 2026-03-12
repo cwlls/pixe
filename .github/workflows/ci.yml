@@ -33,3 +33,6 @@ jobs:
 
       - name: Run Integration Tests
         run: go test -v -race -timeout 120s ./internal/integration/...
+
+      - name: Check generated docs are up to date
+        run: go run ./internal/docgen --check
