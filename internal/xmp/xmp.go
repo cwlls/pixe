@@ -92,8 +92,16 @@ func WriteSidecar(mediaPath string, tags domain.MetadataTags) error {
 	sidecarPath := SidecarPath(mediaPath)
 	tmpPath := sidecarPath + ".tmp"
 
+	// XML-escape user-supplied values before injecting into the template.
+	// text/template does not escape XML special characters, so a copyright
+	// string containing &, <, >, " or ' would produce malformed XML.
+	escapedTags := domain.MetadataTags{
+		Copyright:   xmlEscape(tags.Copyright),
+		CameraOwner: xmlEscape(tags.CameraOwner),
+	}
+
 	var buf bytes.Buffer
-	if err := parsedTemplate.Execute(&buf, tags); err != nil {
+	if err := parsedTemplate.Execute(&buf, escapedTags); err != nil {
 		return fmt.Errorf("xmp: write sidecar %q: render template: %w", sidecarPath, err)
 	}
 
