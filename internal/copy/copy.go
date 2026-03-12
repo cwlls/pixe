@@ -131,6 +131,16 @@ func Execute(src, dest string) (tmpPath string, err error) {
 		return "", fmt.Errorf("copy: stream %q → %q: %w", src, tmpPath, err)
 	}
 
+	// Flush to stable storage before closing. Without Sync, a power failure
+	// between Close and the kernel writing dirty pages could leave a partial
+	// file on disk. The subsequent Verify step would catch this on the next
+	// run, but Sync provides the durability guarantee up front — especially
+	// important on network filesystems where Close does not imply fsync.
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return "", fmt.Errorf("copy: sync temp file %q: %w", tmpPath, err)
+	}
+
 	if err := out.Close(); err != nil {
 		return "", fmt.Errorf("copy: close temp file %q: %w", tmpPath, err)
 	}
