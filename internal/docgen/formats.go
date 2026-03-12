@@ -64,7 +64,7 @@ func FormatMarkdownTable(headers []string, rows [][]string) string {
 			if i < len(row) {
 				cell = row[i]
 			}
-			sb.WriteString(fmt.Sprintf(" %-*s |", widths[i], cell))
+			fmt.Fprintf(&sb, " %-*s |", widths[i], cell)
 		}
 		sb.WriteString("\n")
 	}
@@ -86,7 +86,7 @@ func FormatHTMLTable(headers []string, rows [][]string) string {
 	sb.WriteString("  <thead>\n")
 	sb.WriteString("    <tr>\n")
 	for _, h := range headers {
-		sb.WriteString(fmt.Sprintf("      <th>%s</th>\n", h))
+		fmt.Fprintf(&sb, "      <th>%s</th>\n", h)
 	}
 	sb.WriteString("    </tr>\n")
 	sb.WriteString("  </thead>\n")
@@ -98,7 +98,7 @@ func FormatHTMLTable(headers []string, rows [][]string) string {
 			if i < len(row) {
 				cell = row[i]
 			}
-			sb.WriteString(fmt.Sprintf("      <td>%s</td>\n", cell))
+			fmt.Fprintf(&sb, "      <td>%s</td>\n", cell)
 		}
 		sb.WriteString("    </tr>\n")
 	}
