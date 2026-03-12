@@ -29,6 +29,7 @@ import (
 
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe-go/internal/progress"
 )
 
 // Result holds the outcome of a verify run.
@@ -52,6 +53,18 @@ type Options struct {
 	Hasher   *hash.Hasher
 	Registry *discovery.Registry
 	Output   io.Writer
+	// EventBus, when non-nil, receives structured progress events alongside
+	// the plain-text Output writer. Both can be active simultaneously.
+	// When nil, no events are emitted (existing behaviour is unchanged).
+	EventBus *progress.Bus
+}
+
+// emitVerify sends an event to the bus if one is configured. It is a no-op
+// when bus is nil, so callers do not need to guard every call site.
+func emitVerify(bus *progress.Bus, e progress.Event) {
+	if bus != nil {
+		bus.Emit(e)
+	}
 }
 
 // Run walks dir, parses checksums from filenames, recomputes hashes, and
@@ -61,6 +74,32 @@ type Options struct {
 func Run(opts Options) (Result, error) {
 	var result Result
 
+	// Pre-scan: count non-directory, non-dotfile entries so consumers can
+	// show a determinate progress bar. This is a lightweight walk that does
+	// not open any files.
+	total := 0
+	_ = filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // ignore errors in pre-scan
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && path != opts.Dir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasPrefix(d.Name(), ".") {
+			total++
+		}
+		return nil
+	})
+
+	emitVerify(opts.EventBus, progress.Event{
+		Kind:  progress.EventVerifyStart,
+		Total: total,
+	})
+
+	completed := 0
 	err := filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -79,11 +118,22 @@ func Run(opts Options) (Result, error) {
 			return nil
 		}
 
+		// Compute relative path for event reporting.
+		relPath, _ := filepath.Rel(opts.Dir, path)
+
 		// Parse the expected checksum from the filename.
 		expected, ok := parseChecksum(name)
 		if !ok {
 			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
 			result.Unrecognised++
+			completed++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:      progress.EventVerifyUnrecognised,
+				RelPath:   relPath,
+				AbsPath:   path,
+				Completed: completed,
+				Total:     total,
+			})
 			return nil
 		}
 
@@ -92,6 +142,14 @@ func Run(opts Options) (Result, error) {
 		if err != nil || handler == nil {
 			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
 			result.Unrecognised++
+			completed++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:      progress.EventVerifyUnrecognised,
+				RelPath:   relPath,
+				AbsPath:   path,
+				Completed: completed,
+				Total:     total,
+			})
 			return nil
 		}
 
@@ -100,6 +158,17 @@ func Run(opts Options) (Result, error) {
 		if err != nil {
 			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
 			result.Mismatches++
+			completed++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:             progress.EventVerifyMismatch,
+				RelPath:          relPath,
+				AbsPath:          path,
+				ExpectedChecksum: expected,
+				Reason:           err.Error(),
+				Err:              err,
+				Completed:        completed,
+				Total:            total,
+			})
 			return nil
 		}
 		actual, err := opts.Hasher.Sum(rc)
@@ -107,22 +176,61 @@ func Run(opts Options) (Result, error) {
 		if err != nil {
 			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
 			result.Mismatches++
+			completed++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:             progress.EventVerifyMismatch,
+				RelPath:          relPath,
+				AbsPath:          path,
+				ExpectedChecksum: expected,
+				Reason:           err.Error(),
+				Err:              err,
+				Completed:        completed,
+				Total:            total,
+			})
 			return nil
 		}
 
+		completed++
 		if actual == expected {
 			_, _ = fmt.Fprintf(opts.Output, "  OK            %s\n", path)
 			result.Verified++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:      progress.EventVerifyOK,
+				RelPath:   relPath,
+				AbsPath:   path,
+				Checksum:  actual,
+				Completed: completed,
+				Total:     total,
+			})
 		} else {
 			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
 				path, expected, actual)
 			result.Mismatches++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:             progress.EventVerifyMismatch,
+				RelPath:          relPath,
+				AbsPath:          path,
+				ExpectedChecksum: expected,
+				ActualChecksum:   actual,
+				Completed:        completed,
+				Total:            total,
+			})
 		}
 		return nil
 	})
 
 	_, _ = fmt.Fprintf(opts.Output, "\nDone. verified=%d mismatches=%d unrecognised=%d\n",
 		result.Verified, result.Mismatches, result.Unrecognised)
+
+	emitVerify(opts.EventBus, progress.Event{
+		Kind:  progress.EventVerifyDone,
+		Total: total,
+		Summary: &progress.RunSummary{
+			Verified:     result.Verified,
+			Mismatches:   result.Mismatches,
+			Unrecognised: result.Unrecognised,
+		},
+	})
 
 	return result, err
 }

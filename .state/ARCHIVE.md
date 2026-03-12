@@ -1,5 +1,194 @@
 # Completed Features Archive
 
+## Progress Tracking & TUI Feature (17 Tasks)
+
+**Completion Date:** March 11, 2026
+
+**Status:** ✅ COMPLETE
+
+### Summary
+
+The **Progress Tracking & TUI Feature** adds real-time event-driven progress monitoring and a full-featured terminal user interface (TUI) to Pixe. Users can now track sort and verify operations with live progress bars, activity logs, worker status panes, and an interactive GUI for configuration and status inspection.
+
+### Implementation Overview
+
+All 17 tasks were successfully completed:
+
+#### Dependencies & Infrastructure (Tasks 1-2)
+- Added Charm Bracelet stack: `bubbletea`, `bubbles`, `lipgloss`, `go-isatty`
+- Created `internal/progress/` package with pure stdlib event bus:
+  - `event.go` — 19 `EventKind` constants, `Event` struct, `RunSummary` struct
+  - `bus.go` — Non-blocking `Bus` with buffered channels, `Emit()`, `Close()`, `Events()`
+  - `plainwriter.go` — Reference implementation proving event bus carries full CLI output data
+
+#### Pipeline Instrumentation (Tasks 3-4)
+- **Sort pipeline** (`internal/pipeline/pipeline.go`, `worker.go`):
+  - Added `EventBus *progress.Bus` to `SortOptions`
+  - Emit `EventDiscoverDone`, `EventFileStart`, `EventFileExtracted`, `EventFileHashed`, `EventFileCopied`, `EventFileVerified`, `EventFileTagged`, `EventSidecarCarried`, `EventSidecarFailed`, `EventFileComplete`, `EventFileSkipped`, `EventFileDuplicate`, `EventFileError`, `EventRunComplete`
+  - Accurate `Completed` counter in both sequential and concurrent modes
+  
+- **Verify pipeline** (`internal/verify/verify.go`):
+  - Added `EventBus *progress.Bus` to `verify.Options`
+  - Emit `EventVerifyStart`, `EventVerifyOK`, `EventVerifyMismatch`, `EventVerifyUnrecognised`, `EventVerifyDone`
+  - Pre-scan for total file count (deterministic progress bar)
+
+#### CLI Helpers & Flags (Tasks 5, 7)
+- **`cmd/helpers.go`** — Extracted shared setup:
+  - `resolveConfig()` — Viper → `*config.AppConfig`
+  - `buildRegistry()` — Populate `discovery.Registry` with all handlers
+  - `openArchiveDB()` — Resolve DB path, open, handle migration
+  
+- **`--progress` flag** in `cmd/sort.go` and `cmd/verify.go`:
+  - TTY detection via `isatty.IsTerminal()`
+  - Background goroutine for pipeline, foreground for Bubble Tea program
+  - Event bus wiring, `io.Discard` for per-file output suppression
+
+#### CLI Progress Bar (Task 6)
+- **`internal/cli/styles.go`** — Adaptive Lip Gloss styles (no hardcoded colors)
+- **`internal/cli/progress.go`** — `ProgressModel` Bubble Tea component:
+  - Counters: total, completed, copied, duplicates, skipped, errors
+  - ETA calculation: `elapsed / (completed/total) - elapsed`
+  - Mode-aware labels ("sort" vs "verify")
+  - Event-driven updates, window resize handling, quit keys
+
+#### TUI Infrastructure (Tasks 8-10)
+- **`internal/tui/styles.go`** — 15+ adaptive Lip Gloss styles for tabs, headers, footers, borders, counters, logs, workers, overlays
+- **`internal/tui/keymap.go`** — `KeyMap` struct with global, sort, log, overlay, status bindings; `ShortHelp()` and `FullHelp()` methods
+- **`internal/tui/components.go`** — Reusable sub-components:
+  - `styledProgress` — Wraps Bubbles progress with TUI styling
+  - `activityLog` — Scrollable viewport with filtering and follow mode
+  - `workerPane` — Per-worker status display with collapse-to-summary
+  - `errorOverlay` — Modal error detail box
+  
+- **`internal/tui/app.go`** — Root `App` model:
+  - Three tabs: Sort, Verify, Status
+  - Tab switching (Tab, ShiftTab, 1/2/3 keys)
+  - Global key handling (q, ctrl+c, ?)
+  - Window size propagation
+  - Context-sensitive footer help
+
+#### TUI Tabs (Tasks 11-13)
+- **`internal/tui/sort.go`** — `SortModel`:
+  - States: configure → running → complete
+  - Configure: config summary, [s] start, [e] edit, [n] new
+  - Running: event bus bridge, progress bar, activity log, worker pane, error overlay
+  - Complete: summary with breakdown bars, [e] filter errors, [n] new run
+  - Event-to-log formatting with adaptive colors
+  
+- **`internal/tui/verify.go`** — `VerifyModel`:
+  - States: configure → running → complete
+  - Configure: directory input, [v] start verify
+  - Running: `EventVerifyOK`, `EventVerifyMismatch`, `EventVerifyUnrecognised` handling
+  - Complete: summary with mismatch count, [e] filter mismatches
+  
+- **`internal/tui/status.go`** — `StatusModel`:
+  - States: loading → ready
+  - Background goroutine: `discovery.Walk()` + `manifest.LoadLedger()` classification
+  - Five categories: sorted, duplicates, errored, unsorted, unrecognized
+  - Category switching (1–5 keys), refresh (r key), scrollable file lists
+  - Spinner during load, summary counters in ready state
+
+#### GUI Command (Task 14)
+- **`cmd/gui.go`** — `pixe gui` Cobra command:
+  - Registers all sort flags (source, dest, workers, algorithm, copyright, camera-owner, dry-run, db-path, recursive, skip-duplicates, ignore, no-carry-sidecars, overwrite-sidecar-tags)
+  - `runGUI()` wiring: `resolveConfig()`, `buildRegistry()`, `Hasher`, `AppOptions`, `tea.NewProgram()`
+  - Alt-screen mode for clean TUI rendering
+  - Lazy DB opening (Sort tab opens on run start, Status tab doesn't need DB)
+
+#### Testing (Tasks 15-17)
+- **`internal/progress/progress_test.go`** — 8 tests:
+  - `TestBus_EmitAndReceive` — Field preservation
+  - `TestBus_NonBlockingEmit` — Buffer overflow handling
+  - `TestBus_Close` — Channel closure
+  - `TestBus_CloseIdempotent` — Safe double-close
+  - `TestBus_EmitAfterClose` — Silent drop
+  - `TestBus_TimestampSet` — Automatic timestamp injection
+  - `TestPlainWriter_SortOutput` — Plain-text format fidelity
+  - `TestPlainWriter_VerifyOutput` — Verify event formatting
+  
+- **`internal/cli/progress_test.go`** — 9 tests:
+  - `TestProgressModel_Init` — Command initialization
+  - `TestProgressModel_CounterUpdates` — Event→counter mapping
+  - `TestProgressModel_DiscoverDone` — Total count setting
+  - `TestProgressModel_CurrentFile` — Current file tracking
+  - `TestProgressModel_DoneOnRunComplete` — Quit transition
+  - `TestProgressModel_DoneOnBusClosed` — Bus closure handling
+  - `TestProgressModel_WindowResize` — Width/height updates
+  - `TestProgressModel_ViewContainsCounters` — Output validation
+  - `TestProgressModel_VerifyMode` — Mode-specific labels
+  
+- **`internal/tui/tui_test.go`** — 10 tests:
+  - `TestApp_TabSwitching` — Tab cycling and direct jump
+  - `TestApp_WindowSize` — Size propagation
+  - `TestApp_QuitKeys` — Quit handling
+  - `TestSortModel_StateTransitions` — State machine
+  - `TestSortModel_EventCounters` — Counter accuracy
+  - `TestSortModel_ActivityLogAppend` — Log formatting
+  - `TestSortModel_FilterCycle` — Filter rotation
+  - `TestVerifyModel_StateTransitions` — Verify state machine
+  - `TestStatusModel_CategorySwitching` — Category navigation
+  - `TestStatusModel_Refresh` — Refresh cycle
+
+### Files Created
+
+**New packages:**
+- `internal/progress/` — Event bus (event.go, bus.go, plainwriter.go)
+- `internal/cli/` — Progress bar (styles.go, progress.go, progress_test.go)
+- `internal/tui/` — Full TUI (styles.go, keymap.go, components.go, app.go, sort.go, verify.go, status.go, tui_test.go)
+
+**New commands:**
+- `cmd/gui.go` — `pixe gui` command
+
+**New helpers:**
+- `cmd/helpers.go` — `resolveConfig()`, `buildRegistry()`, `openArchiveDB()`
+
+### Architecture Documentation
+
+Section 11 of `.state/ARCHITECTURE.md` documents the complete feature:
+
+- **11.1** — Event-driven architecture overview
+- **11.2** — Event bus design (non-blocking, buffered channels)
+- **11.3** — Event kinds (19 constants)
+- **11.4** — Pipeline instrumentation (sort and verify)
+- **11.5** — CLI progress bar (Bubble Tea model, ETA calculation)
+- **11.6** — TUI architecture (tab-based, state machines)
+- **11.7** — TUI components (progress, log, workers, overlay)
+- **11.8** — GUI command integration
+
+### Key Design Decisions
+
+1. **Non-blocking event emission** — Events are dropped on buffer overflow; progress is best-effort, never blocks pipeline.
+
+2. **Event bus is pure stdlib** — Zero external dependencies in `internal/progress/`; all Charm deps isolated to `internal/cli/` and `internal/tui/`.
+
+3. **Lazy database opening** — GUI doesn't open archive DB upfront; Sort tab opens it when run starts (dest path may be edited interactively).
+
+4. **Adaptive colors only** — All Lip Gloss styles use `lipgloss.AdaptiveColor` for light/dark terminal compatibility.
+
+5. **Background pipeline, foreground TUI** — Pipeline runs in goroutine, Bubble Tea program runs on main goroutine for clean event loop.
+
+6. **Event-to-log formatting** — Each terminal event is formatted into a styled activity log line; PlainWriter proves event bus carries full output data.
+
+7. **State machines for tabs** — Each tab (Sort, Verify, Status) is a Bubble Tea model with explicit state transitions (configure→running→complete, loading→ready).
+
+### Testing Coverage
+
+- **8 event bus tests** covering emit, close, timestamp, plain-text output
+- **9 CLI progress tests** covering counters, ETA, window resize, mode-specific labels
+- **10 TUI tests** covering tab switching, state transitions, event handling, category navigation
+- **All existing tests pass** — no regressions
+
+### Verification
+
+✅ All 17 tasks marked complete in PLAN.md
+✅ Architecture documentation complete and accurate
+✅ All required packages and commands created
+✅ Full test suite passes: `make check && make test-all`
+✅ No lint issues
+✅ Ready for production use
+
+---
+
 ## Source Sidecar Carry Feature (22 Tasks)
 
 **Completion Date:** March 11, 2026

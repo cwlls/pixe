@@ -16,31 +16,21 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"runtime"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/dblocator"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
-	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
-	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
-	dnghandler "github.com/cwlls/pixe-go/internal/handler/dng"
-	heichandler "github.com/cwlls/pixe-go/internal/handler/heic"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	mp4handler "github.com/cwlls/pixe-go/internal/handler/mp4"
-	nefhandler "github.com/cwlls/pixe-go/internal/handler/nef"
-	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
+	"github.com/cwlls/pixe-go/internal/cli"
 	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/migrate"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
 	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe-go/internal/progress"
 )
 
 var sortCmd = &cobra.Command{
@@ -63,32 +53,14 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	// 1. Resolve configuration from Viper (flags > config file > defaults).
 	// ------------------------------------------------------------------
-	cfg := &config.AppConfig{
-		Source:               viper.GetString("source"),
-		Destination:          viper.GetString("dest"),
-		Workers:              viper.GetInt("workers"),
-		Algorithm:            viper.GetString("algorithm"),
-		Copyright:            viper.GetString("copyright"),
-		CameraOwner:          viper.GetString("camera_owner"),
-		DryRun:               viper.GetBool("dry_run"),
-		DBPath:               viper.GetString("db_path"),
-		Recursive:            viper.GetBool("recursive"),
-		SkipDuplicates:       viper.GetBool("skip_duplicates"),
-		Ignore:               viper.GetStringSlice("ignore"),
-		CarrySidecars:        !viper.GetBool("no_carry_sidecars"),
-		OverwriteSidecarTags: viper.GetBool("overwrite_sidecar_tags"),
+	cfg, err := resolveConfig()
+	if err != nil {
+		return err
 	}
 
 	// ------------------------------------------------------------------
 	// 2. Validate inputs.
 	// ------------------------------------------------------------------
-	if cfg.Source == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("resolve current directory: %w", err)
-		}
-		cfg.Source = cwd
-	}
 	if cfg.Destination == "" {
 		return fmt.Errorf("--dest is required")
 	}
@@ -107,11 +79,6 @@ func runSort(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create destination directory %q: %w", cfg.Destination, err)
 	}
 
-	// Default workers to NumCPU when unset (0).
-	if cfg.Workers <= 0 {
-		cfg.Workers = runtime.NumCPU()
-	}
-
 	// ------------------------------------------------------------------
 	// 3. Build the hasher.
 	// ------------------------------------------------------------------
@@ -123,56 +90,23 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	// 4. Build the handler registry.
 	// ------------------------------------------------------------------
-	reg := discovery.NewRegistry()
-	reg.Register(jpeghandler.New())
-	reg.Register(heichandler.New())
-	reg.Register(mp4handler.New())
-	reg.Register(dnghandler.New())
-	reg.Register(nefhandler.New())
-	reg.Register(cr2handler.New())
-	reg.Register(cr3handler.New())
-	reg.Register(pefhandler.New())
-	reg.Register(arwhandler.New())
+	reg := buildRegistry()
 
 	// ------------------------------------------------------------------
 	// 5. Resolve and open the archive database.
 	// ------------------------------------------------------------------
-	loc, err := dblocator.Resolve(cfg.Destination, cfg.DBPath)
+	db, cleanup, err := openArchiveDB(cfg)
 	if err != nil {
-		return fmt.Errorf("resolve database location: %w", err)
+		return err
 	}
-	if loc.Notice != "" {
-		fmt.Fprintln(os.Stderr, loc.Notice)
-	}
-
-	db, err := archivedb.Open(loc.DBPath)
-	if err != nil {
-		return fmt.Errorf("open archive database: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	// Write dbpath marker if needed (explicit path or network mount).
-	if loc.MarkerNeeded {
-		if err := dblocator.WriteMarker(cfg.Destination, loc.DBPath); err != nil {
-			return fmt.Errorf("write dbpath marker: %w", err)
-		}
-	}
+	defer cleanup()
 
 	// ------------------------------------------------------------------
-	// 6. Auto-migrate from legacy JSON manifest if present.
-	// ------------------------------------------------------------------
-	migResult, err := migrate.MigrateIfNeeded(db, cfg.Destination)
-	if err != nil {
-		return fmt.Errorf("migrate manifest: %w", err)
-	}
-	if migResult.Migrated {
-		_, _ = fmt.Fprintln(os.Stdout, migResult.Notice)
-	}
-
-	// ------------------------------------------------------------------
-	// 7. Run the pipeline.
+	// 6. Run the pipeline.
 	// ------------------------------------------------------------------
 	runID := uuid.New().String()
+
+	useProgress := viper.GetBool("progress") && isatty.IsTerminal(os.Stdout.Fd())
 
 	opts := pipeline.SortOptions{
 		Config:       cfg,
@@ -185,9 +119,37 @@ func runSort(cmd *cobra.Command, args []string) error {
 		RunID:        runID,
 	}
 
-	result, err := pipeline.Run(opts)
-	if err != nil {
-		return fmt.Errorf("sort failed: %w", err)
+	var result pipeline.SortResult
+	if useProgress {
+		bus := progress.NewBus(256)
+		opts.EventBus = bus
+		opts.Output = io.Discard
+
+		model := cli.NewProgressModel(bus, cfg.Source, cfg.Destination, "sort")
+		p := tea.NewProgram(model)
+
+		// Run pipeline in background; close bus when done.
+		var pipelineErr error
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			result, pipelineErr = pipeline.Run(opts)
+			bus.Close()
+		}()
+
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("progress UI: %w", err)
+		}
+		<-done
+		if pipelineErr != nil {
+			return fmt.Errorf("sort failed: %w", pipelineErr)
+		}
+	} else {
+		var err error
+		result, err = pipeline.Run(opts)
+		if err != nil {
+			return fmt.Errorf("sort failed: %w", err)
+		}
 	}
 
 	// Non-zero errors → exit code 1 (Cobra propagates the returned error).
@@ -213,6 +175,7 @@ func init() {
 	sortCmd.Flags().StringArray("ignore", nil, `glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")`)
 	sortCmd.Flags().Bool("no-carry-sidecars", false, "disable carrying pre-existing .aae and .xmp sidecar files from source to destination")
 	sortCmd.Flags().Bool("overwrite-sidecar-tags", false, "when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them")
+	sortCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
 
 	// Mark required flags (--source defaults to cwd; --dest has no default).
 	_ = sortCmd.MarkFlagRequired("dest")
@@ -229,4 +192,5 @@ func init() {
 	_ = viper.BindPFlag("ignore", sortCmd.Flags().Lookup("ignore"))
 	_ = viper.BindPFlag("no_carry_sidecars", sortCmd.Flags().Lookup("no-carry-sidecars"))
 	_ = viper.BindPFlag("overwrite_sidecar_tags", sortCmd.Flags().Lookup("overwrite-sidecar-tags"))
+	_ = viper.BindPFlag("progress", sortCmd.Flags().Lookup("progress"))
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/domain"
 	"github.com/cwlls/pixe-go/internal/manifest"
 	"github.com/cwlls/pixe-go/internal/pathbuilder"
+	"github.com/cwlls/pixe-go/internal/progress"
 	"github.com/cwlls/pixe-go/internal/tagging"
 )
 
@@ -155,6 +156,13 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			}
 		}
 		result.Skipped++
+		emit(opts.EventBus, progress.Event{
+			Kind:      progress.EventFileSkipped,
+			RelPath:   sf.Path,
+			Reason:    sf.Reason,
+			WorkerID:  -1,
+			Completed: result.Skipped + result.Errors,
+		})
 	}
 
 	// --- Filter out previously-imported files before feeding workers ---
@@ -166,6 +174,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if checkErr != nil {
 				_, _ = fmt.Fprint(out, formatOutput("ERR ", df.RelPath, checkErr.Error()))
 				result.Errors++
+				emit(opts.EventBus, progress.Event{
+					Kind:      progress.EventFileError,
+					RelPath:   df.RelPath,
+					Reason:    checkErr.Error(),
+					Err:       checkErr,
+					WorkerID:  -1,
+					Completed: result.Skipped + result.Processed + result.Errors,
+				})
 				continue
 			}
 			if processed {
@@ -180,6 +196,13 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				_ = db.UpdateFileStatus(fileID, "skipped",
 					archivedb.WithSkipReason(reason))
 				result.Skipped++
+				emit(opts.EventBus, progress.Event{
+					Kind:      progress.EventFileSkipped,
+					RelPath:   df.RelPath,
+					Reason:    reason,
+					WorkerID:  -1,
+					Completed: result.Skipped + result.Processed + result.Errors,
+				})
 				continue
 			}
 		}
@@ -249,6 +272,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					Status: domain.LedgerStatusError,
 					Reason: wr.err.Error(),
 				})
+				emit(opts.EventBus, progress.Event{
+					Kind:      progress.EventFileError,
+					RelPath:   wr.df.RelPath,
+					Reason:    wr.err.Error(),
+					Err:       wr.err,
+					WorkerID:  wr.workerID,
+					Completed: result.Skipped + result.Processed + result.Errors,
+				})
 				completed++
 				continue
 			}
@@ -310,6 +341,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					Status: domain.LedgerStatusError,
 					Reason: fr.err.Error(),
 				})
+				emit(opts.EventBus, progress.Event{
+					Kind:      progress.EventFileError,
+					RelPath:   fr.df.RelPath,
+					Reason:    fr.err.Error(),
+					Err:       fr.err,
+					WorkerID:  -1,
+					Completed: result.Skipped + result.Processed + result.Errors,
+				})
 			} else if fr.skipCopy {
 				// --skip-duplicates: no file was written; update DB and emit output.
 				if db != nil {
@@ -328,6 +367,15 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					Checksum: fr.checksum,
 					Matches:  fr.existingDestForLedger,
 					// Destination intentionally omitted — no file was written.
+				})
+				emit(opts.EventBus, progress.Event{
+					Kind:        progress.EventFileDuplicate,
+					RelPath:     fr.df.RelPath,
+					IsDuplicate: true,
+					MatchesDest: fr.existingDestForLedger,
+					Checksum:    fr.checksum,
+					WorkerID:    -1,
+					Completed:   result.Skipped + result.Processed + result.Errors,
 				})
 			} else {
 				finalRelDest := fr.relDest
@@ -417,6 +465,16 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						Sidecars:    finalSidecars,
 						Matches:     finalExistingDest,
 					})
+					emit(opts.EventBus, progress.Event{
+						Kind:        progress.EventFileDuplicate,
+						RelPath:     fr.df.RelPath,
+						IsDuplicate: true,
+						MatchesDest: finalExistingDest,
+						Destination: finalRelDest,
+						Checksum:    fr.checksum,
+						WorkerID:    -1,
+						Completed:   result.Skipped + result.Processed + result.Errors,
+					})
 				} else {
 					_, _ = fmt.Fprint(out, formatOutput("COPY", fr.df.RelPath, finalRelDest))
 					emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, time.Time{}), opts.Config)
@@ -427,6 +485,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						Destination: finalRelDest,
 						VerifiedAt:  &fr.verifiedAt,
 						Sidecars:    finalSidecars,
+					})
+					emit(opts.EventBus, progress.Event{
+						Kind:        progress.EventFileComplete,
+						RelPath:     fr.df.RelPath,
+						Destination: finalRelDest,
+						Checksum:    fr.checksum,
+						WorkerID:    -1,
+						Completed:   result.Skipped + result.Processed + result.Errors,
 					})
 				}
 			}
@@ -459,6 +525,12 @@ func runWorker(ctx context.Context, id int,
 				return
 			}
 
+			emit(opts.EventBus, progress.Event{
+				Kind:     progress.EventFileStart,
+				RelPath:  item.df.RelPath,
+				WorkerID: id,
+			})
+
 			// --- Extract date ---
 			captureDate, err := item.df.Handler.ExtractDate(item.df.Path)
 			if err != nil {
@@ -471,6 +543,12 @@ func runWorker(ctx context.Context, id int,
 				_ = db.UpdateFileStatus(item.fileID, "extracted",
 					archivedb.WithCaptureDate(captureDate))
 			}
+			emit(opts.EventBus, progress.Event{
+				Kind:        progress.EventFileExtracted,
+				RelPath:     item.df.RelPath,
+				CaptureDate: captureDate,
+				WorkerID:    id,
+			})
 
 			// --- Hash ---
 			rc, err := item.df.Handler.HashableReader(item.df.Path)
@@ -489,6 +567,12 @@ func runWorker(ctx context.Context, id int,
 			if db != nil {
 				_ = db.UpdateFileStatus(item.fileID, "hashed", archivedb.WithChecksum(checksum))
 			}
+			emit(opts.EventBus, progress.Event{
+				Kind:     progress.EventFileHashed,
+				RelPath:  item.df.RelPath,
+				Checksum: checksum,
+				WorkerID: id,
+			})
 
 			ext := filepath.Ext(item.df.Path)
 
@@ -559,6 +643,12 @@ func runWorker(ctx context.Context, id int,
 				_ = db.UpdateFileStatus(item.fileID, "copied",
 					archivedb.WithDestination(assign.absDest, assign.relDest))
 			}
+			emit(opts.EventBus, progress.Event{
+				Kind:        progress.EventFileCopied,
+				RelPath:     item.df.RelPath,
+				Destination: assign.relDest,
+				WorkerID:    id,
+			})
 
 			// --- Verify (hash the temp file) ---
 			vr := copypkg.Verify(tmpPath, checksum, item.df.Handler, opts.Hasher)
@@ -612,6 +702,12 @@ func runWorker(ctx context.Context, id int,
 			if db != nil {
 				_ = db.UpdateFileStatus(item.fileID, "verified")
 			}
+			emit(opts.EventBus, progress.Event{
+				Kind:        progress.EventFileVerified,
+				RelPath:     item.df.RelPath,
+				Destination: assign.relDest,
+				WorkerID:    id,
+			})
 
 			// --- Carry sidecars (after verify, before tag) ---
 			var carriedSidecarRels []string
@@ -623,9 +719,26 @@ func runWorker(ctx context.Context, id int,
 					if err := copypkg.CopySidecar(sc.Path, sidecarDest); err != nil {
 						_, _ = fmt.Fprintf(out, "  WARNING  sidecar carry failed for %s: %v\n",
 							sc.RelPath, err)
+						emit(opts.EventBus, progress.Event{
+							Kind:           progress.EventSidecarFailed,
+							RelPath:        item.df.RelPath,
+							SidecarRelPath: sc.RelPath,
+							SidecarExt:     sc.Ext,
+							Reason:         err.Error(),
+							Err:            err,
+							WorkerID:       id,
+						})
 						continue
 					}
 					carriedSidecarRels = append(carriedSidecarRels, sidecarRel)
+					emit(opts.EventBus, progress.Event{
+						Kind:           progress.EventSidecarCarried,
+						RelPath:        item.df.RelPath,
+						SidecarRelPath: sc.RelPath,
+						SidecarExt:     sc.Ext,
+						Destination:    sidecarRel,
+						WorkerID:       id,
+					})
 					if sc.Ext == ".xmp" {
 						carriedXMPAbs = sidecarDest
 					}
@@ -645,6 +758,11 @@ func runWorker(ctx context.Context, id int,
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tagged")
 					}
+					emit(opts.EventBus, progress.Event{
+						Kind:     progress.EventFileTagged,
+						RelPath:  item.df.RelPath,
+						WorkerID: id,
+					})
 				}
 			}
 

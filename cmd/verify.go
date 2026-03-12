@@ -16,22 +16,17 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/discovery"
-	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
-	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
-	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
-	dnghandler "github.com/cwlls/pixe-go/internal/handler/dng"
-	heichandler "github.com/cwlls/pixe-go/internal/handler/heic"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	mp4handler "github.com/cwlls/pixe-go/internal/handler/mp4"
-	nefhandler "github.com/cwlls/pixe-go/internal/handler/nef"
-	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
+	"github.com/cwlls/pixe-go/internal/cli"
 	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe-go/internal/progress"
 	"github.com/cwlls/pixe-go/internal/verify"
 )
 
@@ -67,25 +62,47 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("hash algorithm: %w", err)
 	}
 
-	reg := discovery.NewRegistry()
-	reg.Register(jpeghandler.New())
-	reg.Register(heichandler.New())
-	reg.Register(mp4handler.New())
-	reg.Register(dnghandler.New())
-	reg.Register(nefhandler.New())
-	reg.Register(cr2handler.New())
-	reg.Register(cr3handler.New())
-	reg.Register(pefhandler.New())
-	reg.Register(arwhandler.New())
+	reg := buildRegistry()
 
-	result, err := verify.Run(verify.Options{
+	useProgress := viper.GetBool("verify_progress") && isatty.IsTerminal(os.Stdout.Fd())
+
+	opts := verify.Options{
 		Dir:      dir,
 		Hasher:   h,
 		Registry: reg,
 		Output:   os.Stdout,
-	})
-	if err != nil {
-		return fmt.Errorf("verify failed: %w", err)
+	}
+
+	var result verify.Result
+	if useProgress {
+		bus := progress.NewBus(256)
+		opts.EventBus = bus
+		opts.Output = io.Discard
+
+		model := cli.NewProgressModel(bus, dir, "", "verify")
+		p := tea.NewProgram(model)
+
+		var verifyErr error
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			result, verifyErr = verify.Run(opts)
+			bus.Close()
+		}()
+
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("progress UI: %w", err)
+		}
+		<-done
+		if verifyErr != nil {
+			return fmt.Errorf("verify failed: %w", verifyErr)
+		}
+	} else {
+		var err error
+		result, err = verify.Run(opts)
+		if err != nil {
+			return fmt.Errorf("verify failed: %w", err)
+		}
 	}
 
 	if result.Mismatches > 0 {
@@ -98,6 +115,8 @@ func init() {
 	rootCmd.AddCommand(verifyCmd)
 
 	verifyCmd.Flags().StringP("dir", "d", "", "archive directory to verify (required)")
+	verifyCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
 	_ = verifyCmd.MarkFlagRequired("dir")
 	_ = viper.BindPFlag("verify_dir", verifyCmd.Flags().Lookup("dir"))
+	_ = viper.BindPFlag("verify_progress", verifyCmd.Flags().Lookup("progress"))
 }
