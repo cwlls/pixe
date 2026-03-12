@@ -175,17 +175,23 @@ dirA (read-only source)          dirB (organized destination)
 │ IMG_0001.jpg     │  ────────>  │ 2021/12-Dec/                         │
 │ IMG_0002.jpg     │   discover  │   20211225_062223_7d97e98f...jpg      │
 │ IMG_1234.jpg     │   filter    │ 2022/02-Feb/                         │
-│ VID_0010.mp4     │   extract   │   20220202_123101_447d3060...jpg      │
-│ notes.txt        │   hash      │ 2022/03-Mar/                         │
-│ subfolder/       │   copy      │   20220316_232122_321c7d6f...jpg      │
-│   IMG_5678.jpg   │   verify    │ duplicates/                          │
-│                  │   tag       │   20260306_103000/                    │
-│ .pixe_ledger.json│  (ignored)  │     2022/02-Feb/                     │
-└──────────────────┘             │       20220202_123101_447d...jpg      │
-                                 │ .pixe/                               │
-  stdout:                        │   pixe.db  (or dbpath marker)        │
-  COPY IMG_0001.jpg -> 2021/...  └──────────────────────────────────────┘
-  SKIP IMG_1234.jpg -> previously imported
+│ IMG_1234.aae     │   extract   │   20220202_123101_447d3060...jpg      │
+│ DSC_5678.nef     │   hash      │   20220202_123101_447d3060...jpg.xmp  │
+│ DSC_5678.xmp     │   copy      │ 2022/03-Mar/                         │
+│ VID_0010.mp4     │   verify    │   20220316_232122_321c7d6f...nef      │
+│ notes.txt        │   carry     │   20220316_232122_321c7d6f...nef.xmp  │
+│ subfolder/       │   tag       │ duplicates/                          │
+│   IMG_5678.jpg   │             │   20260306_103000/                    │
+│                  │             │     2022/02-Feb/                     │
+│ .pixe_ledger.json│  (ignored)  │       20220202_123101_447d...jpg      │
+└──────────────────┘             │ .pixe/                               │
+                                 │   pixe.db  (or dbpath marker)        │
+  stdout:                        └──────────────────────────────────────┘
+  COPY IMG_0001.jpg -> 2021/...
+  COPY IMG_1234.jpg -> 2022/...
+       +sidecar IMG_1234.aae -> 2022/...aae
+  COPY DSC_5678.nef -> 2022/...
+       +sidecar DSC_5678.xmp -> 2022/...xmp (merge tags)
   DUPE IMG_0002.jpg -> matches 2022/02-Feb/20220202...jpg
   ERR  notes.txt    -> unsupported format: .txt
 ```
@@ -195,9 +201,9 @@ dirA (read-only source)          dirB (organized destination)
 Each file passes through these stages, tracked in the archive database:
 
 ```
-pending → extracted → hashed → copied → verified → tagged → complete
-                                   ↓         ↓         ↓
-                                 failed   mismatch   tag_failed
+pending → extracted → hashed → copied → verified → sidecars carried → tagged → complete
+                                    ↓         ↓                          ↓
+                                  failed   mismatch                  tag_failed
 ```
 
 1. **Pending** — File discovered in `dirA`, not yet processed.
@@ -205,12 +211,13 @@ pending → extracted → hashed → copied → verified → tagged → complete
 3. **Hashed** — Checksum computed over the media payload (data only, excluding metadata).
 4. **Copied** — File written to a temporary file (`.<filename>.pixe-tmp`) in the destination directory within `dirB`. The file does not yet exist at its canonical path. See Section 4.10 for the atomic copy design.
 5. **Verified** — Temporary file re-read and checksum recomputed; matches the source hash. On success, the temp file is atomically renamed to its canonical destination path. On mismatch, the temp file is deleted (the source in `dirA` is untouched and the file can be reprocessed). See Section 4.10.
-6. **Tagged** — Optional metadata persisted to the destination. The pipeline queries the handler's `MetadataSupport()` capability to determine the strategy:
+6. **Sidecars Carried** — Pre-existing sidecar files (`.aae`, `.xmp`) associated with the media file during discovery are copied to the destination directory, renamed to match the parent's new filename. Sidecar carry failure is non-fatal — the media file is already safely in place. Skipped when `--no-carry-sidecars` is active or when the file has no associated sidecars. See Section 4.12.
+7. **Tagged** — Optional metadata persisted to the destination. The pipeline queries the handler's `MetadataSupport()` capability to determine the strategy:
    - **`MetadataEmbed`** → Tags written directly into the destination file (e.g., JPEG EXIF).
-   - **`MetadataSidecar`** → XMP sidecar file written alongside the destination file (e.g., `*.arw.xmp`).
+   - **`MetadataSidecar`** → XMP sidecar file written alongside the destination file (e.g., `*.arw.xmp`). If a source `.xmp` sidecar was carried in the previous stage, Pixe merges tags into it instead of generating a new file. See Section 4.12.6.
    - **`MetadataNone`** → Tagging skipped entirely; stage advances directly to complete.
    - If no tags are configured (`tags.IsEmpty()`), the stage is skipped regardless of capability.
-7. **Complete** — All operations successful. Recorded in ledger.
+8. **Complete** — All operations successful. Recorded in ledger.
 
 Error states (`failed`, `mismatch`, `tag_failed`) halt processing for that file and flag it for user attention. A `tag_failed` status means the media file was successfully copied and verified, but metadata persistence (embedded or sidecar) failed. The file is still present in `dirB`.
 
@@ -281,7 +288,6 @@ ignore:
   - "*.txt"
   - ".DS_Store"
   - "Thumbs.db"
-  - "*.aae"
 ```
 
 Patterns from the CLI flag and config file are **merged** (additive). The hardcoded ledger ignore is always present in addition to user patterns.
@@ -432,6 +438,8 @@ This follows the Adobe convention where the sidecar name includes the full origi
 - Sidecar write failure is **non-fatal** (same as embedded tag failure): the pipeline logs a warning, sets the DB status to `tag_failed`, and continues. The media file itself is already safely copied and verified.
 - In **dry-run mode**, sidecar files are not written (same as embedded tags).
 - Sidecars for **duplicate files** are written alongside the duplicate copy in `duplicates/<run_timestamp>/...`, mirroring the media file's routing.
+
+**Interaction with source sidecar carry:** When the pipeline has carried a pre-existing `.xmp` sidecar from `dirA` (see Section 4.12), the tagging stage **merges** Pixe's tags into the carried sidecar rather than generating a new one from the template. This preserves existing XMP data (develop settings, ratings, keywords, etc.) while injecting Pixe's copyright and ownership fields. See Section 4.12.6 for the full merge rules and overwrite policy.
 
 ### 4.9 Recursive Source Processing
 
@@ -757,7 +765,6 @@ pixe sort --dest ./archive --ignore "*.txt" --ignore "node_modules/" --ignore "*
 # OS junk
 .DS_Store
 Thumbs.db
-*.aae
 
 # Build artifacts
 node_modules/
@@ -778,6 +785,173 @@ Previews.lrdata/
 ```
 
 **Combined effect:** When running `pixe sort --source ./photos --dest ./archive --recursive`, patterns from all sources are merged. A file at `photos/raw-exports/Previews.lrdata/thumb.lrprev` would be ignored by both the nested `.pixeignore` patterns (`Previews.lrdata/` and `*.lrprev`).
+
+### 4.12 Source Sidecar Carry
+
+When sorting media from `dirA`, Pixe detects and carries pre-existing **sidecar files** that sit alongside source media files. Carried sidecars are copied to the same destination directory as their parent media file, renamed to match the parent's new filename, and treated as attachments — not independently tracked files. This preserves companion data (Apple edit instructions, Lightroom develop settings, ratings, keywords, etc.) that would otherwise be silently left behind.
+
+**Default:** Enabled. Opt out with `--no-carry-sidecars` (config key: `carry_sidecars: false`).
+
+#### 4.12.1 Supported Sidecar Extensions
+
+The initial set of recognized sidecar extensions is:
+
+| Extension | Origin | Content |
+|---|---|---|
+| `.aae` | Apple (iOS/macOS Photos) | Non-destructive edit instructions (XML plist) |
+| `.xmp` | Adobe (Lightroom, Camera Raw, Capture One, etc.) | XMP metadata packet — develop settings, ratings, keywords, GPS, copyright, etc. |
+
+This set is intentionally small and may be expanded in future versions (e.g., `.thm`, `.pp3`, `.dop`). The supported extensions are defined as a package-level constant slice, not user-configurable — adding new extensions is a code change, not a config change.
+
+#### 4.12.2 Association Rule
+
+Sidecars are associated with their parent media file by **stem matching within the same directory**:
+
+- A file `IMG_1234.xmp` in the same directory as `IMG_1234.HEIC` is associated with the HEIC file.
+- A file `IMG_1234.HEIC.xmp` (Adobe full-extension convention) in the same directory as `IMG_1234.HEIC` is also associated with the HEIC file.
+- Association is **case-insensitive** on the stem (e.g., `img_1234.xmp` matches `IMG_1234.HEIC`).
+- A sidecar can only associate with **one** parent. If multiple media files share a stem (e.g., `IMG_1234.HEIC` and `IMG_1234.JPG`), the sidecar associates with whichever media file the discovery phase encounters first. This is an inherent ambiguity in stem-based matching; the user can resolve it by using the full-extension convention (`IMG_1234.HEIC.xmp`) which is unambiguous.
+- Sidecars without a matching parent media file in the same directory are **skipped** with reason `"orphan sidecar: no matching media file"` and reported in stdout and ledger.
+
+#### 4.12.3 Discovery Integration
+
+Sidecar detection happens during the **discovery phase** (`internal/discovery/`), after handler-based file classification:
+
+1. `Walk()` first classifies all files as usual (discovered, skipped, or ignored).
+2. A second pass scans the skipped files for recognized sidecar extensions.
+3. For each sidecar candidate, `Walk()` searches the discovered files for a parent with a matching stem (or full filename for the `<name>.<ext>.xmp` convention) in the same directory.
+4. Matched sidecars are **removed from the skipped list** and attached to their parent `DiscoveredFile`.
+5. Unmatched sidecars remain in the skipped list with reason `"orphan sidecar: no matching media file"`.
+
+The `DiscoveredFile` struct gains a new field:
+
+```go
+type DiscoveredFile struct {
+    Path     string                  // absolute path for file I/O
+    RelPath  string                  // relative path from dirA for display and ledger
+    Handler  domain.FileTypeHandler  // resolved handler
+    Sidecars []SidecarFile           // pre-existing sidecars from dirA (may be empty)
+}
+
+type SidecarFile struct {
+    Path    string // absolute path in dirA
+    RelPath string // relative path from dirA
+    Ext     string // normalized lowercase extension (e.g., ".aae", ".xmp")
+}
+```
+
+When `--no-carry-sidecars` is active, the second pass is skipped entirely. Sidecar files remain in the skipped list with their original reason (`"unsupported format: .xmp"`, etc.) — the same behavior as before this feature existed.
+
+#### 4.12.4 Destination Naming
+
+Carried sidecars are renamed to match the parent media file's destination filename, using the **full-extension convention** (Adobe standard):
+
+```
+<parent_dest_filename>.<sidecar_ext>
+```
+
+Examples:
+
+| Source (dirA) | Parent destination (dirB) | Sidecar destination (dirB) |
+|---|---|---|
+| `IMG_1234.aae` | `2021/12-Dec/20211225_062223_7d97e98f.heic` | `2021/12-Dec/20211225_062223_7d97e98f.heic.aae` |
+| `IMG_1234.xmp` | `2021/12-Dec/20211225_062223_7d97e98f.heic` | `2021/12-Dec/20211225_062223_7d97e98f.heic.xmp` |
+| `IMG_1234.HEIC.xmp` | `2021/12-Dec/20211225_062223_7d97e98f.heic` | `2021/12-Dec/20211225_062223_7d97e98f.heic.xmp` |
+| `DSC_5678.xmp` | `2022/03-Mar/20220316_232122_321c7d6f.nef` | `2022/03-Mar/20220316_232122_321c7d6f.nef.xmp` |
+
+This ensures unambiguous association in the destination archive and compatibility with Adobe tools that expect the `<filename>.<ext>.xmp` convention.
+
+#### 4.12.5 Pipeline Integration
+
+Sidecar carry slots into the existing pipeline between **verify** and **tag**:
+
+```
+pending → extracted → hashed → copied → verified → sidecars carried → tagged → complete
+```
+
+For each `DiscoveredFile` with a non-empty `Sidecars` slice:
+
+1. **After verify succeeds** (the parent media file is at its canonical destination path), each sidecar is copied to its derived destination path.
+2. Sidecar copy uses a **simple file copy** — no temp-file-then-rename atomicity, no hash verification. Sidecars are small metadata files, not irreplaceable media payloads. The source in `dirA` is always available for re-copy. This matches the treatment of Pixe-generated XMP sidecars (Section 4.8.2: "Sidecars are generated artifacts, not copied files. They are not subject to the copy-then-verify integrity flow").
+3. **Sidecar copy failure is non-fatal.** If a sidecar fails to copy, the pipeline logs a warning to stdout and continues. The parent media file is already safely copied and verified. The file's status is **not** downgraded to `tag_failed` for a sidecar copy failure — the media file is the primary artifact. A warning line is emitted: `WARN <source_filename> -> sidecar carry failed: <sidecar_relpath>: <error>`.
+4. **After sidecars are carried**, the tag stage proceeds as usual. For XMP sidecars specifically, the tag stage behavior depends on whether a source `.xmp` was carried — see Section 4.12.6.
+
+#### 4.12.6 XMP Sidecar Merge (Tag Interaction)
+
+When a source `.xmp` sidecar has been carried to the destination AND the user has configured metadata tags (`--copyright` and/or `--camera-owner`), the tagging stage **merges** Pixe's tags into the carried `.xmp` rather than generating a new one. This preserves the user's existing XMP data (develop settings, ratings, keywords, etc.) while adding Pixe's metadata.
+
+**Interaction matrix:**
+
+| Source has `.xmp`? | Tags configured? | Behavior |
+|---|---|---|
+| No | No | Nothing. No sidecar carried, no sidecar generated. |
+| No | Yes | Pixe generates `.xmp` from template (existing behavior, unchanged). |
+| Yes | No | Source `.xmp` carried as-is. No tag injection. |
+| Yes | Yes | Source `.xmp` carried, then Pixe merges tags into it (see merge rules below). |
+
+**Merge rules:**
+
+The `xmp` package gains a `MergeTags(sidecarPath string, tags MetadataTags, overwrite bool) error` function that:
+
+1. Parses the existing XMP file at `sidecarPath`.
+2. For each configured tag (`dc:rights`/`xmpRights:Marked`, `aux:OwnerName`):
+   - If the field **does not exist** in the XMP: inject it (add the element and, if necessary, the namespace declaration).
+   - If the field **already exists** in the XMP and `overwrite` is `false` (default): **leave the existing value intact**. The source is authoritative.
+   - If the field **already exists** in the XMP and `overwrite` is `true`: **replace** the existing value with Pixe's configured value.
+3. Adds missing namespace declarations (`xmlns:dc`, `xmlns:xmpRights`, `xmlns:aux`) to the `rdf:Description` element as needed. Existing namespace declarations are preserved.
+4. Writes the modified XMP back to the same path (atomic write via temp file + rename, same as `WriteSidecar`).
+
+**Overwrite control:**
+
+- **Default:** Source values are authoritative (`overwrite: false`). Pixe only fills in missing fields.
+- **Override:** `--overwrite-sidecar-tags` flag (config key: `overwrite_sidecar_tags: true`) causes Pixe to replace existing values with its configured tags.
+
+**`.aae` files are never modified.** The merge behavior applies exclusively to `.xmp` sidecars. Apple `.aae` files are carried verbatim — Pixe has no reason to write into Apple edit instruction plists.
+
+#### 4.12.7 Duplicate Handling
+
+Sidecars follow their parent media file's duplicate routing:
+
+- **Default mode (copy duplicates):** If the parent is routed to `duplicates/<run_timestamp>/...`, its sidecars are copied there too, with the same naming convention.
+- **Skip duplicates mode (`--skip-duplicates`):** If the parent is skipped (no copy), sidecars are also skipped. No sidecar bytes are written to `dirB`.
+
+#### 4.12.8 Database & Ledger Tracking
+
+Carried sidecars are **attachments to their parent file** — they do not get their own rows in the `files` table. This is consistent with how Pixe-generated XMP sidecars are already handled (they are filesystem artifacts with no DB presence).
+
+**Schema addition:** A new nullable text column on the `files` table:
+
+```sql
+ALTER TABLE files ADD COLUMN carried_sidecars TEXT;
+```
+
+The `carried_sidecars` column stores a JSON array of the sidecar destination relative paths, or `NULL` when no sidecars were carried. Example value: `["2021/12-Dec/20211225_062223_7d97e98f.heic.aae","2021/12-Dec/20211225_062223_7d97e98f.heic.xmp"]`.
+
+This is sufficient for auditability (knowing which sidecars were carried for a given file) without the overhead of a separate table or per-sidecar rows. The column is additive (`ALTER TABLE ADD COLUMN`) and nullable, so existing databases migrate seamlessly.
+
+**Ledger:** The `LedgerEntry` gains an optional `sidecars` field (omitted when empty, consistent with `omitempty` convention):
+
+```json
+{"path":"IMG_1234.HEIC","status":"complete","checksum":"7d97e98f...","destination":"2021/12-Dec/20211225_062223_7d97e98f.heic","sidecars":["2021/12-Dec/20211225_062223_7d97e98f.heic.aae","2021/12-Dec/20211225_062223_7d97e98f.heic.xmp"]}
+```
+
+#### 4.12.9 Dry-Run Mode
+
+In `--dry-run` mode, sidecar association is still performed during discovery (so the user can see what would be carried), but no sidecar files are copied or modified. The stdout output includes the sidecar association:
+
+```
+COPY IMG_1234.HEIC -> 2021/12-Dec/20211225_062223_7d97e98f.heic (dry run)
+     +sidecar IMG_1234.aae -> 2021/12-Dec/20211225_062223_7d97e98f.heic.aae
+     +sidecar IMG_1234.xmp -> 2021/12-Dec/20211225_062223_7d97e98f.heic.xmp (merge tags)
+```
+
+#### 4.12.10 `pixe clean` Interaction
+
+The `pixe clean` command (Section 7.5) already handles orphaned XMP sidecars from interrupted runs. Carried sidecars that were partially written during an interrupted run are **not** automatically cleaned by `pixe clean` — they are indistinguishable from intentionally carried sidecars without additional bookkeeping. This is acceptable because:
+
+- Sidecar files are small (typically < 100 KB).
+- An interrupted carry leaves a complete or partial sidecar file that is harmless alongside the media file.
+- Re-running `pixe sort` will re-carry the sidecar correctly (the parent media file will be skipped as "previously imported", but the sidecar carry is idempotent if the parent's destination already exists).
 
 ---
 
@@ -1091,6 +1265,8 @@ Primary operation. Discovers files in `dirA`, processes them through the pipelin
 | `--recursive` | `-r` | `false` | Recursively process subdirectories of `--source` |
 | `--skip-duplicates` | | `false` | Skip copying files whose checksum matches an already-archived file. Emits `DUPE` on stdout and records in DB/ledger, but writes no bytes to `dirB`. See Section 4.6. |
 | `--ignore` | | (none) | Glob pattern for files to ignore. Repeatable: each `--ignore` adds one pattern. Merged with patterns from config file. |
+| `--no-carry-sidecars` | | `false` | Disable source sidecar carry. When set, pre-existing `.aae` and `.xmp` files in `dirA` are not carried alongside their parent media file. See Section 4.12. |
+| `--overwrite-sidecar-tags` | | `false` | When merging Pixe tags into a carried `.xmp` sidecar, overwrite existing values. Default preserves source values (source is authoritative). See Section 4.12.6. |
 
 #### `pixe verify`
 Walks a previously sorted `dirB`, parses checksums from filenames, recomputes data-only hashes, and reports mismatches.
@@ -1167,6 +1343,8 @@ copyright: "Copyright {{.Year}} My Family, all rights reserved"
 camera_owner: "Wells Family"
 recursive: false
 skip_duplicates: false
+carry_sidecars: true
+overwrite_sidecar_tags: false
 ignore:
   - "*.txt"
   - ".DS_Store"
@@ -2149,6 +2327,7 @@ Each file entry is a self-contained JSON object. Entries are appended one at a t
 | `checksum` | `copy`, `duplicate` | Hex-encoded content hash. Present when the file was hashed (even if it was then identified as a duplicate). |
 | `destination` | `copy`, `duplicate` (when copied) | Relative path within `dirB` where the file was written. For copied duplicates, this is the path under `duplicates/`. Absent when `--skip-duplicates` is active (no file was written). |
 | `verified_at` | `copy` | ISO 8601 UTC timestamp of successful verification. |
+| `sidecars` | `copy` (when sidecars carried) | JSON array of relative paths within `dirB` where carried sidecar files were written. Absent when no sidecars were carried or when `--no-carry-sidecars` is active. See Section 4.12.8. |
 | `matches` | `duplicate` | Relative path within `dirB` of the existing file this duplicate matches. |
 | `reason` | `skip`, `error` | Human-readable explanation of why the file was skipped or why processing failed. Same text shown on stdout. |
 
@@ -2195,12 +2374,15 @@ dirB (organized destination)
 │   └── 12-Dec/
 │       ├── 20211225_062223_7d97e98f...jpg       ← JPEG: tags embedded in file
 │       ├── 20211225_071500_a3b4c5d6...arw       ← RAW: tags in sidecar
-│       └── 20211225_071500_a3b4c5d6...arw.xmp   ← XMP sidecar (Adobe convention)
+│       └── 20211225_071500_a3b4c5d6...arw.xmp   ← XMP sidecar (Pixe-generated or carried from source)
 ├── 2022/
 │   ├── 02-Feb/
 │   │   ├── 20220202_123101_447d3060...jpg
 │   │   ├── 20220202_130000_e5f6a7b8...dng
-│   │   └── 20220202_130000_e5f6a7b8...dng.xmp
+│   │   ├── 20220202_130000_e5f6a7b8...dng.xmp
+│   │   ├── 20220202_143000_b1c2d3e4...heic      ← HEIC with carried sidecars
+│   │   ├── 20220202_143000_b1c2d3e4...heic.aae  ← carried .aae (Apple edits)
+│   │   └── 20220202_143000_b1c2d3e4...heic.xmp  ← carried .xmp (with merged Pixe tags)
 │   └── 03-Mar/
 │       ├── 20220316_232122_321c7d6f...mp4
 │       └── 20220316_232122_321c7d6f...mp4.xmp
@@ -2209,7 +2391,8 @@ dirB (organized destination)
 │       └── 2022/02-Feb/
 │           ├── 20220202_123101_447d...jpg
 │           ├── 20220202_130000_e5f6...nef
-│           └── 20220202_130000_e5f6...nef.xmp   ← sidecars follow dupes too
+│           ├── 20220202_130000_e5f6...nef.xmp    ← sidecars follow dupes too
+│           └── 20220202_130000_e5f6...nef.aae    ← carried sidecars follow dupes too
 └── .pixe/
     ├── pixe.db              ← SQLite database (if dirB is local)
     ├── pixe.db-wal          ← WAL file (transient, managed by SQLite)
@@ -2221,7 +2404,7 @@ dirB (organized destination)
     └── archive-a1b2c3d4.db  ← database for a network-mounted dirB
 ```
 
-> **Note:** XMP sidecar files (`.xmp`) only appear when the user has configured `--copyright` and/or `--camera-owner`. If no metadata tags are configured, no sidecars are generated and the layout is identical to the pre-sidecar design.
+> **Note:** XMP sidecar files (`.xmp`) may appear from two sources: (1) Pixe-generated sidecars when `--copyright` and/or `--camera-owner` are configured, or (2) pre-existing source sidecars carried from `dirA` (see Section 4.12). When both apply, Pixe merges its tags into the carried source sidecar rather than generating a separate file. Carried `.aae` files (Apple edit instructions) are copied verbatim and never modified by Pixe.
 
 > **Note:** During active copy operations, temporary files with the pattern `.<filename>.pixe-tmp` may be visible in destination directories (e.g., `2021/12-Dec/.20211225_062223_7d97e98f...jpg.pixe-tmp`). These are transient artifacts of the atomic copy process (Section 4.10) and are renamed to their canonical paths upon successful verification. Orphaned temp files from interrupted runs are self-healing on `pixe resume` and can be cleaned via `pixe clean` (Section 7.5).
 
@@ -2237,13 +2420,15 @@ dirB (organized destination)
 | `pixe sort` | `--recursive` | `-r` | `false` | `recursive` | Recursively process subdirectories of `--source`. Default is top-level only. |
 | `pixe sort` | `--skip-duplicates` | | `false` | `skip_duplicates` | Skip copying files whose checksum matches an already-archived file. Emits `DUPE` on stdout and records in DB/ledger, but writes no bytes to `dirB`. Default is to copy duplicates to `duplicates/<run_timestamp>/...` for user review. See Section 4.6. |
 | `pixe sort` | `--ignore` | | (none) | `ignore` (list) | Glob pattern for files to ignore. Repeatable on CLI; list in config. Merged additively. `.pixe_ledger.json` is always ignored (hardcoded). |
+| `pixe sort` | `--no-carry-sidecars` | | `false` | `carry_sidecars: false` | Disable source sidecar carry. Pre-existing `.aae` and `.xmp` files in `dirA` are not carried alongside their parent media file. See Section 4.12. |
+| `pixe sort` | `--overwrite-sidecar-tags` | | `false` | `overwrite_sidecar_tags` | When merging Pixe tags into a carried `.xmp` sidecar, overwrite existing values instead of preserving them. See Section 4.12.6. |
 | `pixe clean` | `--dir` | `-d` | (required) | `clean_dir` | Destination directory (`dirB`) to clean. |
 | `pixe clean` | `--db-path` | | (auto-detected) | `clean_db_path` | Explicit path to the SQLite database file. Overrides automatic location logic. |
 | `pixe clean` | `--dry-run` | | `false` | — | Preview what would be cleaned without deleting files or running VACUUM. |
 | `pixe clean` | `--temp-only` | | `false` | — | Only clean orphaned temp files and XMP sidecars. Skip database compaction. |
 | `pixe clean` | `--vacuum-only` | | `false` | — | Only run database compaction. Skip artifact scanning. Mutually exclusive with `--temp-only`. |
 
-All flags are supported via config file and environment variable (e.g., `PIXE_RECURSIVE`, `PIXE_SKIP_DUPLICATES`, `PIXE_IGNORE`). The `--ignore` flag can appear multiple times on the command line, each specifying one glob pattern. In the config file, `ignore` is a YAML list.
+All flags are supported via config file and environment variable (e.g., `PIXE_RECURSIVE`, `PIXE_SKIP_DUPLICATES`, `PIXE_IGNORE`, `PIXE_CARRY_SIDECARS`, `PIXE_OVERWRITE_SIDECAR_TAGS`). The `--ignore` flag can appear multiple times on the command line, each specifying one glob pattern. In the config file, `ignore` is a YAML list. The `--no-carry-sidecars` flag maps to the config key `carry_sidecars: false` (note the inverted polarity — the config key is positive, the flag is negative).
 
 ### 9.2 Updated `pixe resume`
 
@@ -2717,7 +2902,7 @@ gem "kramdown-parser-gfm"
 
 These items are explicitly **out of scope** for the current build but are acknowledged for future planning:
 
-1. **Source sidecar association** (`.aae`, existing `.xmp`) — When sorting from `dirA`, should Pixe detect and carry along sidecar files that already exist alongside source media files? Currently, only Pixe-generated XMP sidecars (written to `dirB` during tagging) are handled. Pre-existing sidecars in `dirA` are treated as unrecognized files.
+1. ~~**Source sidecar association** (`.aae`, existing `.xmp`)~~ — **Promoted to Section 4.12.** No longer a future consideration.
 2. ~~**CRW format** (legacy Canon pre-2004) — Excluded from current RAW support due to its obsolete proprietary format and lack of pure-Go library support. Could be revisited if demand arises.~~ no longer under consideration
 3. **MP4/MOV embedded metadata writing** — MP4 currently uses `MetadataSidecar`. A future enhancement could implement `udta/©cpy` and `udta/©own` atom writing in pure Go and promote MP4 to `MetadataEmbed`, eliminating the sidecar for video files.
 4. **HEIC embedded metadata writing** — HEIC currently uses `MetadataSidecar`. If a reliable pure-Go HEIC EXIF writer becomes available, HEIC could be promoted to `MetadataEmbed`. The `MetadataCapability` enum makes this a one-line change per handler.
