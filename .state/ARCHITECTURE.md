@@ -38,6 +38,98 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 ---
 
+## 2.1 v2.3.0 Feature Additions
+
+The following features were added in v2.3.0 (2026-03-12):
+
+### New File Format Handlers
+
+Three new file format handlers extend archive support:
+
+- **PNG Handler** (`internal/handler/png/`) — Supports `.png` files with EXIF extraction from `eXIf` chunks (PNG 1.5+) or `tEXt` chunks. Falls back to Ansel Adams date when no metadata is present. Uses full-file hashing (PNG compression is unstable across re-encoding). Declares `MetadataSidecar` capability for XMP sidecar tagging.
+
+- **ORF Handler** (`internal/handler/orf/`) — Supports Olympus `.orf` RAW files. TIFF-based format using `tiffraw.Base` for shared logic. Detects both Olympus-specific `IIRO` header and standard TIFF LE signatures.
+
+- **RW2 Handler** (`internal/handler/rw2/`) — Supports Panasonic `.rw2` RAW files. TIFF-based format using `tiffraw.Base`. Detects Panasonic-specific `49 49 55 00` header signature.
+
+All three handlers are registered in `cmd/helpers.go` `buildRegistry()` and tested via `handlertest.RunSuite()`.
+
+### Colorized Terminal Output
+
+A new `Formatter` type in `internal/pipeline/format.go` applies Lip Gloss styling to status verbs when stdout is a TTY:
+
+- `COPY` → green (`#85e89d` dark, `#22863a` light)
+- `DUPE` → yellow (`#ffdf5d` dark, `#b08800` light)
+- `ERR` → red bold (`#f97583` dark, `#cb2431` light)
+- `SKIP` → dim gray (`#6a737d` dark, `#959da5` light)
+
+TTY detection uses `isatty.IsTerminal(os.Stdout.Fd())`. The `NO_COLOR` environment variable is respected (standard convention). Color is disabled in `--quiet` mode (no per-file output to colorize).
+
+### Verbosity Levels
+
+Two new persistent flags on `rootCmd`:
+
+- `--quiet` / `-q` — Suppresses per-file output (`COPY`/`SKIP`/`DUPE`/`ERR` lines). Only the final summary is emitted. Maps to `cfg.Verbosity = -1`.
+- `--verbose` / `-v` — Adds per-stage timing info to output (extract, hash, copy, verify, tag durations) and worker utilization stats. Maps to `cfg.Verbosity = 1`.
+
+These flags are mutually exclusive. Normal mode (`Verbosity = 0`) is the default.
+
+### Date Filter Flags
+
+Two new flags on `pixe sort`:
+
+- `--since <YYYY-MM-DD>` — Skips files with capture date before the specified date (inclusive).
+- `--before <YYYY-MM-DD>` — Skips files with capture date after the specified date (inclusive). Internally parsed as end-of-day (`23:59:59.999`).
+
+Both can be combined for a date range. Skipped files emit `SKIP <filename> -> outside date range` and are recorded in the DB with `status = 'skipped'` and `skip_reason = 'outside date range'`. The Ansel Adams fallback date (`1902-02-20`) is subject to filtering.
+
+### Config Auto-Discovery
+
+When `pixe sort` is invoked, the source directory (`dirA`) is checked for a `.pixe.yaml` file. If found, its configuration is merged with the global config, respecting the priority chain:
+
+**CLI flags > source-local `.pixe.yaml` > profile config > global `.pixe.yaml` > env vars > defaults**
+
+This is implemented via a two-phase approach in `cmd/sort.go`: after `resolveConfig()` returns, the source directory is checked, and if a local config exists, `mergeSourceConfig()` merges eligible keys (those not explicitly set via CLI flags) into the global Viper instance, then `resolveConfig()` is called again.
+
+### Config Profiles
+
+A new `--profile <name>` persistent flag on `rootCmd` enables loading named configuration profiles:
+
+```bash
+pixe sort --profile family --dest ./archive
+```
+
+Profiles are searched in:
+1. `~/.pixe/profiles/<name>.yaml`
+2. `$XDG_CONFIG_HOME/pixe/profiles/<name>.yaml`
+
+Profile files use the same YAML format as `.pixe.yaml`. The `loadProfile()` helper in `cmd/helpers.go` handles discovery and merging. Profiles are merged after source-local config in the priority chain.
+
+### `pixe stats` Command
+
+A new `pixe stats` command provides an archive dashboard:
+
+```bash
+pixe stats --dir ./archive
+```
+
+Displays:
+- Total files and size
+- Duplicate and error counts (broken down by type: failed, mismatch, tag_failed)
+- Skipped file count
+- Date range (earliest to latest capture date)
+- Last import timestamp
+- Total run count
+- Format breakdown (file counts by extension, sorted by frequency)
+
+Backed by new database methods in `internal/archivedb/queries.go`:
+- `FormatBreakdown() (map[string]int, error)` — Returns file counts grouped by extension
+- `LastRunDate() (*time.Time, error)` — Returns the timestamp of the most recent completed run
+
+The command supports `--json` output for scripting.
+
+---
+
 ## 3. Version Management
 
 ### 3.1 Source of Truth: Git Tags

@@ -9,6 +9,21 @@ This document tracks planned features and improvements for Pixe. Items are group
 
 ---
 
+## v2.3.0 (2026-03-12)
+
+**Implemented features:**
+
+- **B5** — Date filter flags (`--since`, `--before`) on `pixe sort`
+- **D3** — Verbosity levels (`--quiet`, `--verbose`)
+- **D4** — Colorized terminal output with TTY auto-detection
+- **E1** — Config auto-discovery in source directory (`.pixe.yaml`)
+- **C4** — `pixe stats` archive dashboard command
+- **A3** — PNG file format handler
+- **A6** — ORF (Olympus RAW) and RW2 (Panasonic RAW) handlers
+- **E2** — Config profiles (`--profile` flag)
+
+---
+
 ## A. New File Format Support
 
 ### A2 — AVIF Handler 🟡
