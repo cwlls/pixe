@@ -6,15 +6,7 @@ on:
       -
   workflow_dispatch:
     inputs:
-      tag_name:
-        description: 'The Git tag to build and release (e.g., v1.0.0)'
-        required: true
-        type: string
-      run_build:
-        description: 'Run the build process?'
-        required: true
-        default: 'true'
-        type: boolean
+      # Optional inputs can be defined here
       logLevel:
         description: 'Log level'
         required: true
