@@ -145,6 +145,19 @@ func Walk(dirA string, reg *Registry, opts WalkOptions) (discovered []Discovered
 			return nil // completely invisible
 		}
 
+		// --- Symlink policy ---
+		// Symlinks are skipped explicitly. filepath.WalkDir does not follow
+		// symlinks for non-root entries, but we still detect and record them
+		// so the user knows they were seen and intentionally excluded.
+		// A symlink pointing outside dirA could expose unintended files.
+		if d.Type()&fs.ModeSymlink != 0 {
+			skipped = append(skipped, SkippedFile{
+				Path:   relPath,
+				Reason: "symlink",
+			})
+			return nil
+		}
+
 		// --- Dotfile policy (hardcoded, not configurable) ---
 		// .pixe_ledger.json and .pixeignore are caught above by the ignore matcher.
 		// Other dotfiles (e.g. .DS_Store) are skipped with a reason.
