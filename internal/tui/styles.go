@@ -51,16 +51,6 @@ var borderStyle = lipgloss.NewStyle().
 var progressBarStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#cccccc"})
 
-// Counter styles.
-var (
-	counterStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#cccccc"})
-
-	errorCounterStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#cc0000", Dark: "#ff6666"}).
-				Bold(true)
-)
-
 // Activity log verb styles.
 var (
 	logCopyStyle = lipgloss.NewStyle().

@@ -380,16 +380,16 @@ func (m SortModel) viewConfigure() string {
 	sb.WriteString("\n")
 	sb.WriteString(headerStyle.Render("  Sort Configuration"))
 	sb.WriteString("\n\n")
-	sb.WriteString(fmt.Sprintf("  Source:      %s\n", dimStyle.Render(m.config.Source)))
-	sb.WriteString(fmt.Sprintf("  Destination: %s\n", dimStyle.Render(m.config.Destination)))
-	sb.WriteString(fmt.Sprintf("  Workers:     %s\n", dimStyle.Render(fmt.Sprintf("%d", m.config.Workers))))
-	sb.WriteString(fmt.Sprintf("  Algorithm:   %s\n", dimStyle.Render(m.config.Algorithm)))
-	sb.WriteString(fmt.Sprintf("  Recursive:   %s\n", dimStyle.Render(fmt.Sprintf("%v", m.config.Recursive))))
+	fmt.Fprintf(&sb, "  Source:      %s\n", dimStyle.Render(m.config.Source))
+	fmt.Fprintf(&sb, "  Destination: %s\n", dimStyle.Render(m.config.Destination))
+	fmt.Fprintf(&sb, "  Workers:     %s\n", dimStyle.Render(fmt.Sprintf("%d", m.config.Workers)))
+	fmt.Fprintf(&sb, "  Algorithm:   %s\n", dimStyle.Render(m.config.Algorithm))
+	fmt.Fprintf(&sb, "  Recursive:   %s\n", dimStyle.Render(fmt.Sprintf("%v", m.config.Recursive)))
 	if m.config.Copyright != "" {
-		sb.WriteString(fmt.Sprintf("  Copyright:   %s\n", dimStyle.Render(m.config.Copyright)))
+		fmt.Fprintf(&sb, "  Copyright:   %s\n", dimStyle.Render(m.config.Copyright))
 	}
 	if m.config.CameraOwner != "" {
-		sb.WriteString(fmt.Sprintf("  Camera Owner:%s\n", dimStyle.Render(m.config.CameraOwner)))
+		fmt.Fprintf(&sb, "  Camera Owner:%s\n", dimStyle.Render(m.config.CameraOwner))
 	}
 	sb.WriteString("\n")
 	if m.config.Destination == "" {
@@ -412,7 +412,7 @@ func (m SortModel) viewRunning() string {
 
 	// Counters.
 	sb.WriteString("  ")
-	sb.WriteString(fmt.Sprintf("%d / %d  ", m.completed, m.total))
+	fmt.Fprintf(&sb, "%d / %d  ", m.completed, m.total)
 	sb.WriteString(logCopyStyle.Render(fmt.Sprintf("copied: %d", m.copied)))
 	sb.WriteString("  │  ")
 	sb.WriteString(logDupeStyle.Render(fmt.Sprintf("dupes: %d", m.duplicates)))
@@ -454,10 +454,10 @@ func (m SortModel) viewComplete() string {
 	sb.WriteString("\n")
 	sb.WriteString(headerStyle.Render("  Sort Complete"))
 	sb.WriteString("\n\n")
-	sb.WriteString(fmt.Sprintf("  Copied:    %s\n", logCopyStyle.Render(fmt.Sprintf("%d", m.copied))))
-	sb.WriteString(fmt.Sprintf("  Duplicates:%s\n", logDupeStyle.Render(fmt.Sprintf("%d", m.duplicates))))
-	sb.WriteString(fmt.Sprintf("  Skipped:   %s\n", logSkipStyle.Render(fmt.Sprintf("%d", m.skipped))))
-	sb.WriteString(fmt.Sprintf("  Errors:    %s\n", logErrStyle.Render(fmt.Sprintf("%d", m.errors))))
+	fmt.Fprintf(&sb, "  Copied:    %s\n", logCopyStyle.Render(fmt.Sprintf("%d", m.copied)))
+	fmt.Fprintf(&sb, "  Duplicates:%s\n", logDupeStyle.Render(fmt.Sprintf("%d", m.duplicates)))
+	fmt.Fprintf(&sb, "  Skipped:   %s\n", logSkipStyle.Render(fmt.Sprintf("%d", m.skipped)))
+	fmt.Fprintf(&sb, "  Errors:    %s\n", logErrStyle.Render(fmt.Sprintf("%d", m.errors)))
 	sb.WriteString("\n")
 	sb.WriteString(m.log.View())
 	sb.WriteString("\n")

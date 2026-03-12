@@ -4,6 +4,14 @@
 
 ---
 
+## [2.0.2] -- 2026-03-11
+
+### Improvements
+
+- **Lint violations fixed** — Resolved QF1012 (staticcheck) violations in `internal/tui` package by replacing `sb.WriteString(fmt.Sprintf(...))` calls with `fmt.Fprintf(&sb, ...)` for improved efficiency (17 occurrences across `sort.go`, `status.go`, `verify.go`). Removed unused `counterStyle` and `errorCounterStyle` variables from `internal/tui/styles.go`. Result: `make lint` → 0 issues.
+
+---
+
 ## [2.0.1] -- 2026-03-11
 
 ### Bug Fixes

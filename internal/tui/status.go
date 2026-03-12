@@ -178,9 +178,9 @@ func (m *StatusModel) refreshViewport() {
 	var sb strings.Builder
 	for _, f := range cat.files {
 		if f.detail != "" {
-			sb.WriteString(fmt.Sprintf("  %s  %s\n", f.relPath, dimStyle.Render(f.detail)))
+			fmt.Fprintf(&sb, "  %s  %s\n", f.relPath, dimStyle.Render(f.detail))
 		} else {
-			sb.WriteString(fmt.Sprintf("  %s\n", f.relPath))
+			fmt.Fprintf(&sb, "  %s\n", f.relPath)
 		}
 	}
 	m.viewport.SetContent(sb.String())
@@ -317,8 +317,8 @@ func (m StatusModel) View() string {
 	}
 
 	// Source and ledger info.
-	sb.WriteString(fmt.Sprintf("  Source: %s\n", dimStyle.Render(m.source)))
-	sb.WriteString(fmt.Sprintf("  Ledger: %s\n", dimStyle.Render(m.ledgerInfo)))
+	fmt.Fprintf(&sb, "  Source: %s\n", dimStyle.Render(m.source))
+	fmt.Fprintf(&sb, "  Ledger: %s\n", dimStyle.Render(m.ledgerInfo))
 	sb.WriteString("\n")
 
 	// Summary counters.
