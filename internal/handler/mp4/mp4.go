@@ -48,7 +48,6 @@
 package mp4
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -58,7 +57,11 @@ import (
 	mp4lib "github.com/abema/go-mp4"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/fileutil"
 )
+
+// Compile-time interface check.
+var _ domain.FileTypeHandler = (*Handler)(nil)
 
 // mp4Epoch is the QuickTime/MP4 epoch: 1904-01-01 00:00:00 UTC.
 var mp4Epoch = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -91,7 +94,7 @@ func (h *Handler) MagicBytes() []domain.MagicSignature {
 // Detect returns true if the file has a .mp4/.mov extension AND contains
 // a recognised ISOBMFF box type at offset 4.
 func (h *Handler) Detect(filePath string) (bool, error) {
-	ext := strings.ToLower(fileExt(filePath))
+	ext := strings.ToLower(fileutil.Ext(filePath))
 	if ext != ".mp4" && ext != ".mov" {
 		return false, nil
 	}
@@ -148,19 +151,40 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 // HashableReader returns an io.ReadCloser that yields the concatenated raw
 // bytes of all video keyframes (sync samples) in presentation order.
 //
+// The implementation uses io.SectionReader + io.MultiReader to stream
+// keyframe data directly from the file without loading it into memory.
+// This bounds peak memory usage to O(1) regardless of video size or
+// keyframe count, which is important when many workers run concurrently.
+//
 // If keyframe extraction fails (e.g. the file has no video track or no stss
 // box), the full file is returned as a fallback so the file is always hashable.
 func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
-	data, err := extractKeyframePayload(filePath)
-	if err != nil || len(data) == 0 {
-		// Fallback: hash the full file.
-		f, err2 := os.Open(filePath)
-		if err2 != nil {
-			return nil, fmt.Errorf("mp4: open %q: %w", filePath, err2)
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("mp4: open %q: %w", filePath, err)
+	}
+
+	r, err := extractKeyframePayload(f)
+	if err != nil {
+		// Fallback: hash the full file. Seek back to start.
+		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("mp4: seek %q: %w", filePath, seekErr)
 		}
 		return f, nil
 	}
-	return io.NopCloser(bytes.NewReader(data)), nil
+
+	return &mp4ReadCloser{Reader: r, file: f}, nil
+}
+
+// mp4ReadCloser wraps an io.Reader with the file it reads from.
+type mp4ReadCloser struct {
+	io.Reader
+	file *os.File
+}
+
+func (rc *mp4ReadCloser) Close() error {
+	return rc.file.Close()
 }
 
 // MetadataSupport declares that MP4/MOV uses XMP sidecar files.
@@ -176,15 +200,13 @@ func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
 }
 
-// extractKeyframePayload reads the stss, stco/co64, stsc, and stsz boxes to
-// locate video keyframes and returns their concatenated raw bytes.
-func extractKeyframePayload(filePath string) ([]byte, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
+// extractKeyframePayload parses the stss, stco/co64, stsc, and stsz boxes to
+// locate video keyframes and returns a streaming io.Reader over their byte
+// ranges. It uses io.SectionReader + io.MultiReader so no keyframe data is
+// loaded into memory — each SectionReader reads directly from f on demand.
+//
+// The caller must keep f open for the lifetime of the returned reader.
+func extractKeyframePayload(f *os.File) (io.Reader, error) {
 	// Extract stss (sync sample table) — lists keyframe sample numbers.
 	stssBoxes, err := mp4lib.ExtractBoxWithPayload(f, nil, mp4lib.BoxPath{
 		mp4lib.BoxTypeMoov(),
@@ -245,26 +267,25 @@ func extractKeyframePayload(filePath string) ([]byte, error) {
 	// Build sample → file offset map.
 	sampleOffsets := buildSampleOffsets(stsc, chunkOffsets, stsz)
 
-	// Collect keyframe bytes.
-	var buf bytes.Buffer
+	// Build a slice of SectionReaders — one per keyframe — and combine with
+	// MultiReader. No keyframe data is loaded into memory; each SectionReader
+	// reads directly from f when the caller reads from the returned io.Reader.
+	var readers []io.Reader
 	for _, sampleNum := range stss.SampleNumber {
 		idx := int(sampleNum) - 1 // 1-based → 0-based
 		if idx < 0 || idx >= len(sampleOffsets) {
 			continue
 		}
-		offset := sampleOffsets[idx].offset
-		size := sampleOffsets[idx].size
-		if size == 0 {
+		so := sampleOffsets[idx]
+		if so.size == 0 {
 			continue
 		}
-		frame := make([]byte, size)
-		if _, err := f.ReadAt(frame, int64(offset)); err != nil {
-			continue
-		}
-		buf.Write(frame)
+		readers = append(readers, io.NewSectionReader(f, int64(so.offset), int64(so.size)))
 	}
-
-	return buf.Bytes(), nil
+	if len(readers) == 0 {
+		return nil, fmt.Errorf("no keyframes found")
+	}
+	return io.MultiReader(readers...), nil
 }
 
 // sampleLocation identifies a byte range within the mdat box for a single sample.
@@ -356,14 +377,4 @@ func extractChunkOffsets(f *os.File) ([]uint64, error) {
 		offsets[i] = uint64(o)
 	}
 	return offsets, nil
-}
-
-// fileExt returns the file extension including the leading dot, or "".
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
 }

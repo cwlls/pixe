@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/fileutil"
 )
 
 const magicReadSize = 16 // bytes — enough for all supported format signatures
@@ -70,7 +71,7 @@ func (r *Registry) Register(h domain.FileTypeHandler) {
 //  4. Otherwise try every other registered handler's magic bytes in order.
 //  5. If nothing matches → return nil.
 func (r *Registry) Detect(filePath string) (domain.FileTypeHandler, error) {
-	ext := strings.ToLower(fileExt(filePath))
+	ext := strings.ToLower(fileutil.Ext(filePath))
 
 	header, err := readHeader(filePath)
 	if err != nil {
@@ -92,16 +93,6 @@ func (r *Registry) Detect(filePath string) (domain.FileTypeHandler, error) {
 	}
 
 	return nil, nil
-}
-
-// fileExt returns the file extension including the leading dot, or "" if none.
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
 }
 
 // readHeader reads up to magicReadSize bytes from the start of the file.

@@ -50,7 +50,11 @@ import (
 	"github.com/dsoprea/go-heic-exif-extractor"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/fileutil"
 )
+
+// Compile-time interface check.
+var _ domain.FileTypeHandler = (*Handler)(nil)
 
 // anselsAdams is the fallback date when no EXIF date can be extracted.
 var anselsAdams = time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
@@ -80,7 +84,7 @@ func (h *Handler) MagicBytes() []domain.MagicSignature {
 // Detect returns true if the file has a .heic/.heif extension AND contains
 // the ISOBMFF "ftyp" box signature at offset 4.
 func (h *Handler) Detect(filePath string) (bool, error) {
-	ext := strings.ToLower(fileExt(filePath))
+	ext := strings.ToLower(fileutil.Ext(filePath))
 	if ext != ".heic" && ext != ".heif" {
 		return false, nil
 	}
@@ -155,14 +159,4 @@ func (h *Handler) MetadataSupport() domain.MetadataCapability {
 // generation instead of calling this method.
 func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
-}
-
-// fileExt returns the file extension including the leading dot, or "".
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
 }

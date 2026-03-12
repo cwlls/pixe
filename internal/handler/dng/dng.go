@@ -34,6 +34,7 @@ import (
 	"strings"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/fileutil"
 	"github.com/cwlls/pixe-go/internal/handler/tiffraw"
 )
 
@@ -65,7 +66,7 @@ func (h *Handler) MagicBytes() []domain.MagicSignature {
 // Detect returns true if the file has a .dng extension AND begins with
 // a valid TIFF header (little-endian or big-endian).
 func (h *Handler) Detect(filePath string) (bool, error) {
-	ext := strings.ToLower(fileExt(filePath))
+	ext := strings.ToLower(fileutil.Ext(filePath))
 	if ext != ".dng" {
 		return false, nil
 	}
@@ -83,14 +84,4 @@ func (h *Handler) Detect(filePath string) (bool, error) {
 	le := header[0] == 0x49 && header[1] == 0x49 && header[2] == 0x2A && header[3] == 0x00
 	be := header[0] == 0x4D && header[1] == 0x4D && header[2] == 0x00 && header[3] == 0x2A
 	return le || be, nil
-}
-
-// fileExt returns the file extension including the leading dot, or "".
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
 }

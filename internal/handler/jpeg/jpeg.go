@@ -30,7 +30,6 @@
 package jpeg
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -43,7 +42,11 @@ import (
 	rwexif "github.com/rwcarlsen/goexif/exif"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/fileutil"
 )
+
+// Compile-time interface check.
+var _ domain.FileTypeHandler = (*Handler)(nil)
 
 // anselsAdams is the fallback date when no EXIF date can be extracted.
 // February 20, 1902 — Ansel Adams' birthday.
@@ -73,7 +76,7 @@ func (h *Handler) MagicBytes() []domain.MagicSignature {
 // Detect returns true if the file has a .jpg/.jpeg extension AND begins with
 // the JPEG SOI magic bytes 0xFF 0xD8 0xFF.
 func (h *Handler) Detect(filePath string) (bool, error) {
-	ext := strings.ToLower(fileExt(filePath))
+	ext := strings.ToLower(fileutil.Ext(filePath))
 	if ext != ".jpg" && ext != ".jpeg" {
 		return false, nil
 	}
@@ -130,21 +133,106 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 }
 
 // HashableReader returns an io.ReadCloser over the JPEG media payload —
-// the raw bytes from the SOS marker (0xFF 0xDA) through to and including
-// the EOI marker (0xFF 0xD9). All APP markers (EXIF, ICC, XMP, etc.) are
-// excluded so that metadata edits do not change the checksum.
+// the raw bytes from the SOS marker (0xFF 0xDA) through to end-of-file.
+// All APP markers (EXIF, ICC, XMP, etc.) are excluded so that metadata
+// edits do not change the checksum.
+//
+// The implementation streams the file: only JPEG marker headers (a few KB)
+// are read to locate the SOS offset; the payload itself is served via an
+// io.SectionReader without loading the entire file into memory. This bounds
+// peak memory usage to O(1) regardless of file size, which is important
+// when many workers run concurrently on large panoramic JPEGs.
 func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
-	data, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("jpeg: read %q: %w", filePath, err)
+		return nil, fmt.Errorf("jpeg: open %q: %w", filePath, err)
 	}
 
-	payload, err := extractSOSPayload(data)
+	sosOffset, err := findSOSOffset(f)
 	if err != nil {
-		return nil, fmt.Errorf("jpeg: extract SOS payload from %q: %w", filePath, err)
+		_ = f.Close()
+		return nil, fmt.Errorf("jpeg: find SOS in %q: %w", filePath, err)
 	}
 
-	return io.NopCloser(bytes.NewReader(payload)), nil
+	fi, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("jpeg: stat %q: %w", filePath, err)
+	}
+
+	// Serve the SOS-to-EOF region via a SectionReader so we never load the
+	// full file into memory. The caller is responsible for closing.
+	sr := io.NewSectionReader(f, sosOffset, fi.Size()-sosOffset)
+	return &fileReadCloser{Reader: sr, file: f}, nil
+}
+
+// fileReadCloser wraps an io.Reader with the file it reads from, so that
+// Close() properly releases the file descriptor.
+type fileReadCloser struct {
+	io.Reader
+	file *os.File
+}
+
+func (frc *fileReadCloser) Close() error {
+	return frc.file.Close()
+}
+
+// findSOSOffset scans JPEG marker headers sequentially and returns the byte
+// offset of the SOS marker (0xFF 0xDA). Only marker headers are read — the
+// entropy-coded data is never loaded into memory.
+func findSOSOffset(r io.ReadSeeker) (int64, error) {
+	// Read and verify the SOI marker.
+	soi := make([]byte, 2)
+	if _, err := io.ReadFull(r, soi); err != nil {
+		return 0, fmt.Errorf("read SOI: %w", err)
+	}
+	if soi[0] != 0xFF || soi[1] != 0xD8 {
+		return 0, fmt.Errorf("not a JPEG file (missing SOI marker)")
+	}
+
+	hdr := make([]byte, 4)
+	for {
+		// Read the 2-byte marker.
+		if _, err := io.ReadFull(r, hdr[:2]); err != nil {
+			return 0, fmt.Errorf("read marker: %w", err)
+		}
+		if hdr[0] != 0xFF {
+			return 0, fmt.Errorf("expected 0xFF marker byte, got 0x%02X", hdr[0])
+		}
+		marker := hdr[1]
+
+		// SOS found — return current position (start of SOS marker).
+		if marker == 0xDA {
+			pos, err := r.Seek(0, io.SeekCurrent)
+			if err != nil {
+				return 0, fmt.Errorf("seek: %w", err)
+			}
+			return pos - 2, nil // back up to the 0xFF 0xDA bytes
+		}
+
+		// Markers without a length field.
+		switch {
+		case marker == 0xD8: // SOI (should not appear again, but handle gracefully)
+			continue
+		case marker == 0xD9: // EOI before SOS — malformed
+			return 0, fmt.Errorf("EOI marker before SOS")
+		case marker >= 0xD0 && marker <= 0xD7: // RST0–RST7
+			continue
+		}
+
+		// All other markers carry a 2-byte big-endian length (includes the 2 length bytes).
+		if _, err := io.ReadFull(r, hdr[2:4]); err != nil {
+			return 0, fmt.Errorf("read segment length: %w", err)
+		}
+		segLen := int64(hdr[2])<<8 | int64(hdr[3])
+		if segLen < 2 {
+			return 0, fmt.Errorf("invalid segment length %d", segLen)
+		}
+		// Seek past the segment body (length includes the 2 length bytes).
+		if _, err := r.Seek(segLen-2, io.SeekCurrent); err != nil {
+			return 0, fmt.Errorf("seek past segment: %w", err)
+		}
+	}
 }
 
 // MetadataSupport declares that JPEG supports safe in-file EXIF writing.
@@ -281,14 +369,4 @@ func scanForEOI(data []byte, start, n int) ([]byte, error) {
 		// Other 0xFF bytes in entropy data — malformed, but keep scanning.
 	}
 	return nil, fmt.Errorf("EOI marker not found after SOS")
-}
-
-// fileExt returns the file extension including the leading dot, or "".
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
 }

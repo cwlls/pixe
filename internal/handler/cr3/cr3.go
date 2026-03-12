@@ -56,6 +56,7 @@ import (
 	rwexif "github.com/rwcarlsen/goexif/exif"
 
 	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe-go/internal/fileutil"
 )
 
 // Compile-time interface check.
@@ -88,7 +89,7 @@ func (h *Handler) MagicBytes() []domain.MagicSignature {
 // Detect returns true if the file has a .cr3 extension AND contains the
 // ISOBMFF "ftyp" box with "crx " brand.
 func (h *Handler) Detect(filePath string) (bool, error) {
-	ext := strings.ToLower(fileExt(filePath))
+	ext := strings.ToLower(fileutil.Ext(filePath))
 	if ext != ".cr3" {
 		return false, nil
 	}
@@ -690,14 +691,4 @@ func findTIFFHeader(data []byte) []byte {
 		}
 	}
 	return nil
-}
-
-// fileExt returns the file extension including the leading dot, or "".
-func fileExt(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
 }
