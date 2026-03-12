@@ -473,96 +473,29 @@ func scanRunSummary(rows *sql.Rows) (*RunSummary, error) {
 	return &s, nil
 }
 
+// extraScanner wraps *sql.Rows and appends extra destination pointers to every
+// Scan call. This lets scanFileRow (which scans the 18 standard file columns)
+// be reused when the query returns additional columns after the standard ones.
+type extraScanner struct {
+	rows  *sql.Rows
+	extra []any
+}
+
+func (es *extraScanner) Scan(dest ...any) error {
+	return es.rows.Scan(append(dest, es.extra...)...)
+}
+
 // scanFileWithSource scans a FileRecord plus the run_source column.
+// It delegates the 18 standard file columns to scanFileRow via extraScanner,
+// eliminating the ~90 lines of duplicated scan logic.
 func scanFileWithSource(rows *sql.Rows) (*FileWithSource, error) {
 	var fws FileWithSource
-	var f = &fws.FileRecord
-
-	var destPath, destRel, checksum, captureDate sql.NullString
-	var fileSize sql.NullInt64
-	var extractedAt, hashedAt, copiedAt, verifiedAt, taggedAt sql.NullString
-	var errMsg, skipReason, carriedSidecars sql.NullString
-	var isDupInt int
-
-	if err := rows.Scan(
-		&f.ID,
-		&f.RunID,
-		&f.SourcePath,
-		&destPath,
-		&destRel,
-		&checksum,
-		&f.Status,
-		&isDupInt,
-		&captureDate,
-		&fileSize,
-		&extractedAt,
-		&hashedAt,
-		&copiedAt,
-		&verifiedAt,
-		&taggedAt,
-		&errMsg,
-		&skipReason,
-		&carriedSidecars,
-		&fws.RunSource,
-	); err != nil {
+	es := &extraScanner{rows: rows, extra: []any{&fws.RunSource}}
+	fr, err := scanFileRow(es)
+	if err != nil {
 		return nil, fmt.Errorf("archivedb: scan file with source: %w", err)
 	}
-
-	f.IsDuplicate = isDupInt != 0
-
-	if destPath.Valid {
-		f.DestPath = &destPath.String
-	}
-	if destRel.Valid {
-		f.DestRel = &destRel.String
-	}
-	if checksum.Valid {
-		f.Checksum = &checksum.String
-	}
-	if fileSize.Valid {
-		f.FileSize = &fileSize.Int64
-	}
-	if errMsg.Valid {
-		f.Error = &errMsg.String
-	}
-	if skipReason.Valid {
-		f.SkipReason = &skipReason.String
-	}
-	if carriedSidecars.Valid {
-		f.CarriedSidecars = &carriedSidecars.String
-	}
-
-	parseOptTime := func(ns sql.NullString, fieldName string) (*time.Time, error) {
-		if !ns.Valid {
-			return nil, nil
-		}
-		t, err := time.Parse(time.RFC3339, ns.String)
-		if err != nil {
-			return nil, fmt.Errorf("archivedb: parse %s: %w", fieldName, err)
-		}
-		return &t, nil
-	}
-
-	var err error
-	if f.CaptureDate, err = parseOptTime(captureDate, "capture_date"); err != nil {
-		return nil, err
-	}
-	if f.ExtractedAt, err = parseOptTime(extractedAt, "extracted_at"); err != nil {
-		return nil, err
-	}
-	if f.HashedAt, err = parseOptTime(hashedAt, "hashed_at"); err != nil {
-		return nil, err
-	}
-	if f.CopiedAt, err = parseOptTime(copiedAt, "copied_at"); err != nil {
-		return nil, err
-	}
-	if f.VerifiedAt, err = parseOptTime(verifiedAt, "verified_at"); err != nil {
-		return nil, err
-	}
-	if f.TaggedAt, err = parseOptTime(taggedAt, "tagged_at"); err != nil {
-		return nil, err
-	}
-
+	fws.FileRecord = *fr
 	return &fws, nil
 }
 
