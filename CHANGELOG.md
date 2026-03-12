@@ -4,6 +4,22 @@
 
 ---
 
+## [v2.4.0] -- 2026-03-12
+
+### Added
+
+- **`internal/handler/tiff/` — Standalone TIFF handler** — Support for `.tif` and `.tiff` files produced by scanners and professional workflows. Embeds `tiffraw.Base` for EXIF extraction and supports both TIFF little-endian and big-endian magic bytes.
+
+- **`internal/handler/avif/` — AVIF handler** — Support for `.avif` files (AV1 Image File Format), the HEIC successor used by iPhone 16+ and modern Android devices. Implements custom ISOBMFF `meta`/`iinf`/`iloc` box parser for EXIF date extraction (the `go-heic-exif-extractor` library does not support AVIF brands).
+
+### Changed
+
+- **Unified handler registry in `cmd/helpers.go`** — `buildRegistry()` now registers 14 handlers (added AVIF after HEIC, TIFF last to avoid claiming RAW files). Handler registration is now centralized and consistent across all CLI commands.
+
+- **Refactored `cmd/resume.go` and `cmd/status.go`** — Removed stale inline handler registration blocks (both were missing PNG, ORF, RW2 handlers). Both commands now call `buildRegistry()` for consistency.
+
+---
+
 ## [v2.2.10] -- 2026-03-12
 
 ### Bug Fixes

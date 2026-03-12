@@ -9,6 +9,15 @@ This document tracks planned features and improvements for Pixe. Items are group
 
 ---
 
+## v2.4.0 (2026-03-12)
+
+**Implemented features:**
+
+- **A2** — AVIF handler (AV1 Image File Format with custom ISOBMFF parser for EXIF extraction)
+- **A4** — Standalone TIFF handler (`.tif`/`.tiff` files with embedded `tiffraw.Base`)
+
+---
+
 ## v2.3.0 (2026-03-12)
 
 **Implemented features:**
@@ -26,20 +35,8 @@ This document tracks planned features and improvements for Pixe. Items are group
 
 ## A. New File Format Support
 
-### A2 — AVIF Handler 🟡
-Support for AVIF (AV1 Image File Format), the HEIC successor used by iPhone 16+ and modern Android devices. The ISOBMFF container parsing can share logic with the existing HEIC handler. Requires evaluating a pure-Go AVIF library.
-
-### A3 — PNG Handler 🟢
-Support for `.png` files — common for screenshots and edited photos. The stdlib `image/png` package handles decoding. EXIF lives in the `eXIf` chunk (PNG 1.5+) or `tEXt`/`iTXt` chunks; date extraction may be unreliable for PNGs that lack EXIF.
-
-### A4 — Standalone TIFF Handler 🟢
-A thin handler for `.tif`/`.tiff` files produced by scanners and professional workflows. The existing `tiffraw.Base` already handles the heavy lifting — this is primarily extension registration and magic-byte detection.
-
 ### A5 — RAF Handler (Fujifilm RAW) 🟡
 Support for Fujifilm's proprietary RAF format. Unlike other RAW formats, RAF is not TIFF-based — it uses a custom container with an embedded JPEG preview and raw sensor data. Requires a new parser. Niche but Fujifilm has a devoted user base.
-
-### A6 — ORF / RW2 Handlers (Olympus / Panasonic RAW) 🟢
-Both formats are TIFF-based and can use `tiffraw.Base`. Adding them completes coverage of the major mirrorless camera RAW ecosystem with minimal new code.
 
 ---
 
@@ -48,18 +45,9 @@ Both formats are TIFF-based and can use `tiffraw.Base`. Adding them completes co
 ### B4 — Configurable Destination Path Templates 🟡
 Replace the hardcoded `YYYY/MM-Mon/YYYYMMDD_HHMMSS_CHECKSUM.ext` structure with a user-defined template (e.g., `--path-template "{{.Year}}/{{.Month}}-{{.MonthName}}/{{.Filename}}"`). Requires careful design to preserve determinism guarantees.
 
-### B5 — Date Filters on `sort` 🟢
-Add `--since` and `--before` flags to `pixe sort` so only files with capture dates in a given range are processed. The capture date is already extracted — this is a simple filter gate in the pipeline. Highly useful for re-importing a specific trip or time period.
-
 ---
 
 ## C. Archive Management & Maintenance
-
-### C4 — `pixe stats` Archive Dashboard 🟢
-A quick summary command: total files, total size, date range, format breakdown, error rate, and last run date. Most of this data is already queryable via `ArchiveStats()` — this is primarily a presentation layer.
-
-### C7 — Database Backup / Export 🟢
-`pixe query export --dir ./archive --format csv` dumps the archive database to CSV or JSON for external analysis, spreadsheets, or backup. Enables users to work with their archive metadata independently of Pixe.
 
 ### C8 — Database Merge 🟡
 When sorting to a NAS destination, Pixe intentionally keeps the run's database local to the machine performing the sort to avoid SQLite reliability issues over remote filesystems. After the sort completes, the user manually copies that local `.pixe.db` to the NAS. This feature would add a `pixe db merge` command that runs on the NAS-side machine, reads the copied database file, and folds its records into the NAS's own local copy of the archive database — reconciling file entries, run history, and checksums without duplicating existing records.
@@ -68,12 +56,6 @@ When sorting to a NAS destination, Pixe intentionally keeps the run's database l
 
 ## D. User Experience & Output
 
-### D3 — `--quiet` / `--verbose` Log Levels 🟢
-`--quiet` suppresses per-file output and shows only the final summary. `--verbose` adds per-stage timing, worker assignments, and debug information. Currently there is only one output level.
-
-### D4 — Colorized Terminal Output 🟢
-Color-code status lines: COPY in green, DUPE in yellow, ERR in red, SKIP in dim. Lip Gloss is already a dependency. Auto-detect TTY and disable colors when stdout is piped.
-
 ### D5 — Machine-Readable Output (`--json`) 🟡
 Emit newline-delimited JSON to stdout instead of the human-readable COPY/SKIP/DUPE/ERR lines. Mirrors the ledger format and enables scripting and integration with external tools.
 
@@ -81,24 +63,8 @@ Emit newline-delimited JSON to stdout instead of the human-readable COPY/SKIP/DU
 
 ## E. Configuration & Workflow
 
-### E1 — Config Auto-Discovery in `dirA` 🟢
-Look for a `.pixe.yaml` in the source directory before falling back to the global config location. This lets users place per-project configs alongside their photos — for example, a `.pixe.yaml` at the root of an SD card that sets copyright and destination automatically.
-
-### E2 — Config Profiles 🟡
-`pixe sort --profile family` loads `~/.pixe/profiles/family.yaml`. Different cameras or sources can have different copyright strings, hash algorithms, or destinations without requiring flags on every invocation.
-
-### E3 — `pixe init` Interactive Setup Wizard 🟡
-A guided setup command that asks questions and generates a `.pixe.yaml`. Lowers the barrier to entry for new users who are unfamiliar with the available configuration options.
-
 ### E6 — Destination Aliases 🟢
 `pixe sort --dest @nas` resolves to a path configured in `.pixe.yaml` under `aliases`. Saves typing long or environment-specific paths on every invocation.
-
----
-
-## G. Distribution & Platform
-
-### G5 — Linux ARM Builds (Raspberry Pi / NAS) 🟢
-Add `linux/arm64` and `linux/arm` targets to the GoReleaser build matrix. GoReleaser already supports cross-compilation — this is a configuration change. Enables deployment on Raspberry Pi, Synology, Unraid, and similar NAS platforms.
 
 ---
 
@@ -134,11 +100,4 @@ The following items offer the best impact-to-effort ratio and are good candidate
 
 | Priority | Item | Rationale |
 |:--------:|------|-----------|
-| 1 | **B5** Date filters | Trivial effort, immediate workflow value |
-| 2 | **D3** Quiet/verbose levels | Trivial effort, immediate UX improvement |
-| 3 | **D4** Colorized output | Trivial effort, Lip Gloss already available |
-| 4 | **E1** Config auto-discovery | Low effort, significant workflow improvement |
-| 5 | **C4** `pixe stats` | Low effort, highly requested capability |
-| 6 | **A3** PNG handler | Low effort, very common format |
-| 7 | **A6** ORF/RW2 handlers | Low effort, completes RAW ecosystem coverage |
-| 8 | **E2** Config profiles | Medium effort, high value for multi-camera households |
+
