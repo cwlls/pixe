@@ -122,6 +122,7 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | `--camera-owner` | Camera owner string to inject |
 | `--no-carry-sidecars` | Disable carrying pre-existing `.aae` and `.xmp` sidecar files from source to destination (carry is enabled by default) |
 | `--overwrite-sidecar-tags` | When merging tags into a carried `.xmp` sidecar, replace existing values instead of preserving them |
+| `--progress` | Show live progress bar with file count, ETA, and status counters (only activates when stdout is a TTY) |
 | `--dry-run` | Preview operations without copying |
 | `--db-path` | Explicit path to the SQLite archive database |
 
@@ -175,6 +176,7 @@ pixe verify --dir /path/to/archive [options]
 | `-d, --dir` | Archive directory to verify (required) |
 | `-w, --workers` | Number of concurrent workers (default: auto-detect) |
 | `-a, --algorithm` | Hash algorithm (must match what was used during sort) |
+| `--progress` | Show live progress bar with file count, ETA, and status counters (only activates when stdout is a TTY) |
 
 Exit code `0` = all verified. Exit code `1` = one or more mismatches.
 
@@ -301,6 +303,51 @@ pixe clean --dir /path/to/archive [options]
 - **Orphaned temp files** — `.pixe-tmp` files left behind by interrupted sort runs
 - **Orphaned XMP sidecars** — Pixe-generated `.xmp` files whose corresponding media file no longer exists (regex-gated to avoid removing user-created XMP files)
 - **Database compaction** — Runs `VACUUM` to reclaim space from long-lived archives (skipped if a sort is currently in progress)
+
+### `pixe gui`
+
+Launch the interactive terminal UI for sorting and verifying with live progress bars and activity logs.
+
+```bash
+pixe gui [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-s, --source` | Source directory containing media files (default: current directory) |
+| `-d, --dest` | Destination directory for the organized archive |
+| `-w, --workers` | Number of concurrent workers (default: auto-detect) |
+| `-a, --algorithm` | Hash algorithm: `sha1`, `sha256` (default: `sha1`) |
+| `-r, --recursive` | Recursively process subdirectories of `--source` |
+| `--ignore` | Glob pattern for files to exclude (repeatable) |
+| `--skip-duplicates` | Skip copying duplicate files instead of copying to `duplicates/` |
+| `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
+| `--camera-owner` | Camera owner string to inject |
+| `--no-carry-sidecars` | Disable carrying pre-existing `.aae` and `.xmp` sidecar files |
+| `--overwrite-sidecar-tags` | When merging tags into a carried `.xmp` sidecar, replace existing values |
+| `--dry-run` | Preview operations without copying |
+| `--db-path` | Explicit path to the SQLite archive database |
+
+**Key bindings:**
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Cycle between tabs |
+| `1` / `2` / `3` | Jump to Sort / Verify / Status tab |
+| `s` | Start sort (Sort tab, configure state) |
+| `v` | Start verify (Verify tab, configure state) |
+| `f` | Cycle activity log filter (All → COPY → DUPE → ERR → SKIP → All) |
+| `n` | New run (complete state) |
+| `e` | Filter to errors (complete state) |
+| `j` / `k` / `↑` / `↓` | Scroll activity log |
+| `r` | Refresh (Status tab) |
+| `q` / `Ctrl+C` | Quit |
+
+**Three tabs:**
+
+- **Sort** — Configure and run a sort with live progress bar, scrollable activity log (filterable), and per-worker status pane. States: configure → running → complete.
+- **Verify** — Configure and run a verify with live progress bar and activity log. States: configure → running → complete.
+- **Status** — Background walk + ledger classification into 5 categories (Sorted, Duplicates, Errored, Unsorted, Unrecognised) with scrollable viewport. Refreshes on `r`.
 
 ## Configuration File
 

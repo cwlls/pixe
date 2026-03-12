@@ -9,6 +9,23 @@ permalink: /changelog/
 
 ---
 
+## [2.0.0] — 2026-03-11
+
+### Added
+
+- **`pixe gui` interactive terminal UI** — A full-featured TUI launched with `pixe gui`. Uses Bubble Tea + Lip Gloss (Charm Bracelet stack). Requires a TTY.
+  - **Three tabs**: Sort (configure and run a sort with live progress bar, activity log, per-worker status), Verify (configure and run a verify with live progress bar and activity log), Status (background walk + ledger classification into 5 categories: Sorted, Duplicates, Errored, Unsorted, Unrecognised).
+  - **Key bindings**: `Tab`/`Shift+Tab` cycle tabs; `1`/`2`/`3` jump to Sort/Verify/Status; `s` start sort; `v` start verify; `f` cycle activity log filter; `n` new run; `e` filter to errors; `j`/`k`/`↑`/`↓` scroll; `r` refresh; `q`/`Ctrl+C` quit.
+  - **Flags**: Same as `pixe sort` — `--source`, `--dest`, `--workers`, `--algorithm`, `--copyright`, `--camera-owner`, `--dry-run`, `--db-path`, `--recursive`, `--skip-duplicates`, `--ignore`, `--no-carry-sidecars`, `--overwrite-sidecar-tags`.
+
+- **`--progress` flag on `pixe sort` and `pixe verify`** — Opt-in live progress bar for the existing CLI commands. Only activates when stdout is a TTY; falls back to plain text otherwise.
+  - Shows a gradient progress bar with file count and percentage, ETA estimate, current file being processed (sort mode), and status counters (copied/dupes/skipped/errors for sort; verified/mismatches/unrecognised for verify).
+  - Example: `pixe sort --dest ~/Archive --progress` or `pixe verify --dir ~/Archive --progress`.
+
+- **Internal: Pipeline event bus** (`internal/progress/`) — Pure stdlib package. The sort and verify pipelines now emit structured `progress.Event` values alongside their existing plain-text output. Both can be active simultaneously — the `--progress` flag and `pixe gui` consume events; plain text is the default.
+
+- **New dependencies**: bubbletea v1.3.10, bubbles v1.0.0, lipgloss v1.1.0.
+
 ## [1.9.0] — 2026-03-11
 
 ### Added

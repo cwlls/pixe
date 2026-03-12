@@ -32,6 +32,7 @@ Click any command to expand its flags and details.
           <tr><td>--camera-owner</td><td>Camera owner string to inject into metadata</td></tr>
           <tr><td>--no-carry-sidecars</td><td>Disable carrying pre-existing <code>.aae</code> and <code>.xmp</code> sidecar files from source to destination (carry is enabled by default)</td></tr>
           <tr><td>--overwrite-sidecar-tags</td><td>When merging tags into a carried <code>.xmp</code> sidecar, replace existing values instead of preserving them</td></tr>
+          <tr><td>--progress</td><td>Show live progress bar with file count, ETA, and status counters (only activates when stdout is a TTY)</td></tr>
           <tr><td>--dry-run</td><td>Preview operations without copying any files</td></tr>
           <tr><td>--db-path</td><td>Explicit path to the SQLite archive database</td></tr>
         </tbody>
@@ -100,6 +101,7 @@ Click any command to expand its flags and details.
           <tr><td>-d, --dir</td><td>Archive directory to verify <strong>(required)</strong></td></tr>
           <tr><td>-w, --workers</td><td>Concurrent workers (default: auto)</td></tr>
           <tr><td>-a, --algorithm</td><td>Must match the algorithm used during sort (default: sha1)</td></tr>
+          <tr><td>--progress</td><td>Show live progress bar with file count, ETA, and status counters (only activates when stdout is a TTY)</td></tr>
         </tbody>
       </table>
     </div>
@@ -198,6 +200,66 @@ Click any command to expand its flags and details.
   </div>
 </div>
 
+<!-- pixe gui -->
+<div class="cmd-block">
+  <div class="cmd-header" onclick="toggle(this)">
+    <span class="cmd-name">pixe gui</span>
+    <span class="cmd-desc">Launch the interactive terminal UI</span>
+    <span class="cmd-toggle">▼</span>
+  </div>
+  <div class="cmd-body">
+    <p style="font-size:0.875rem;color:var(--text-dim);margin-bottom:0.75rem;">Interactive terminal UI with three tabs: Sort (configure and run with live progress bar, activity log, per-worker status), Verify (configure and run with live progress bar and activity log), and Status (background walk + ledger classification). Requires a TTY.</p>
+    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe gui --dest /path/to/archive [options]</span></pre>
+    <div class="flag-table-wrap">
+      <table class="flag-table">
+        <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>-s, --source</td><td>Source directory (default: current working directory)</td></tr>
+          <tr><td>-d, --dest</td><td>Destination archive directory</td></tr>
+          <tr><td>-w, --workers</td><td>Concurrent workers (default: auto-detect from CPU count)</td></tr>
+          <tr><td>-a, --algorithm</td><td>Hash algorithm: <code>sha1</code> or <code>sha256</code> (default: sha1)</td></tr>
+          <tr><td>-r, --recursive</td><td>Recurse into subdirectories of source</td></tr>
+          <tr><td>--ignore</td><td>Glob pattern to exclude (repeatable)</td></tr>
+          <tr><td>--skip-duplicates</td><td>Skip duplicates entirely instead of copying to <code>duplicates/</code></td></tr>
+          <tr><td>--copyright</td><td>Copyright template: <code>"Copyright {{.Year}} My Family"</code></td></tr>
+          <tr><td>--camera-owner</td><td>Camera owner string to inject into metadata</td></tr>
+          <tr><td>--no-carry-sidecars</td><td>Disable carrying pre-existing <code>.aae</code> and <code>.xmp</code> sidecar files from source to destination (carry is enabled by default)</td></tr>
+          <tr><td>--overwrite-sidecar-tags</td><td>When merging tags into a carried <code>.xmp</code> sidecar, replace existing values instead of preserving them</td></tr>
+          <tr><td>--dry-run</td><td>Preview operations without copying any files</td></tr>
+          <tr><td>--db-path</td><td>Explicit path to the SQLite archive database</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Key bindings</h3>
+    <div class="flag-table-wrap">
+      <table class="flag-table">
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>Tab / Shift+Tab</td><td>Cycle between tabs</td></tr>
+          <tr><td>1 / 2 / 3</td><td>Jump to Sort / Verify / Status tab</td></tr>
+          <tr><td>s</td><td>Start sort (Sort tab, configure state)</td></tr>
+          <tr><td>v</td><td>Start verify (Verify tab, configure state)</td></tr>
+          <tr><td>f</td><td>Cycle activity log filter (All → COPY → DUPE → ERR → SKIP → All)</td></tr>
+          <tr><td>n</td><td>New run (complete state)</td></tr>
+          <tr><td>e</td><td>Filter to errors (complete state)</td></tr>
+          <tr><td>j / k / ↑ / ↓</td><td>Scroll activity log</td></tr>
+          <tr><td>r</td><td>Refresh (Status tab)</td></tr>
+          <tr><td>q / Ctrl+C</td><td>Quit</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Examples</h3>
+    <pre><span class="term-comment"># Launch GUI with destination archive</span>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe gui --dest ~/Archive</span>
+
+<span class="term-comment"># GUI with explicit source and recursive</span>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe gui --source ~/Photos --dest ~/Archive --recursive</span>
+
+<span class="term-comment"># GUI with copyright tagging</span>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe gui --dest ~/Archive --copyright "Copyright {{.Year}} My Family"</span></pre>
+  </div>
+</div>
+
 <!-- pixe version -->
 <div class="cmd-block">
   <div class="cmd-header" onclick="toggle(this)">
@@ -207,7 +269,7 @@ Click any command to expand its flags and details.
   </div>
   <div class="cmd-body">
     <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe version</span>
-pixe v1.8.0 (commit: abc1234, built: 2026-03-11T10:30:00Z)</pre>
+pixe v2.0.0 (commit: abc1234, built: 2026-03-11T10:30:00Z)</pre>
     <p style="font-size:0.875rem;color:var(--text-dim);margin-top:0.5rem;">No flags. Prints the version string and exits.</p>
   </div>
 </div>

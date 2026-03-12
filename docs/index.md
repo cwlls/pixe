@@ -36,11 +36,16 @@ title: Pixe — Safe, Deterministic Photo Sorting
         <p class="problem-a">Output is deterministic. The same photo always produces the same filename and directory path. Re-running Pixe on the same source produces the same archive.</p>
       </div>
       <div class="problem-card">
-        <div class="problem-q">Do I need exiftool or ffmpeg installed?</div>
-        <span class="tag-ok">No</span>
-        <p class="problem-a">Pixe is a single binary with no runtime dependencies. All EXIF parsing, RAW decoding, and metadata handling is pure Go — nothing to install separately.</p>
-      </div>
-    </div>
+         <div class="problem-q">Do I need exiftool or ffmpeg installed?</div>
+         <span class="tag-ok">No</span>
+         <p class="problem-a">Pixe is a single binary with no runtime dependencies. All EXIF parsing, RAW decoding, and metadata handling is pure Go — nothing to install separately.</p>
+       </div>
+       <div class="problem-card">
+         <div class="problem-q">Can I see what's happening in real time?</div>
+         <span class="tag-ok">Yes</span>
+         <p class="problem-a">Use <code>pixe gui</code> for a full interactive TUI with live progress bars, activity logs, and per-worker status. Or add <code>--progress</code> to any sort or verify command for a lightweight progress bar.</p>
+       </div>
+     </div>
   </div>
 </section>
 
@@ -76,7 +81,8 @@ title: Pixe — Safe, Deterministic Photo Sorting
 
     <div class="pre-label">Sort your photos</div>
     <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --source ~/Photos --dest ~/Archive --recursive</span></pre>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --source ~/Photos --dest ~/Archive --recursive</span>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe gui --dest ~/Archive</span></pre>
 
     <div class="pre-label">Example output</div>
     <pre><span class="term-copy">COPY</span> IMG_0001.jpg -&gt; 2021/12-Dec/20211225_062223_abc123ef.jpg
