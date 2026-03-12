@@ -82,5 +82,15 @@ This page is generated from the Go package doc comments in the source tree. Each
 
 **`internal/fileutil`** — Package fileutil provides shared file-path utilities used across handler and discovery packages.
 
+**`internal/handler/avif`** — Package avif implements the FileTypeHandler contract for AVIF images.
+
 **`internal/handler/handlertest`** — Package handlertest provides a shared test suite for FileTypeHandler implementations that delegate to tiffraw.Base. Each handler test file calls RunSuite with handler-specific configuration to exercise the standard 10 behaviours without duplicating test logic.
+
+**`internal/handler/orf`** — Package orf implements the FileTypeHandler contract for Olympus ORF RAW images.
+
+**`internal/handler/png`** — Package png implements the FileTypeHandler contract for PNG images.
+
+**`internal/handler/rw2`** — Package rw2 implements the FileTypeHandler contract for Panasonic RW2 RAW images.
+
+**`internal/handler/tiff`** — Package tiff implements the FileTypeHandler contract for standalone TIFF images.
 <!-- pixe:end:package-list -->

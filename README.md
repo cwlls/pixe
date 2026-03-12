@@ -115,6 +115,9 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                             |
 | -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                           |
 | -a, --algorithm          | sha1    | hash algorithm to use: sha1, sha256                                                                 |
+| -q, --quiet              | false   | suppress per-file output; show only the final summary                                               |
+| -v, --verbose            | false   | show per-stage timing and debug information                                                         |
+| --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                                       |
 | -s, --source             |         | source directory containing media files to sort (default: current directory)                        |
 | -d, --dest               |         | destination directory for the organized archive (required)                                          |
 | --copyright              |         | copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"            |
@@ -127,6 +130,8 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | --no-carry-sidecars      | false   | disable carrying pre-existing .aae and .xmp sidecar files from source to destination                |
 | --overwrite-sidecar-tags | false   | when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them |
 | --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                           |
+| --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                     |
+| --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                    |
 <!-- pixe:end:sort-flags -->
 
 #### Ignore Patterns
@@ -180,6 +185,9 @@ pixe verify --dir /path/to/archive [options]
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                   |
 | -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                 |
 | -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                       |
+| -q, --quiet     | false   | suppress per-file output; show only the final summary                     |
+| -v, --verbose   | false   | show per-stage timing and debug information                               |
+| --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml             |
 | -d, --dir       |         | archive directory to verify (required)                                    |
 | --progress      | false   | show a live progress bar instead of per-file text output (requires a TTY) |
 <!-- pixe:end:verify-flags -->
@@ -200,6 +208,9 @@ pixe resume --dir /path/to/archive
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                  |
 | -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                |
 | -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                      |
+| -q, --quiet     | false   | suppress per-file output; show only the final summary                    |
+| -v, --verbose   | false   | show per-stage timing and debug information                              |
+| --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml            |
 | -d, --dir       |         | destination directory containing the archive database (required)         |
 | --db-path       |         | explicit path to the SQLite archive database (overrides auto-resolution) |
 <!-- pixe:end:resume-flags -->
@@ -256,6 +267,9 @@ pixe status --source /path/to/photos [options]
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)              |
 | -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())            |
 | -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                  |
+| -q, --quiet     | false   | suppress per-file output; show only the final summary                |
+| -v, --verbose   | false   | show per-stage timing and debug information                          |
+| --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml        |
 | -s, --source    |         | source directory to inspect (default: current directory)             |
 | -r, --recursive | false   | recursively inspect subdirectories of --source                       |
 | --ignore        |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt") |
@@ -340,6 +354,9 @@ pixe gui [options]
 | --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                  |
 | -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                |
 | -a, --algorithm          | sha1    | hash algorithm to use: sha1, sha256                                                      |
+| -q, --quiet              | false   | suppress per-file output; show only the final summary                                    |
+| -v, --verbose            | false   | show per-stage timing and debug information                                              |
+| --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                            |
 | -s, --source             |         | source directory containing media files (default: current directory)                     |
 | -d, --dest               |         | destination directory for the organized archive                                          |
 | --copyright              |         | copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family" |
@@ -395,6 +412,7 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 | Format  | Extensions   | Metadata      |
 | ------- | ------------ | ------------- |
 | ARW     | .arw         | XMP sidecar   |
+| AVIF    | .avif        | XMP sidecar   |
 | CR2     | .cr2         | XMP sidecar   |
 | CR3     | .cr3         | XMP sidecar   |
 | DNG     | .dng         | XMP sidecar   |
@@ -402,7 +420,11 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 | JPEG    | .jpg, .jpeg  | Embedded EXIF |
 | MP4/MOV | .mp4, .mov   | XMP sidecar   |
 | NEF     | .nef         | XMP sidecar   |
+| ORF     | .orf         | XMP sidecar   |
 | PEF     | .pef         | XMP sidecar   |
+| PNG     | .png         | XMP sidecar   |
+| RW2     | .rw2         | XMP sidecar   |
+| TIFF    | .tif, .tiff  | XMP sidecar   |
 <!-- pixe:end:format-table -->
 
 ### Date Fallback Chain

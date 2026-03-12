@@ -29,6 +29,7 @@ import (
 	"github.com/cwlls/pixe-go/internal/dblocator"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
+	avifhandler "github.com/cwlls/pixe-go/internal/handler/avif"
 	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
 	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
 	dnghandler "github.com/cwlls/pixe-go/internal/handler/dng"
@@ -40,6 +41,7 @@ import (
 	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
 	pnghandler "github.com/cwlls/pixe-go/internal/handler/png"
 	rw2handler "github.com/cwlls/pixe-go/internal/handler/rw2"
+	tiffhandler "github.com/cwlls/pixe-go/internal/handler/tiff"
 	"github.com/cwlls/pixe-go/internal/migrate"
 )
 
@@ -113,6 +115,7 @@ func buildRegistry() *discovery.Registry {
 	reg := discovery.NewRegistry()
 	reg.Register(jpeghandler.New())
 	reg.Register(heichandler.New())
+	reg.Register(avifhandler.New())
 	reg.Register(mp4handler.New())
 	reg.Register(pnghandler.New())
 	reg.Register(dnghandler.New())
@@ -123,6 +126,7 @@ func buildRegistry() *discovery.Registry {
 	reg.Register(arwhandler.New())
 	reg.Register(orfhandler.New())
 	reg.Register(rw2handler.New())
+	reg.Register(tiffhandler.New())
 	return reg
 }
 

@@ -28,15 +28,6 @@ import (
 
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
-	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
-	cr2handler "github.com/cwlls/pixe-go/internal/handler/cr2"
-	cr3handler "github.com/cwlls/pixe-go/internal/handler/cr3"
-	dnghandler "github.com/cwlls/pixe-go/internal/handler/dng"
-	heichandler "github.com/cwlls/pixe-go/internal/handler/heic"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	mp4handler "github.com/cwlls/pixe-go/internal/handler/mp4"
-	nefhandler "github.com/cwlls/pixe-go/internal/handler/nef"
-	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
 	"github.com/cwlls/pixe-go/internal/ignore"
 	"github.com/cwlls/pixe-go/internal/manifest"
 )
@@ -116,18 +107,9 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 
 	// ------------------------------------------------------------------
-	// 3. Build handler registry (identical to sort.go).
+	// 3. Build handler registry.
 	// ------------------------------------------------------------------
-	reg := discovery.NewRegistry()
-	reg.Register(jpeghandler.New())
-	reg.Register(heichandler.New())
-	reg.Register(mp4handler.New())
-	reg.Register(dnghandler.New())
-	reg.Register(nefhandler.New())
-	reg.Register(cr2handler.New())
-	reg.Register(cr3handler.New())
-	reg.Register(pefhandler.New())
-	reg.Register(arwhandler.New())
+	reg := buildRegistry()
 
 	// ------------------------------------------------------------------
 	// 4. Walk dirA.

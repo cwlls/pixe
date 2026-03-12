@@ -19,27 +19,46 @@
 
 ---
 
-## Parallelization Strategy
+## Sprint: A4 (TIFF Handler) + A2 (AVIF Handler)
 
-Tasks are grouped into waves. All tasks within a wave can be executed in parallel.
+### Task Summary
 
-### Wave 1 — Independent features (tasks 1, 2, 4, 5, 6, 7, 8)
-All seven tasks touch different packages with no overlapping files. They can be developed in parallel.
-
-### Wave 2 — Dependent features (tasks 3, 9)
-- Task 3 (colorized output) depends on task 2 (verbosity levels) because color rendering must respect `--quiet` mode.
-- Task 9 (handler registration) depends on tasks 6, 7, 8 (the handlers themselves).
-
-### Wave 3 — Config profiles (task 10)
-Depends on task 4 (config auto-discovery) because profiles extend the config loading chain.
-
-### Wave 4 — Integration tests (task 11)
-Validates all features end-to-end.
-
-### Wave 5 — Commit (task 12)
+| #   | Task                                                          | Priority | Agent      | Status | Depends On | Notes                                    |
+|:----|:--------------------------------------------------------------|:---------|:-----------|:-------|:-----------|:-----------------------------------------|
+| 13  | A4 — Implement standalone TIFF handler                        | 1        | @developer | [x]    | —          | Wave 1                                   |
+| 14  | A2 — AVIF EXIF extraction spike                               | 2        | @developer | [x]    | —          | Wave 1 — custom parser needed            |
+| 15  | A2 — Implement AVIF handler                                   | 3        | @developer | [x]    | 14         | Wave 2                                   |
+| 16  | Consolidate handler registration (`resume.go`, `status.go`)   | 4        | @developer | [x]    | 13, 15     | Wave 3                                   |
+| 17  | Register TIFF + AVIF handlers in `buildRegistry()`            | 5        | @developer | [x]    | 13, 15, 16 | Wave 3                                   |
+| 18  | Verify all tests pass (`make check`)                          | 6        | @tester    | [x]    | 16, 17     | Wave 4 — complete                        |
+| 19  | Commit all changes                                            | 7        | @committer | [~]    | 18         | Wave 5                                   |
 
 ---
 
-## Task Descriptions
+### Parallelization Strategy
 
-All tasks 1–11 have been completed and validated. Task 12 (commit) is pending.
+#### Wave 1 — Independent work (tasks 13, 14)
+Tasks 13 and 14 touch completely different packages and have no file overlap. They can be executed in parallel.
+
+#### Wave 2 — AVIF handler implementation (task 15)
+Depends on the spike result from task 14 to determine the EXIF extraction approach.
+
+#### Wave 3 — Registration and consolidation (tasks 16, 17)
+Both tasks modify `cmd/` files. Task 16 refactors `resume.go` and `status.go` to call `buildRegistry()`. Task 17 adds the two new handlers to `buildRegistry()` in `helpers.go`. These two tasks touch different files and can run in parallel, but both depend on the handler packages existing (tasks 13, 15).
+
+#### Wave 4 — Validation (task 18)
+Runs `make check` (fmt-check + vet + unit tests) to validate everything compiles and passes.
+
+#### Wave 5 — Commit (task 19)
+
+---
+
+
+
+#### Task 19 — Commit all changes
+
+Commit the complete sprint as a single conventional commit.
+
+**Acceptance criteria:**
+- Clean `git status` after commit
+- Commit message follows project conventions

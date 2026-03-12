@@ -44,6 +44,21 @@ Click any command to expand its flags and details.
       <td>hash algorithm to use: sha1, sha256</td>
     </tr>
     <tr>
+      <td>-q, --quiet</td>
+      <td>false</td>
+      <td>suppress per-file output; show only the final summary</td>
+    </tr>
+    <tr>
+      <td>-v, --verbose</td>
+      <td>false</td>
+      <td>show per-stage timing and debug information</td>
+    </tr>
+    <tr>
+      <td>--profile</td>
+      <td></td>
+      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
+    </tr>
+    <tr>
       <td>-s, --source</td>
       <td></td>
       <td>source directory containing media files to sort (default: current directory)</td>
@@ -102,6 +117,16 @@ Click any command to expand its flags and details.
       <td>--progress</td>
       <td>false</td>
       <td>show a live progress bar instead of per-file text output (requires a TTY)</td>
+    </tr>
+    <tr>
+      <td>--since</td>
+      <td></td>
+      <td>only process files with capture date on or after this date (format: YYYY-MM-DD)</td>
+    </tr>
+    <tr>
+      <td>--before</td>
+      <td></td>
+      <td>only process files with capture date on or before this date (format: YYYY-MM-DD)</td>
     </tr>
   </tbody>
 </table>
@@ -163,6 +188,21 @@ Click any command to expand its flags and details.
       <td>-a, --algorithm</td>
       <td>sha1</td>
       <td>hash algorithm to use: sha1, sha256</td>
+    </tr>
+    <tr>
+      <td>-q, --quiet</td>
+      <td>false</td>
+      <td>suppress per-file output; show only the final summary</td>
+    </tr>
+    <tr>
+      <td>-v, --verbose</td>
+      <td>false</td>
+      <td>show per-stage timing and debug information</td>
+    </tr>
+    <tr>
+      <td>--profile</td>
+      <td></td>
+      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
     </tr>
     <tr>
       <td>-s, --source</td>
@@ -229,6 +269,21 @@ Click any command to expand its flags and details.
       <td>hash algorithm to use: sha1, sha256</td>
     </tr>
     <tr>
+      <td>-q, --quiet</td>
+      <td>false</td>
+      <td>suppress per-file output; show only the final summary</td>
+    </tr>
+    <tr>
+      <td>-v, --verbose</td>
+      <td>false</td>
+      <td>show per-stage timing and debug information</td>
+    </tr>
+    <tr>
+      <td>--profile</td>
+      <td></td>
+      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
+    </tr>
+    <tr>
       <td>-d, --dir</td>
       <td></td>
       <td>archive directory to verify (required)</td>
@@ -281,6 +336,21 @@ Click any command to expand its flags and details.
       <td>-a, --algorithm</td>
       <td>sha1</td>
       <td>hash algorithm to use: sha1, sha256</td>
+    </tr>
+    <tr>
+      <td>-q, --quiet</td>
+      <td>false</td>
+      <td>suppress per-file output; show only the final summary</td>
+    </tr>
+    <tr>
+      <td>-v, --verbose</td>
+      <td>false</td>
+      <td>show per-stage timing and debug information</td>
+    </tr>
+    <tr>
+      <td>--profile</td>
+      <td></td>
+      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
     </tr>
     <tr>
       <td>-d, --dir</td>
@@ -479,6 +549,21 @@ Click any command to expand its flags and details.
       <td>-a, --algorithm</td>
       <td>sha1</td>
       <td>hash algorithm to use: sha1, sha256</td>
+    </tr>
+    <tr>
+      <td>-q, --quiet</td>
+      <td>false</td>
+      <td>suppress per-file output; show only the final summary</td>
+    </tr>
+    <tr>
+      <td>-v, --verbose</td>
+      <td>false</td>
+      <td>show per-stage timing and debug information</td>
+    </tr>
+    <tr>
+      <td>--profile</td>
+      <td></td>
+      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
     </tr>
     <tr>
       <td>-s, --source</td>

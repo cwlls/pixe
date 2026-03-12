@@ -167,6 +167,11 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
       <td>XMP sidecar</td>
     </tr>
     <tr>
+      <td>AVIF</td>
+      <td>.avif</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
       <td>CR2</td>
       <td>.cr2</td>
       <td>XMP sidecar</td>
@@ -202,8 +207,28 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
       <td>XMP sidecar</td>
     </tr>
     <tr>
+      <td>ORF</td>
+      <td>.orf</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
       <td>PEF</td>
       <td>.pef</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
+      <td>PNG</td>
+      <td>.png</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
+      <td>RW2</td>
+      <td>.rw2</td>
+      <td>XMP sidecar</td>
+    </tr>
+    <tr>
+      <td>TIFF</td>
+      <td>.tif, .tiff</td>
       <td>XMP sidecar</td>
     </tr>
   </tbody>

@@ -29,6 +29,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **MP4 Parsing** | Native Go package (e.g., `abema/go-mp4` or equivalent) | Atom-level access for metadata and keyframe extraction |
 | **TIFF/RAW Parsing** | Native Go TIFF parser (e.g., `golang.org/x/image/tiff` or equivalent) | IFD traversal for EXIF extraction and embedded JPEG preview location in TIFF-based RAW formats (DNG, NEF, CR2, PEF, ARW) |
 | **CR3 Parsing** | ISOBMFF parser (reuses HEIC/MP4 approach) | Canon RAW X container; box-based EXIF and JPEG preview extraction |
+| **AVIF Parsing** | ISOBMFF parser (reuses HEIC approach) + `go-heic-exif-extractor` or minimal custom `meta` box parser | AV1 Image File Format; same ISOBMFF container as HEIC with AVIF-specific `ftyp` brands |
 | **Hashing** | `crypto/sha1` (default), `crypto/sha256`, others via `crypto` stdlib | Configurable algorithm, SHA-1 default for filename brevity |
 | **Persistence** | SQLite database (CGo-free: `modernc.org/sqlite`) | Cumulative registry, concurrent-safe, queryable; see Section 8 |
 | **Glob Matching** | `bmatcuk/doublestar/v4` | `**` recursive globs, `{alt}` alternatives; superset of `filepath.Match`; see Section 4.11 |
@@ -53,6 +54,35 @@ Three new file format handlers extend archive support:
 - **RW2 Handler** (`internal/handler/rw2/`) — Supports Panasonic `.rw2` RAW files. TIFF-based format using `tiffraw.Base`. Detects Panasonic-specific `49 49 55 00` header signature.
 
 All three handlers are registered in `cmd/helpers.go` `buildRegistry()` and tested via `handlertest.RunSuite()`.
+
+### Standalone TIFF Handler (A4)
+
+- **TIFF Handler** (`internal/handler/tiff/`) — Supports `.tif` and `.tiff` files produced by scanners, professional editing workflows (Photoshop, GIMP), and scientific imaging. TIFF is a TIFF-based format (it *is* the base format), so the handler embeds `tiffraw.Base` for date extraction, hashable region (raw image data strips/tiles), and metadata no-op. The handler supplies only `Extensions()`, `MagicBytes()`, and `Detect()`. Magic bytes match both TIFF LE (`49 49 2A 00`) and TIFF BE (`4D 4D 00 2A`) headers. Extension is the primary discriminator since the TIFF magic signature is shared with DNG, NEF, PEF, ARW, and other TIFF-based RAW formats.
+
+  Tested via `handlertest.RunSuite()`. Registered in `buildRegistry()` and all other handler registration sites.
+
+  **Registration order:** The TIFF handler must be registered **after** all TIFF-based RAW handlers (DNG, NEF, CR2, PEF, ARW, ORF, RW2) in the registry. Since the extension-based fast path resolves first, registration order only matters for the magic-byte fallback path. Placing TIFF last ensures that a `.dng` file with standard TIFF magic bytes is claimed by the DNG handler, not the generic TIFF handler.
+
+### AVIF Handler (A2)
+
+- **AVIF Handler** (`internal/handler/avif/`) — Supports `.avif` files, the AV1 Image File Format used by iPhone 16+ (iOS 18), modern Android devices, Chrome screenshots, and next-generation web images. AVIF is an ISOBMFF container — the same box-based format used by HEIC, MP4, and CR3. The handler shares the HEIC handler's structural approach: `ftyp` box detection at offset 4, ISOBMFF container parsing for EXIF extraction, full-file hashing, and XMP sidecar for metadata.
+
+  **Detection:** AVIF files are identified by the `ftyp` box type at offset 4 (same as HEIC) combined with an AVIF-specific major brand at offset 8–11. Recognized brands: `avif` (still image), `avis` (sequence), and `mif1` (generic HEIF with AV1 codec — requires secondary brand check). The `.avif` extension is the primary discriminator; magic bytes confirm the file is a valid ISOBMFF container with an AVIF brand.
+
+  **EXIF extraction:** AVIF stores EXIF in the same ISOBMFF structure as HEIC — an `Exif` item within the `meta` box, referenced by `iloc` (item location) entries. The extraction approach depends on Go library availability:
+
+  - **Primary approach:** Use `github.com/dsoprea/go-heic-exif-extractor` (already a dependency for HEIC). This library operates at the ISOBMFF container level and may work on AVIF files without modification, since both HEIC and AVIF use the same `meta` box structure for EXIF storage. Requires validation with real AVIF files from iPhone 16+ and Android sources.
+  - **Fallback approach:** If the HEIC EXIF library does not recognize AVIF brand codes, implement a minimal ISOBMFF `meta` box parser (~150–200 lines) that locates the raw EXIF blob, then hand it to `rwcarlsen/goexif` for standard EXIF tag parsing. This parser would be placed in a shared `internal/handler/isobmff/` package for reuse by HEIC, CR3, and AVIF.
+
+  **Hashable region:** Full-file hash (same rationale as HEIC — AVIF's compressed AV1 payload within `mdat` cannot be cleanly separated from container metadata without a full AVIF decoder).
+
+  **Metadata:** Declares `MetadataSidecar`. XMP sidecar files (`*.avif.xmp`) are written alongside the destination copy. No in-file metadata writing — AVIF's ISOBMFF container is complex and no pure-Go AVIF EXIF writer exists.
+
+  **Date fallback chain:** `DateTimeOriginal` → `DateTime` → Ansel Adams date (1902-02-20), consistent with all other handlers.
+
+  Tested via `handlertest.RunSuite()` with a `buildFakeAVIF` helper that constructs a minimal ISOBMFF `ftyp` box with the `avif` brand. Registered in `buildRegistry()` and all other handler registration sites.
+
+  **Handler registration consolidation:** As part of this work, the stale handler registration lists in `cmd/resume.go` and `cmd/status.go` (which are missing PNG, ORF, and RW2) should be refactored to call `buildRegistry()` from `cmd/helpers.go` instead of maintaining separate inline registration lists. This eliminates the class of bugs where a new handler is added to one site but not the others.
 
 ### Colorized Terminal Output
 
@@ -478,7 +508,7 @@ Each `FileTypeHandler` declares its metadata capability via `MetadataSupport()` 
 | Capability | Strategy | Formats | Rationale |
 |---|---|---|---|
 | **`MetadataEmbed`** | Write tags directly into the destination file's native metadata structure | JPEG | Maximum portability — metadata travels inside the file and is visible to all consumer apps (Lightroom, Photos, etc.) |
-| **`MetadataSidecar`** | Write an XMP sidecar file alongside the destination file | HEIC, MP4/MOV, DNG, NEF, CR2, CR3, PEF, ARW | Avoids risky writes into proprietary or complex containers while still ensuring metadata is associated with the file |
+| **`MetadataSidecar`** | Write an XMP sidecar file alongside the destination file | HEIC, AVIF, MP4/MOV, PNG, TIFF, DNG, NEF, CR2, CR3, PEF, ARW, ORF, RW2 | Avoids risky writes into proprietary or complex containers while still ensuring metadata is associated with the file |
 | **`MetadataNone`** | No tagging at all | (none currently) | Reserved for future formats where even sidecar association is meaningless |
 
 #### 4.8.2 XMP Sidecar Files
@@ -1157,21 +1187,28 @@ type FileTypeHandler interface {
 |---|---|---|---|---|---|
 | **JPEG** | `.jpg`, `.jpeg` | EXIF `DateTimeOriginal` / `CreateDate` | Full image data (pixel payload) | `MetadataEmbed` | EXIF Copyright (IFD0), CameraOwnerName (ExifIFD 0xA430) written in-file |
 | **HEIC** | `.heic`, `.heif` | EXIF `DateTimeOriginal` / `CreateDate` | Image data payload | `MetadataSidecar` | XMP sidecar (`*.heic.xmp`) |
+| **AVIF** | `.avif` | EXIF `DateTimeOriginal` / `CreateDate` (ISOBMFF `meta` box) | Full file | `MetadataSidecar` | XMP sidecar (`*.avif.xmp`) |
+| **PNG** | `.png` | EXIF from `eXIf` chunk; `tEXt` `Creation Time` fallback | Full file | `MetadataSidecar` | XMP sidecar (`*.png.xmp`) |
 | **MP4** | `.mp4`, `.mov` | QuickTime `CreationDate` / `mvhd` atom | Collected keyframe data | `MetadataSidecar` | XMP sidecar (`*.mp4.xmp`, `*.mov.xmp`) |
+| **TIFF** | `.tif`, `.tiff` | EXIF `DateTimeOriginal` / `CreateDate` | Raw image data strips/tiles | `MetadataSidecar` | XMP sidecar (`*.tif.xmp`, `*.tiff.xmp`) |
 | **DNG** | `.dng` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.dng.xmp`) |
 | **NEF** | `.nef` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.nef.xmp`) |
 | **CR2** | `.cr2` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.cr2.xmp`) |
 | **CR3** | `.cr3` | ISOBMFF container metadata (same approach as HEIC/MP4) | Raw sensor data (ISOBMFF `mdat`) | `MetadataSidecar` | XMP sidecar (`*.cr3.xmp`) |
 | **PEF** | `.pef` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.pef.xmp`) |
 | **ARW** | `.arw` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.arw.xmp`) |
+| **ORF** | `.orf` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.orf.xmp`) |
+| **RW2** | `.rw2` | EXIF `DateTimeOriginal` / `CreateDate` | Raw sensor data strips | `MetadataSidecar` | XMP sidecar (`*.rw2.xmp`) |
 
 ### 6.4 RAW Handler Architecture
 
-RAW image support follows a **shared base + thin wrapper** pattern. Six RAW formats are supported: DNG, NEF (Nikon), CR2 (Canon), CR3 (Canon), PEF (Pentax), and ARW (Sony). CRW (legacy Canon pre-2004) is explicitly out of scope due to its obsolete format and lack of pure-Go library support.
+RAW image and TIFF-based format support follows a **shared base + thin wrapper** pattern. Eight RAW formats and one standard image format share the `tiffraw.Base`: DNG, NEF (Nikon), CR2 (Canon), PEF (Pentax), ARW (Sony), ORF (Olympus), RW2 (Panasonic), and standalone TIFF. CR3 (Canon) is the exception — it uses an ISOBMFF container. CRW (legacy Canon pre-2004) is explicitly out of scope due to its obsolete format and lack of pure-Go library support.
 
 #### 6.4.1 Why a Shared Base
 
-Five of the six supported RAW formats — DNG, NEF, CR2, PEF, and ARW — are TIFF-based containers with standard EXIF IFDs. They share identical logic for date extraction, hashable region identification, and metadata write behavior. Duplicating this logic across five separate packages would be wasteful and error-prone. Instead, a shared `tiffraw` base package provides the common implementation, and each format supplies only its unique identity: extensions, magic bytes, and detection logic.
+Eight of the nine formats that embed `tiffraw.Base` — DNG, NEF, CR2, PEF, ARW, ORF, RW2, and standalone TIFF — are TIFF-based containers with standard EXIF IFDs. They share identical logic for date extraction, hashable region identification, and metadata write behavior. Duplicating this logic across eight separate packages would be wasteful and error-prone. Instead, a shared `tiffraw` base package provides the common implementation, and each format supplies only its unique identity: extensions, magic bytes, and detection logic.
+
+The standalone TIFF handler (`internal/handler/tiff/`) is structurally identical to the RAW wrappers. TIFF *is* the base container format — `tiffraw.Base` was designed from TIFF's IFD structure. The TIFF handler simply claims `.tif`/`.tiff` extensions and matches both LE and BE TIFF magic bytes. It must be registered after all TIFF-based RAW handlers to avoid claiming RAW files with standard TIFF headers.
 
 CR3 is the exception. It uses an ISOBMFF container (like HEIC and MP4) rather than TIFF. It gets its own standalone handler following the ISOBMFF extraction approach already established by the HEIC handler.
 
@@ -1180,9 +1217,11 @@ CR3 is the exception. It uses an ISOBMFF container (like HEIC and MP4) rather th
 ```
 internal/handler/
 ├── handlertest/          ← shared test suite for FileTypeHandler implementations
-│   └── suite.go          ← RunSuite() function: 10-test harness for TIFF-based handlers
-├── tiffraw/              ← shared base for TIFF-based RAW formats
-│   └── tiffraw.go        ← Base struct with common ExtractDate, HashableReader, WriteMetadataTags
+│   ├── handlertest.go    ← test helper utilities
+│   └── suite.go          ← RunSuite() function: 10-test harness
+├── tiffraw/              ← shared base for TIFF-based formats (RAW + standalone TIFF)
+│   ├── tiffraw.go        ← Base struct with common ExtractDate, HashableReader, WriteMetadataTags
+│   └── tiffraw_test.go
 ├── dng/
 │   ├── dng.go            ← thin wrapper: Extensions, MagicBytes, Detect → delegates to tiffraw.Base
 │   └── dng_test.go       ← uses handlertest.RunSuite()
@@ -1201,23 +1240,36 @@ internal/handler/
 ├── arw/
 │   ├── arw.go
 │   └── arw_test.go       ← uses handlertest.RunSuite()
+├── orf/
+│   ├── orf.go            ← Olympus RAW, embeds tiffraw.Base
+│   └── orf_test.go       ← uses handlertest.RunSuite()
+├── rw2/
+│   ├── rw2.go            ← Panasonic RAW, embeds tiffraw.Base
+│   └── rw2_test.go       ← uses handlertest.RunSuite()
+├── tiff/
+│   ├── tiff.go           ← standalone TIFF, embeds tiffraw.Base
+│   └── tiff_test.go      ← uses handlertest.RunSuite()
+├── avif/
+│   ├── avif.go           ← ISOBMFF-based handler (parallel to HEIC)
+│   └── avif_test.go
 ├── jpeg/
 │   ├── jpeg.go
 │   └── jpeg_test.go
 ├── heic/
 │   ├── heic.go
-│   └── heic_test.go
-├── mp4/
-│   ├── mp4.go
-│   └── mp4_test.go
-└── tiffraw/
-    ├── tiffraw.go
-    └── tiffraw_test.go
+│   ├── heic_test.go
+│   └── testdata/
+├── png/
+│   ├── png.go
+│   └── png_test.go
+└── mp4/
+    ├── mp4.go
+    └── mp4_test.go
 ```
 
 #### 6.4.3 Shared Test Suite: `handlertest`
 
-The `handlertest` package provides a reusable test harness (`RunSuite()` function) that exercises the 10 standard behaviors shared by all `FileTypeHandler` implementations. This eliminates ~900 lines of test duplication across the five TIFF-based RAW handler test files (DNG, NEF, CR2, PEF, ARW).
+The `handlertest` package provides a reusable test harness (`RunSuite()` function) that exercises the 10 standard behaviors shared by all `FileTypeHandler` implementations. This eliminates significant test duplication across the TIFF-based handler test files (DNG, NEF, CR2, PEF, ARW, ORF, RW2, TIFF) and is also used by the PNG and AVIF handlers.
 
 **The 10-test suite covers:**
 
@@ -1250,7 +1302,7 @@ func TestHandler(t *testing.T) {
 }
 ```
 
-Each TIFF-based handler test file (DNG, NEF, CR2, PEF, ARW) calls `RunSuite()` with handler-specific configuration. The suite runs all 10 subtests in parallel (via `t.Parallel()` on each subtest) using `t.TempDir()` for isolated file I/O.
+Each TIFF-based handler test file (DNG, NEF, CR2, PEF, ARW, ORF, RW2, TIFF) calls `RunSuite()` with handler-specific configuration, as do the PNG and AVIF handlers. The suite runs all 10 subtests in parallel (via `t.Parallel()` on each subtest) using `t.TempDir()` for isolated file I/O.
 
 #### 6.4.4 Shared Base: `tiffraw.Base`
 
@@ -1350,33 +1402,159 @@ The CR3 handler (standalone, not using `tiffraw.Base`) implements the same patte
 
 #### 6.4.9 Magic Byte Signatures
 
-Each RAW format has a distinct file header that enables reliable magic-byte detection:
+Each format has a distinct file header that enables reliable magic-byte detection:
 
 | Format | Magic Bytes | Offset | Notes |
 |---|---|---|---|
+| **TIFF** | `49 49 2A 00` or `4D 4D 00 2A` | 0 | TIFF LE or BE header. Extension (`.tif`/`.tiff`) is the primary discriminator. Registered last among TIFF-based handlers. |
 | **DNG** | `49 49 2A 00` or `4D 4D 00 2A` | 0 | TIFF little-endian or big-endian header (same as TIFF; DNG is distinguished by the presence of a DNGVersion tag in IFD0 — detection must check beyond magic bytes) |
 | **NEF** | `49 49 2A 00` | 0 | TIFF LE header; Nikon-specific maker note IFDs distinguish from generic TIFF. Extension `.nef` is the primary discriminator. |
 | **CR2** | `49 49 2A 00` + `43 52` at offset 8 | 0 | TIFF LE header with `CR` signature bytes at offset 8–9 |
 | **CR3** | `66 74 79 70` ("ftyp") | 4 | ISOBMFF container; `ftyp` brand is `crx ` (Canon RAW X) |
 | **PEF** | `49 49 2A 00` | 0 | TIFF LE header; Pentax-specific. Extension `.pef` is the primary discriminator. |
 | **ARW** | `49 49 2A 00` | 0 | TIFF LE header; Sony-specific. Extension `.arw` is the primary discriminator. |
+| **ORF** | `49 49 52 4F` ("IIRO") or `49 49 2A 00` | 0 | Olympus-specific "IIRO" header or standard TIFF LE. Extension `.orf` is the primary discriminator. |
+| **RW2** | `49 49 55 00` | 0 | Panasonic-specific header. Extension `.rw2` is the primary discriminator. |
 
-> **Important:** Several TIFF-based RAW formats share the same TIFF magic bytes (`49 49 2A 00`). For these formats, the **extension-based fast path** in the registry is the primary discriminator, with magic bytes serving only to confirm the file is a valid TIFF container. CR2 is the notable exception — it has additional signature bytes at offset 8 that uniquely identify it. The registry's two-phase detection (extension first, then magic byte verification) handles this gracefully.
+> **Important:** Several TIFF-based formats share the same TIFF magic bytes (`49 49 2A 00`). For these formats, the **extension-based fast path** in the registry is the primary discriminator, with magic bytes serving only to confirm the file is a valid TIFF container. CR2 is the notable exception — it has additional signature bytes at offset 8 that uniquely identify it. The standalone TIFF handler must be registered **after** all RAW handlers to avoid claiming RAW files with standard TIFF headers. The registry's two-phase detection (extension first, then magic byte verification) handles this gracefully.
 
 #### 6.4.10 Handler Registration
 
-All RAW handlers are registered in the same three locations as existing handlers (`cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go`):
+All handlers are registered via `buildRegistry()` in `cmd/helpers.go`, which is the **single source of truth** for handler registration. All commands that need a registry (`sort`, `verify`, `status`, `resume`) call this function rather than maintaining separate inline registration lists.
 
 ```go
-reg.Register(dnghandler.New())
-reg.Register(nefhandler.New())
-reg.Register(cr2handler.New())
-reg.Register(cr3handler.New())
-reg.Register(pefhandler.New())
-reg.Register(arwhandler.New())
+func buildRegistry() *discovery.Registry {
+    reg := discovery.NewRegistry()
+    reg.Register(jpeghandler.New())
+    reg.Register(heichandler.New())
+    reg.Register(avifhandler.New())
+    reg.Register(mp4handler.New())
+    reg.Register(pnghandler.New())
+    reg.Register(dnghandler.New())
+    reg.Register(nefhandler.New())
+    reg.Register(cr2handler.New())
+    reg.Register(cr3handler.New())
+    reg.Register(pefhandler.New())
+    reg.Register(arwhandler.New())
+    reg.Register(orfhandler.New())
+    reg.Register(rw2handler.New())
+    reg.Register(tiffhandler.New())
+    return reg
+}
 ```
 
-Registration order matters for the TIFF-based formats that share magic bytes. Since the extension-based fast path resolves first, registration order only affects the fallback path (files with mismatched extensions). JPEG must remain registered before the TIFF-based RAW handlers to avoid false matches on TIFF magic bytes.
+The `buildRegistry()` function registers **14 handlers** in total:
+
+1. **JPEG** — `.jpg`, `.jpeg` files
+2. **HEIC** — `.heic`, `.heif` files (ISOBMFF container)
+3. **AVIF** — `.avif` files (ISOBMFF container, AV1 codec)
+4. **MP4** — `.mp4`, `.mov` video files (ISOBMFF container)
+5. **PNG** — `.png` files
+6. **DNG** — `.dng` RAW files (TIFF-based)
+7. **NEF** — `.nef` Nikon RAW files (TIFF-based)
+8. **CR2** — `.cr2` Canon RAW files (TIFF-based)
+9. **CR3** — `.cr3` Canon RAW X files (ISOBMFF container)
+10. **PEF** — `.pef` Pentax RAW files (TIFF-based)
+11. **ARW** — `.arw` Sony RAW files (TIFF-based)
+12. **ORF** — `.orf` Olympus RAW files (TIFF-based)
+13. **RW2** — `.rw2` Panasonic RAW files (TIFF-based)
+14. **TIFF** — `.tif`, `.tiff` files (standalone TIFF, TIFF-based)
+
+Registration order matters for the TIFF-based formats that share magic bytes. Since the extension-based fast path resolves first, registration order only affects the fallback path (files with mismatched extensions). JPEG must remain registered before the TIFF-based RAW handlers to avoid false matches on TIFF magic bytes. The standalone TIFF handler must be registered **last** among all TIFF-based handlers to avoid claiming RAW files (`.dng`, `.nef`, etc.) that share the standard TIFF magic signature.
+
+All commands that need a handler registry (`sort`, `verify`, `status`, `resume`, `gui`) call `buildRegistry()` rather than maintaining separate inline registration lists. This ensures a single source of truth for handler availability across the CLI.
+
+### 6.5 AVIF Handler Architecture
+
+AVIF (AV1 Image File Format) is an ISOBMFF-based image format — the same container family as HEIC, MP4, and CR3. It uses AV1 compression for the image payload, replacing HEVC (used by HEIC). AVIF is the default photo format on iPhone 16+ (iOS 18) and is increasingly adopted by Android devices, Chrome, and web platforms.
+
+#### 6.5.1 Relationship to HEIC
+
+AVIF and HEIC share nearly identical container structure:
+
+| Aspect | HEIC | AVIF |
+|---|---|---|
+| Container | ISOBMFF | ISOBMFF |
+| `ftyp` brands | `heic`, `heix`, `hevc`, `hevx`, `mif1` | `avif`, `avis`, `mif1` |
+| Image codec | HEVC (H.265) | AV1 |
+| EXIF storage | `meta` box → `Exif` item via `iloc` | `meta` box → `Exif` item via `iloc` (identical) |
+| XMP storage | `meta` box → `mime` item | `meta` box → `mime` item (identical) |
+
+The key difference is the `ftyp` major brand and the codec used within `mdat`. From Pixe's perspective — which cares about container detection, EXIF extraction, and hashing, not image decoding — the two formats are structurally equivalent.
+
+#### 6.5.2 Detection
+
+AVIF detection follows the same two-phase strategy as HEIC:
+
+1. **Extension check:** `.avif` (case-insensitive).
+2. **Magic byte verification:** `ftyp` box type at offset 4 (`66 74 79 70`), same as HEIC. After confirming `ftyp`, the handler reads the major brand at offset 8–11 and checks for AVIF-specific brands:
+   - `avif` (`61 76 69 66`) — still image
+   - `avis` (`61 76 69 73`) — image sequence
+   - `mif1` (`6D 69 66 31`) — generic HEIF container (may contain AV1; requires extension as tiebreaker)
+
+The `mif1` brand is ambiguous — it can contain either HEVC or AV1 payloads. When the major brand is `mif1`, the `.avif` extension is the definitive discriminator. This matches the existing HEIC behavior where `mif1`-branded files with `.heic` extension are claimed by the HEIC handler.
+
+#### 6.5.3 EXIF Extraction
+
+AVIF stores EXIF metadata in the same ISOBMFF structure as HEIC:
+
+```
+ftyp → meta → iinf (item info) → iloc (item locations) → Exif item
+```
+
+The raw EXIF blob is extracted from the `Exif` item and parsed with the standard EXIF library (`rwcarlsen/goexif`). The fallback chain is identical to all other handlers:
+
+1. `DateTimeOriginal` (tag 0x9003)
+2. `DateTime` (tag 0x0132)
+3. Ansel Adams date (1902-02-20)
+
+**Implementation approach:**
+
+The AVIF handler first attempts to use `github.com/dsoprea/go-heic-exif-extractor` (already a dependency for HEIC). This library operates at the ISOBMFF container level and should work with AVIF files since both formats use the same `meta` box EXIF storage structure.
+
+If the HEIC EXIF library does not recognize AVIF brand codes (it may reject the `ftyp` box during initial parsing), a minimal ISOBMFF `meta` box parser is implemented directly in the AVIF handler. This parser:
+
+1. Reads the `ftyp` box (already done in `Detect`).
+2. Scans top-level boxes until it finds `meta`.
+3. Within `meta`, locates the `iinf` (item info) box to find the item ID of the `Exif` item.
+4. Reads the `iloc` (item location) box to find the byte offset and length of the EXIF blob within the file.
+5. Reads the raw EXIF bytes at that offset and hands them to `rwcarlsen/goexif`.
+
+This parser is ~150–200 lines and is specific to EXIF extraction — it does not need to understand the full ISOBMFF spec, only the `meta`/`iinf`/`iloc` box chain.
+
+#### 6.5.4 Hashable Region
+
+Full-file hash (same as HEIC). AVIF's compressed AV1 payload within `mdat` cannot be cleanly separated from container metadata without a full AVIF decoder. Since AVIF files from cameras are not edited in place (the original is preserved), the full-file hash is stable and deterministic.
+
+#### 6.5.5 Metadata Capability
+
+`MetadataSidecar`. No pure-Go AVIF EXIF writer exists. XMP sidecar files (`*.avif.xmp`) are written alongside the destination copy, using the same XMP template and merge logic as all other sidecar-capable handlers (Section 4.8.2).
+
+#### 6.5.6 Magic Byte Signature
+
+| Format | Magic Bytes | Offset | Notes |
+|---|---|---|---|
+| **AVIF** | `66 74 79 70` ("ftyp") | 4 | ISOBMFF container. Major brand at offset 8–11: `avif`, `avis`, or `mif1`. Extension `.avif` is the primary discriminator when brand is `mif1`. |
+
+The AVIF handler shares the same offset-4 `ftyp` signature as HEIC and CR3. The extension-based fast path ensures no conflicts — a `.heic` file is never offered to the AVIF handler, and vice versa.
+
+#### 6.5.7 Test Fixtures
+
+The `buildFakeAVIF` test helper constructs a minimal valid ISOBMFF file:
+
+```go
+// ftyp box: size(4) + "ftyp"(4) + brand "avif"(4) + minor(4) + compat "avif"(4) + compat "mif1"(4) = 24 bytes
+data := []byte{
+    0x00, 0x00, 0x00, 0x18, // box size = 24
+    0x66, 0x74, 0x79, 0x70, // "ftyp"
+    0x61, 0x76, 0x69, 0x66, // major brand "avif"
+    0x00, 0x00, 0x00, 0x00, // minor version
+    0x61, 0x76, 0x69, 0x66, // compat brand "avif"
+    0x6D, 0x69, 0x66, 0x31, // compat brand "mif1"
+}
+```
+
+This is structurally identical to the HEIC fake file pattern but with AVIF brand codes. The file is valid enough for `Detect()` and `MagicBytes()` tests but does not contain actual AV1 image data or EXIF metadata. `ExtractDate()` falls back to the Ansel Adams date, which is the expected behavior for the `handlertest.RunSuite()` no-EXIF test.
 
 ---
 
@@ -3944,7 +4122,7 @@ Emit as a table row per handler.
 <!-- pixe:end:format-table -->
 ```
 
-**Implementation note (resolved):** The `extractFormats` function in `internal/docgen/extract.go` correctly handles inherited `MetadataSupport()` methods from embedded `tiffraw.Base`. TIFF-based handlers (ARW, CR2, DNG, NEF, PEF) inherit `MetadataSupport() → domain.MetadataSidecar` via struct embedding. The extraction logic detects this by checking whether the handler's source file imports the `tiffraw` package; if so, it sets `Metadata = "XMP sidecar"`. The `handlertest` package (test infrastructure) is excluded from the format table output. The CI workflow includes `fetch-tags: true` in the `actions/checkout@v4` step to ensure `git describe --tags` returns the correct version during documentation generation.
+**Implementation note (resolved):** The `extractFormats` function in `internal/docgen/extract.go` correctly handles inherited `MetadataSupport()` methods from embedded `tiffraw.Base`. TIFF-based handlers (ARW, CR2, DNG, NEF, PEF, ORF, RW2, TIFF) inherit `MetadataSupport() → domain.MetadataSidecar` via struct embedding. The extraction logic detects this by checking whether the handler's source file imports the `tiffraw` package; if so, it sets `Metadata = "XMP sidecar"`. The AVIF handler (ISOBMFF-based, not using `tiffraw`) declares `MetadataSidecar` directly, same as HEIC and CR3. The `handlertest` package (test infrastructure) is excluded from the format table output. The CI workflow includes `fetch-tags: true` in the `actions/checkout@v4` step to ensure `git describe --tags` returns the correct version during documentation generation.
 
 #### 15.4.5 Package Reference (Developer Documentation)
 
