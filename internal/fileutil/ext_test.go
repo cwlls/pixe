@@ -17,6 +17,7 @@ package fileutil
 import "testing"
 
 func TestExt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		path string
@@ -75,7 +76,9 @@ func TestExt(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := Ext(tc.path)
 			if got != tc.want {
 				t.Errorf("Ext(%q) = %q, want %q", tc.path, got, tc.want)

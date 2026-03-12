@@ -45,6 +45,7 @@ func buildFakeHEIC(t *testing.T, dir, name string) string {
 }
 
 func TestHandler_Extensions(t *testing.T) {
+	t.Parallel()
 	h := New()
 	exts := h.Extensions()
 	want := map[string]bool{".heic": true, ".heif": true}
@@ -60,6 +61,7 @@ func TestHandler_Extensions(t *testing.T) {
 }
 
 func TestHandler_MagicBytes(t *testing.T) {
+	t.Parallel()
 	h := New()
 	sigs := h.MagicBytes()
 	if len(sigs) == 0 {
@@ -79,6 +81,7 @@ func TestHandler_MagicBytes(t *testing.T) {
 }
 
 func TestHandler_Detect_validHEIC(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := buildFakeHEIC(t, dir, "photo.heic")
 
@@ -93,6 +96,7 @@ func TestHandler_Detect_validHEIC(t *testing.T) {
 }
 
 func TestHandler_Detect_wrongExtension(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// HEIC magic bytes but .jpg extension — should return false.
 	path := buildFakeHEIC(t, dir, "photo.jpg")
@@ -108,6 +112,7 @@ func TestHandler_Detect_wrongExtension(t *testing.T) {
 }
 
 func TestHandler_Detect_notHEIC(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fake.heic")
 	if err := os.WriteFile(path, []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}, 0o644); err != nil {
@@ -125,6 +130,7 @@ func TestHandler_Detect_notHEIC(t *testing.T) {
 }
 
 func TestHandler_ExtractDate_noEXIF_fallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// Fake HEIC with no EXIF — should fall back to Ansel Adams.
 	path := buildFakeHEIC(t, dir, "no_exif.heic")
@@ -141,6 +147,7 @@ func TestHandler_ExtractDate_noEXIF_fallback(t *testing.T) {
 }
 
 func TestHandler_HashableReader_returnsData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := buildFakeHEIC(t, dir, "photo.heic")
 
@@ -161,6 +168,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 }
 
 func TestHandler_HashableReader_deterministic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := buildFakeHEIC(t, dir, "photo.heic")
 
@@ -183,6 +191,7 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 }
 
 func TestHandler_MetadataSupport(t *testing.T) {
+	t.Parallel()
 	h := New()
 	got := h.MetadataSupport()
 	if got != domain.MetadataSidecar {
@@ -193,6 +202,7 @@ func TestHandler_MetadataSupport(t *testing.T) {
 // TestHandler_WriteMetadataTags_noop verifies WriteMetadataTags is a no-op
 // retained for interface compliance. The pipeline no longer calls this directly.
 func TestHandler_WriteMetadataTags_noop(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := buildFakeHEIC(t, dir, "photo.heic")
 

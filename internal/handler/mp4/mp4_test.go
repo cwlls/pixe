@@ -86,6 +86,7 @@ func writeFixture(t *testing.T, dir, name string, data []byte) string {
 }
 
 func TestHandler_Extensions(t *testing.T) {
+	t.Parallel()
 	h := New()
 	exts := h.Extensions()
 	want := map[string]bool{".mp4": true, ".mov": true}
@@ -101,6 +102,7 @@ func TestHandler_Extensions(t *testing.T) {
 }
 
 func TestHandler_MagicBytes(t *testing.T) {
+	t.Parallel()
 	h := New()
 	sigs := h.MagicBytes()
 	if len(sigs) == 0 {
@@ -115,6 +117,7 @@ func TestHandler_MagicBytes(t *testing.T) {
 }
 
 func TestHandler_Detect_validMP4(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	data := buildMinimalMP4(0)
 	path := writeFixture(t, dir, "video.mp4", data)
@@ -130,6 +133,7 @@ func TestHandler_Detect_validMP4(t *testing.T) {
 }
 
 func TestHandler_Detect_wrongExtension(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	data := buildMinimalMP4(0)
 	path := writeFixture(t, dir, "video.jpg", data) // wrong extension
@@ -145,6 +149,7 @@ func TestHandler_Detect_wrongExtension(t *testing.T) {
 }
 
 func TestHandler_Detect_notMP4(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeFixture(t, dir, "fake.mp4", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01})
 
@@ -159,6 +164,7 @@ func TestHandler_Detect_notMP4(t *testing.T) {
 }
 
 func TestHandler_ExtractDate_withCreationTime(t *testing.T) {
+	t.Parallel()
 	// 2021-12-25 06:22:23 UTC expressed as seconds since 1904-01-01.
 	target := time.Date(2021, 12, 25, 6, 22, 23, 0, time.UTC)
 	secs := uint32(target.Sub(mp4Epoch).Seconds())
@@ -178,6 +184,7 @@ func TestHandler_ExtractDate_withCreationTime(t *testing.T) {
 }
 
 func TestHandler_ExtractDate_zeroTime_fallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	data := buildMinimalMP4(0) // creation time = 0 → fallback
 	path := writeFixture(t, dir, "video.mp4", data)
@@ -194,6 +201,7 @@ func TestHandler_ExtractDate_zeroTime_fallback(t *testing.T) {
 }
 
 func TestHandler_HashableReader_returnsData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	data := buildMinimalMP4(0)
 	path := writeFixture(t, dir, "video.mp4", data)
@@ -215,6 +223,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 }
 
 func TestHandler_HashableReader_deterministic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	data := buildMinimalMP4(0)
 	path := writeFixture(t, dir, "video.mp4", data)
@@ -238,6 +247,7 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 }
 
 func TestHandler_MetadataSupport(t *testing.T) {
+	t.Parallel()
 	h := New()
 	got := h.MetadataSupport()
 	if got != domain.MetadataSidecar {
@@ -248,6 +258,7 @@ func TestHandler_MetadataSupport(t *testing.T) {
 // TestHandler_WriteMetadataTags_noop verifies WriteMetadataTags is a no-op
 // retained for interface compliance. The pipeline no longer calls this directly.
 func TestHandler_WriteMetadataTags_noop(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	data := buildMinimalMP4(0)
 	path := writeFixture(t, dir, "video.mp4", data)
@@ -260,5 +271,138 @@ func TestHandler_WriteMetadataTags_noop(t *testing.T) {
 	statAfter, _ := os.Stat(path)
 	if statBefore.ModTime() != statAfter.ModTime() {
 		t.Error("WriteMetadataTags modified the file (should be no-op for MP4)")
+	}
+}
+
+// TestHandler_Detect_emptyFile verifies that an empty .mp4 file returns false
+// without error (file too short to read box type).
+func TestHandler_Detect_emptyFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeFixture(t, dir, "empty.mp4", []byte{})
+
+	h := New()
+	ok, err := h.Detect(path)
+	if err != nil {
+		t.Fatalf("Detect on empty file: %v", err)
+	}
+	if ok {
+		t.Error("Detect should return false for empty file")
+	}
+}
+
+// TestHandler_Detect_tooShort verifies that a file shorter than 12 bytes
+// returns false without error.
+func TestHandler_Detect_tooShort(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeFixture(t, dir, "short.mp4", []byte{0x00, 0x00, 0x00, 0x08})
+
+	h := New()
+	ok, err := h.Detect(path)
+	if err != nil {
+		t.Fatalf("Detect on short file: %v", err)
+	}
+	if ok {
+		t.Error("Detect should return false for too-short file")
+	}
+}
+
+// TestHandler_Detect_movExtension verifies that a valid MP4 with .mov extension
+// is detected correctly.
+func TestHandler_Detect_movExtension(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	data := buildMinimalMP4(0)
+	path := writeFixture(t, dir, "video.mov", data)
+
+	h := New()
+	ok, err := h.Detect(path)
+	if err != nil {
+		t.Fatalf("Detect .mov: %v", err)
+	}
+	if !ok {
+		t.Error("Detect should return true for valid MP4 with .mov extension")
+	}
+}
+
+// TestHandler_ExtractDate_noMoovBox verifies that a file with only an ftyp box
+// (no moov/mvhd) falls back to the Ansel Adams date.
+func TestHandler_ExtractDate_noMoovBox(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Build a file with only an ftyp box — no moov/mvhd.
+	ftypOnly := []byte{
+		0x00, 0x00, 0x00, 0x18, // size = 24
+		0x66, 0x74, 0x79, 0x70, // "ftyp"
+		0x6d, 0x70, 0x34, 0x32, // major brand "mp42"
+		0x00, 0x00, 0x00, 0x00, // minor version
+		0x6d, 0x70, 0x34, 0x32, // compat "mp42"
+		0x69, 0x73, 0x6f, 0x6d, // compat "isom"
+	}
+	path := writeFixture(t, dir, "ftyp_only.mp4", ftypOnly)
+
+	h := New()
+	got, err := h.ExtractDate(path)
+	if err != nil {
+		t.Fatalf("ExtractDate: %v", err)
+	}
+	want := time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("ExtractDate = %v, want Ansel Adams date %v", got, want)
+	}
+}
+
+// TestHandler_HashableReader_fallbackToFullFile verifies that when keyframe
+// extraction fails (no stss box), HashableReader falls back to returning the
+// full file content.
+func TestHandler_HashableReader_fallbackToFullFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// buildMinimalMP4 has moov/mvhd but no stss — triggers fallback path.
+	data := buildMinimalMP4(0)
+	path := writeFixture(t, dir, "video.mp4", data)
+
+	h := New()
+	rc, err := h.HashableReader(path)
+	if err != nil {
+		t.Fatalf("HashableReader: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	payload, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	// Fallback returns the full file — must be non-empty and match file size.
+	fi, _ := os.Stat(path)
+	if int64(len(payload)) != fi.Size() {
+		t.Errorf("fallback payload size = %d, want %d (full file)", len(payload), fi.Size())
+	}
+}
+
+// TestHandler_HashableReader_nonexistentFile verifies that HashableReader
+// returns an error for a non-existent file.
+func TestHandler_HashableReader_nonexistentFile(t *testing.T) {
+	t.Parallel()
+	h := New()
+	_, err := h.HashableReader("/nonexistent/path/video.mp4")
+	if err == nil {
+		t.Fatal("HashableReader should return error for non-existent file")
+	}
+}
+
+// TestHandler_ExtractDate_nonexistentFile verifies that ExtractDate returns
+// the fallback date (not an error) when the file cannot be opened.
+func TestHandler_ExtractDate_nonexistentFile(t *testing.T) {
+	t.Parallel()
+	h := New()
+	got, err := h.ExtractDate("/nonexistent/path/video.mp4")
+	if err == nil {
+		t.Fatal("ExtractDate should return error for non-existent file")
+	}
+	want := time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("ExtractDate fallback = %v, want %v", got, want)
 	}
 }

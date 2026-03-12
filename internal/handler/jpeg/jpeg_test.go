@@ -31,6 +31,7 @@ const (
 )
 
 func TestHandler_Extensions(t *testing.T) {
+	t.Parallel()
 	h := New()
 	exts := h.Extensions()
 	want := map[string]bool{".jpg": true, ".jpeg": true}
@@ -46,6 +47,7 @@ func TestHandler_Extensions(t *testing.T) {
 }
 
 func TestHandler_MagicBytes(t *testing.T) {
+	t.Parallel()
 	h := New()
 	sigs := h.MagicBytes()
 	if len(sigs) == 0 {
@@ -61,6 +63,7 @@ func TestHandler_MagicBytes(t *testing.T) {
 }
 
 func TestHandler_Detect_validJPEG(t *testing.T) {
+	t.Parallel()
 	h := New()
 	ok, err := h.Detect(fixtureWithExif)
 	if err != nil {
@@ -72,6 +75,7 @@ func TestHandler_Detect_validJPEG(t *testing.T) {
 }
 
 func TestHandler_Detect_wrongExtension(t *testing.T) {
+	t.Parallel()
 	h := New()
 	// Copy the JPEG to a .png path — extension mismatch should return false.
 	dir := t.TempDir()
@@ -88,6 +92,7 @@ func TestHandler_Detect_wrongExtension(t *testing.T) {
 }
 
 func TestHandler_Detect_notJPEG(t *testing.T) {
+	t.Parallel()
 	h := New()
 	dir := t.TempDir()
 	f := filepath.Join(dir, "fake.jpg")
@@ -104,6 +109,7 @@ func TestHandler_Detect_notJPEG(t *testing.T) {
 }
 
 func TestHandler_ExtractDate_withEXIF(t *testing.T) {
+	t.Parallel()
 	h := New()
 	got, err := h.ExtractDate(fixtureWithExif)
 	if err != nil {
@@ -117,6 +123,7 @@ func TestHandler_ExtractDate_withEXIF(t *testing.T) {
 }
 
 func TestHandler_ExtractDate_noEXIF_fallback(t *testing.T) {
+	t.Parallel()
 	h := New()
 	got, err := h.ExtractDate(fixtureNoExif)
 	if err != nil {
@@ -130,6 +137,7 @@ func TestHandler_ExtractDate_noEXIF_fallback(t *testing.T) {
 }
 
 func TestHandler_HashableReader_returnsData(t *testing.T) {
+	t.Parallel()
 	h := New()
 	rc, err := h.HashableReader(fixtureWithExif)
 	if err != nil {
@@ -151,6 +159,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 }
 
 func TestHandler_HashableReader_noExif_stillWorks(t *testing.T) {
+	t.Parallel()
 	h := New()
 	rc, err := h.HashableReader(fixtureNoExif)
 	if err != nil {
@@ -168,6 +177,7 @@ func TestHandler_HashableReader_noExif_stillWorks(t *testing.T) {
 }
 
 func TestHandler_HashableReader_deterministic(t *testing.T) {
+	t.Parallel()
 	// Hashing the same file twice must produce the same bytes.
 	h := New()
 
@@ -192,6 +202,7 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 }
 
 func TestHandler_MetadataSupport(t *testing.T) {
+	t.Parallel()
 	h := New()
 	got := h.MetadataSupport()
 	if got != domain.MetadataEmbed {
@@ -200,6 +211,7 @@ func TestHandler_MetadataSupport(t *testing.T) {
 }
 
 func TestHandler_WriteMetadataTags_noop_whenEmpty(t *testing.T) {
+	t.Parallel()
 	h := New()
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "photo.jpg")
@@ -213,6 +225,222 @@ func TestHandler_WriteMetadataTags_noop_whenEmpty(t *testing.T) {
 	// File should be untouched.
 	if statBefore.ModTime() != statAfter.ModTime() {
 		t.Error("WriteMetadataTags modified the file when tags were empty")
+	}
+}
+
+// buildMinimalJPEG builds a minimal valid JPEG: SOI + APP0 (JFIF) + SOS + EOI.
+// It has no EXIF data, so ExtractDate should return the Ansel Adams fallback.
+func buildMinimalJPEG() []byte {
+	var buf []byte
+	// SOI
+	buf = append(buf, 0xFF, 0xD8)
+	// APP0 (JFIF) — minimal 16-byte segment
+	app0 := []byte{
+		0xFF, 0xE0, // APP0 marker
+		0x00, 0x10, // length = 16 (includes the 2 length bytes)
+		0x4A, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
+		0x01, 0x01, // version 1.1
+		0x00,       // aspect ratio units
+		0x00, 0x01, // X density
+		0x00, 0x01, // Y density
+		0x00, 0x00, // thumbnail size
+	}
+	buf = append(buf, app0...)
+	// SOS marker (start of scan)
+	buf = append(buf, 0xFF, 0xDA)
+	// SOS segment length (must be ≥ 2)
+	buf = append(buf, 0x00, 0x08)
+	// SOS header: 1 component, Cs=1, Td=0, Ta=0, Ss=0, Se=63, Ah=0, Al=0
+	buf = append(buf, 0x01, 0x01, 0x00, 0x3F, 0x00, 0x00)
+	// Minimal entropy-coded data (a few bytes)
+	buf = append(buf, 0x7F, 0xA0)
+	// EOI
+	buf = append(buf, 0xFF, 0xD9)
+	return buf
+}
+
+// buildCorruptEXIFJPEG builds a JPEG with a malformed APP1 (EXIF) segment.
+func buildCorruptEXIFJPEG() []byte {
+	var buf []byte
+	// SOI
+	buf = append(buf, 0xFF, 0xD8)
+	// APP1 with corrupt EXIF data (wrong magic)
+	corruptPayload := []byte{
+		0x45, 0x58, 0x49, 0x46, 0x00, 0x00, // "EXIF\0\0" header
+		0xFF, 0xFF, 0xFF, 0xFF, // garbage TIFF header
+	}
+	segLen := uint16(len(corruptPayload) + 2) // +2 for length field itself
+	buf = append(buf, 0xFF, 0xE1)             // APP1 marker
+	buf = append(buf, byte(segLen>>8), byte(segLen))
+	buf = append(buf, corruptPayload...)
+	// SOS
+	buf = append(buf, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x3F, 0x00, 0x00)
+	buf = append(buf, 0x7F, 0xA0)
+	// EOI
+	buf = append(buf, 0xFF, 0xD9)
+	return buf
+}
+
+func TestHandler_ExtractDate_corruptEXIF_fallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corrupt_exif.jpg")
+	if err := os.WriteFile(path, buildCorruptEXIFJPEG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := New()
+	got, err := h.ExtractDate(path)
+	if err != nil {
+		t.Fatalf("ExtractDate: %v", err)
+	}
+	want := time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("ExtractDate corrupt EXIF = %v, want Ansel Adams %v", got, want)
+	}
+}
+
+func TestHandler_ExtractDate_bareJPEG_fallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bare.jpg")
+	if err := os.WriteFile(path, buildMinimalJPEG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := New()
+	got, err := h.ExtractDate(path)
+	if err != nil {
+		t.Fatalf("ExtractDate: %v", err)
+	}
+	want := time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("ExtractDate bare JPEG = %v, want Ansel Adams %v", got, want)
+	}
+}
+
+func TestHandler_ExtractDate_truncatedFile_fallback(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Just SOI + a few bytes — truncated before any APP segment.
+	path := filepath.Join(dir, "truncated.jpg")
+	if err := os.WriteFile(path, []byte{0xFF, 0xD8, 0xFF}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := New()
+	got, err := h.ExtractDate(path)
+	if err != nil {
+		t.Fatalf("ExtractDate: %v", err)
+	}
+	want := time.Date(1902, 2, 20, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("ExtractDate truncated = %v, want Ansel Adams %v", got, want)
+	}
+}
+
+func TestHandler_HashableReader_nonexistentFile(t *testing.T) {
+	t.Parallel()
+	h := New()
+	_, err := h.HashableReader("/nonexistent/path/photo.jpg")
+	if err == nil {
+		t.Fatal("HashableReader should return error for non-existent file")
+	}
+}
+
+func TestHandler_HashableReader_truncatedJPEG(t *testing.T) {
+	t.Parallel()
+	// A file that starts with SOI but has no SOS — findSOSOffset should error.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "truncated.jpg")
+	// SOI only — no segments, no SOS
+	if err := os.WriteFile(path, []byte{0xFF, 0xD8}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := New()
+	_, err := h.HashableReader(path)
+	if err == nil {
+		t.Fatal("HashableReader should return error for JPEG with no SOS marker")
+	}
+}
+
+func TestHandler_WriteMetadataTags_withCopyright(t *testing.T) {
+	t.Parallel()
+	h := New()
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "photo.jpg")
+	copyFile(t, fixtureWithExif, dst)
+
+	tags := domain.MetadataTags{Copyright: "Copyright 2026 Test"}
+	if err := h.WriteMetadataTags(dst, tags); err != nil {
+		t.Fatalf("WriteMetadataTags with copyright: %v", err)
+	}
+	// File must still be a valid JPEG after tagging.
+	ok, err := h.Detect(dst)
+	if err != nil {
+		t.Fatalf("Detect after tagging: %v", err)
+	}
+	if !ok {
+		t.Error("file should still be detected as JPEG after tagging")
+	}
+}
+
+func TestHandler_WriteMetadataTags_withBothTags(t *testing.T) {
+	t.Parallel()
+	h := New()
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "photo.jpg")
+	copyFile(t, fixtureWithExif, dst)
+
+	tags := domain.MetadataTags{
+		Copyright:   "Copyright 2026 Test",
+		CameraOwner: "Test Owner",
+	}
+	if err := h.WriteMetadataTags(dst, tags); err != nil {
+		t.Fatalf("WriteMetadataTags with both tags: %v", err)
+	}
+	// File must still be detectable as JPEG.
+	ok, err := h.Detect(dst)
+	if err != nil {
+		t.Fatalf("Detect after tagging: %v", err)
+	}
+	if !ok {
+		t.Error("file should still be detected as JPEG after tagging")
+	}
+}
+
+func TestHandler_WriteMetadataTags_noExifFile_graceful(t *testing.T) {
+	t.Parallel()
+	// A JPEG with no EXIF block — WriteMetadataTags should return nil (graceful skip).
+	h := New()
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "no_exif.jpg")
+	copyFile(t, fixtureNoExif, dst)
+
+	tags := domain.MetadataTags{Copyright: "Copyright 2026 Test"}
+	err := h.WriteMetadataTags(dst, tags)
+	if err != nil {
+		t.Fatalf("WriteMetadataTags on no-EXIF file: %v (should be graceful)", err)
+	}
+}
+
+func TestHandler_Detect_pngContentJpgExtension(t *testing.T) {
+	t.Parallel()
+	// PNG magic bytes in a .jpg file — Detect should return false.
+	h := New()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fake.jpg")
+	// PNG magic: 0x89 0x50 0x4E 0x47
+	if err := os.WriteFile(path, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := h.Detect(path)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if ok {
+		t.Error("Detect should return false for PNG content in .jpg file")
 	}
 }
 

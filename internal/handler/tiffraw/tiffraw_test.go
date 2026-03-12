@@ -28,6 +28,7 @@ import (
 
 // TestBase_MetadataSupport verifies that tiffraw.Base declares MetadataSidecar.
 func TestBase_MetadataSupport(t *testing.T) {
+	t.Parallel()
 	b := &Base{}
 	got := b.MetadataSupport()
 	if got != domain.MetadataSidecar {
@@ -38,6 +39,7 @@ func TestBase_MetadataSupport(t *testing.T) {
 // TestBase_WriteMetadataTags_noop verifies that WriteMetadataTags is a no-op
 // retained for interface compliance. The pipeline no longer calls this directly.
 func TestBase_WriteMetadataTags_noop(t *testing.T) {
+	t.Parallel()
 	b := &Base{}
 	tags := domain.MetadataTags{Copyright: "test", CameraOwner: "test"}
 	err := b.WriteMetadataTags("dummy.dng", tags)
@@ -49,6 +51,7 @@ func TestBase_WriteMetadataTags_noop(t *testing.T) {
 // TestBase_HashableReader_fullFileFallback verifies that a file with no
 // sensor data IFD returns the full file content.
 func TestBase_HashableReader_fullFileFallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildMinimalTIFF(t, dir, "test.dng")
 
@@ -81,6 +84,7 @@ func TestBase_HashableReader_fullFileFallback(t *testing.T) {
 // TestBase_HashableReader_deterministic verifies that two calls to
 // HashableReader return identical bytes.
 func TestBase_HashableReader_deterministic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildTIFFWithSensorData(t, dir, "test.dng")
 
@@ -114,6 +118,7 @@ func TestBase_HashableReader_deterministic(t *testing.T) {
 // TestBase_ExtractDate_noEXIF_fallback verifies that a file with no EXIF
 // returns the Ansel Adams fallback date.
 func TestBase_ExtractDate_noEXIF_fallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildMinimalTIFF(t, dir, "test.dng")
 
@@ -132,6 +137,7 @@ func TestBase_ExtractDate_noEXIF_fallback(t *testing.T) {
 // TestBase_HashableReader_withSensorData verifies that a file with a sensor
 // data IFD (Compression=7, non-JPEG) returns the sensor data bytes.
 func TestBase_HashableReader_withSensorData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	sensorBytes := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
 	filePath := buildTIFFWithSensorDataBytes(t, dir, "test.dng", sensorBytes)
@@ -157,6 +163,7 @@ func TestBase_HashableReader_withSensorData(t *testing.T) {
 // contains both a JPEG preview IFD (Compression=6) and a sensor data IFD
 // (Compression=7), HashableReader returns the sensor data, not the JPEG preview.
 func TestBase_HashableReader_prefersNonJPEGCompression(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	sensorBytes := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
 	filePath := buildTIFFWithSensorAndJPEGPreview(t, dir, "test.dng", sensorBytes)
@@ -187,6 +194,7 @@ func TestBase_HashableReader_prefersNonJPEGCompression(t *testing.T) {
 // TestBase_HashableReader_multipleStrips verifies that a sensor data IFD with
 // multiple strips is read as a single concatenated byte sequence.
 func TestBase_HashableReader_multipleStrips(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	strip1 := []byte{0x01, 0x02, 0x03, 0x04}
 	strip2 := []byte{0x05, 0x06, 0x07, 0x08}
@@ -213,6 +221,7 @@ func TestBase_HashableReader_multipleStrips(t *testing.T) {
 // TestBase_HashableReader_tiledSensorData verifies that a sensor data IFD
 // using TileOffsets/TileByteCounts is read correctly.
 func TestBase_HashableReader_tiledSensorData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tile1 := []byte{0xAA, 0xBB, 0xCC, 0xDD}
 	tile2 := []byte{0xEE, 0xFF, 0x11, 0x22}
@@ -239,6 +248,7 @@ func TestBase_HashableReader_tiledSensorData(t *testing.T) {
 // TestFindSensorData_noSensorIFD verifies that findSensorData returns nil
 // for a TIFF that contains only a JPEG preview IFD (Compression=6).
 func TestFindSensorData_noSensorIFD(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildTIFFWithOnlyJPEGPreview(t, dir, "test.dng")
 

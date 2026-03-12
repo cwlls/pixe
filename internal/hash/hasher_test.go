@@ -21,6 +21,7 @@ import (
 )
 
 func TestNewHasher_supported(t *testing.T) {
+	t.Parallel()
 	for _, alg := range []string{"sha1", "sha256"} {
 		h, err := NewHasher(alg)
 		if err != nil {
@@ -36,6 +37,7 @@ func TestNewHasher_supported(t *testing.T) {
 }
 
 func TestNewHasher_unsupported(t *testing.T) {
+	t.Parallel()
 	for _, alg := range []string{"md5", "sha512", "", "SHA1", "SHA-1"} {
 		h, err := NewHasher(alg)
 		if err == nil {
@@ -48,6 +50,7 @@ func TestNewHasher_unsupported(t *testing.T) {
 }
 
 func TestHasher_Sum_sha1(t *testing.T) {
+	t.Parallel()
 	h, err := NewHasher("sha1")
 	if err != nil {
 		t.Fatalf("NewHasher: %v", err)
@@ -79,6 +82,7 @@ func TestHasher_Sum_sha1(t *testing.T) {
 }
 
 func TestHasher_Sum_sha256(t *testing.T) {
+	t.Parallel()
 	h, err := NewHasher("sha256")
 	if err != nil {
 		t.Fatalf("NewHasher: %v", err)
@@ -96,6 +100,7 @@ func TestHasher_Sum_sha256(t *testing.T) {
 }
 
 func TestHasher_Sum_streaming(t *testing.T) {
+	t.Parallel()
 	// Verify that hashing a large reader (> copyBufSize) produces the same
 	// result as hashing the same data in one shot.
 	data := bytes.Repeat([]byte("abcdefghij"), 10_000) // 100 KB
@@ -119,6 +124,7 @@ func TestHasher_Sum_streaming(t *testing.T) {
 }
 
 func TestHasher_Sum_outputFormat(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		alg     string
 		wantLen int

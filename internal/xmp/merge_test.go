@@ -100,6 +100,7 @@ func readSidecarFile(t *testing.T, path string) string {
 
 // TestMergeTags_emptyTags verifies that MergeTags is a no-op when tags are empty.
 func TestMergeTags_emptyTags(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", minimalXMP)
 
@@ -118,6 +119,7 @@ func TestMergeTags_emptyTags(t *testing.T) {
 // TestMergeTags_injectIntoEmptyDescription verifies that fields are added
 // when the rdf:Description has no copyright or owner fields.
 func TestMergeTags_injectIntoEmptyDescription(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", minimalXMP)
 
@@ -159,6 +161,7 @@ func TestMergeTags_injectIntoEmptyDescription(t *testing.T) {
 // TestMergeTags_preserveExistingCopyright verifies that when overwrite=false,
 // an existing dc:rights value is preserved and Pixe's value is NOT injected.
 func TestMergeTags_preserveExistingCopyright(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", xmpWithCopyright)
 
@@ -180,6 +183,7 @@ func TestMergeTags_preserveExistingCopyright(t *testing.T) {
 // TestMergeTags_overwriteExistingCopyright verifies that when overwrite=true,
 // an existing dc:rights value is replaced with Pixe's value.
 func TestMergeTags_overwriteExistingCopyright(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", xmpWithCopyright)
 
@@ -201,6 +205,7 @@ func TestMergeTags_overwriteExistingCopyright(t *testing.T) {
 // TestMergeTags_preserveExistingOwner verifies that when overwrite=false,
 // an existing aux:OwnerName is preserved.
 func TestMergeTags_preserveExistingOwner(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", xmpWithOwner)
 
@@ -222,6 +227,7 @@ func TestMergeTags_preserveExistingOwner(t *testing.T) {
 // TestMergeTags_overwriteExistingOwner verifies that when overwrite=true,
 // an existing aux:OwnerName is replaced.
 func TestMergeTags_overwriteExistingOwner(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", xmpWithOwner)
 
@@ -244,6 +250,7 @@ func TestMergeTags_overwriteExistingOwner(t *testing.T) {
 // source XMP has dc:rights but not aux:OwnerName, the owner is injected
 // while the existing copyright is preserved.
 func TestMergeTags_partialOverlap(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", xmpWithCopyright)
 
@@ -273,6 +280,7 @@ func TestMergeTags_partialOverlap(t *testing.T) {
 // TestMergeTags_preservesUnrelatedFields verifies that Lightroom develop
 // settings and other unrelated XMP fields are preserved after merge.
 func TestMergeTags_preservesUnrelatedFields(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", xmpWithLightroomSettings)
 
@@ -299,6 +307,7 @@ func TestMergeTags_preservesUnrelatedFields(t *testing.T) {
 // TestMergeTags_namespaceAddedWhenMissing verifies that a missing namespace
 // declaration is added to rdf:Description when a field is injected.
 func TestMergeTags_namespaceAddedWhenMissing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// Source has xmlns:dc but not xmlns:aux.
 	src := `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -338,6 +347,7 @@ func TestMergeTags_namespaceAddedWhenMissing(t *testing.T) {
 // TestMergeTags_atomicWrite verifies that the write is atomic: no .tmp file
 // is left behind after a successful merge.
 func TestMergeTags_atomicWrite(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", minimalXMP)
 
@@ -360,6 +370,7 @@ func TestMergeTags_atomicWrite(t *testing.T) {
 // TestMergeTags_fileNotFound verifies that MergeTags returns an error when
 // the sidecar file does not exist.
 func TestMergeTags_fileNotFound(t *testing.T) {
+	t.Parallel()
 	tags := domain.MetadataTags{Copyright: "Copyright 2026"}
 	err := MergeTags("/nonexistent/path/photo.xmp", tags, false)
 	if err == nil {
@@ -370,6 +381,7 @@ func TestMergeTags_fileNotFound(t *testing.T) {
 // TestMergeTags_xmlEscaping verifies that special XML characters in tag values
 // are properly escaped in the output.
 func TestMergeTags_xmlEscaping(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", minimalXMP)
 
@@ -395,6 +407,7 @@ func TestMergeTags_xmlEscaping(t *testing.T) {
 // TestMergeTags_onlyCopyright verifies that only copyright fields are added
 // when CameraOwner is empty.
 func TestMergeTags_onlyCopyright(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", minimalXMP)
 
@@ -416,6 +429,7 @@ func TestMergeTags_onlyCopyright(t *testing.T) {
 // TestMergeTags_onlyOwner verifies that only aux:OwnerName is added when
 // Copyright is empty.
 func TestMergeTags_onlyOwner(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeSidecarFile(t, dir, "photo.xmp", minimalXMP)
 

@@ -17,6 +17,7 @@ package pathbuilder
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ func date(year, month, day, hour, min, sec int) time.Time {
 }
 
 func TestBuild_normalPath(t *testing.T) {
+	t.Parallel()
 	d := date(2021, 12, 25, 6, 22, 23)
 	got := Build(d, testChecksum, ".jpg", false, "")
 	want := filepath.Join("2021", "12-Dec", "20211225_062223_"+testChecksum+".jpg")
@@ -47,6 +49,7 @@ func TestBuild_normalPath(t *testing.T) {
 }
 
 func TestBuild_duplicatePath(t *testing.T) {
+	t.Parallel()
 	d := date(2021, 12, 25, 6, 22, 23)
 	got := Build(d, testChecksum, ".jpg", true, "20260306_103000")
 	want := filepath.Join("duplicates", "20260306_103000", "2021", "12-Dec", "20211225_062223_"+testChecksum+".jpg")
@@ -56,6 +59,7 @@ func TestBuild_duplicatePath(t *testing.T) {
 }
 
 func TestBuild_defaultDate_anselsAdams(t *testing.T) {
+	t.Parallel()
 	// Files with no EXIF date fall back to Ansel Adams' birthday: 1902-02-20.
 	d := date(1902, 2, 20, 0, 0, 0)
 	got := Build(d, testChecksum, ".jpg", false, "")
@@ -66,6 +70,7 @@ func TestBuild_defaultDate_anselsAdams(t *testing.T) {
 }
 
 func TestBuild_extensionNormalization(t *testing.T) {
+	t.Parallel()
 	d := date(2022, 6, 15, 12, 0, 0)
 	cases := []struct {
 		ext  string
@@ -88,6 +93,7 @@ func TestBuild_extensionNormalization(t *testing.T) {
 }
 
 func TestBuild_monthDirectoryFormat(t *testing.T) {
+	t.Parallel()
 	// Locale is already pinned to English by TestMain.
 	cases := []struct {
 		month          int
@@ -121,6 +127,7 @@ func TestBuild_monthDirectoryFormat(t *testing.T) {
 }
 
 func TestBuild_sameSecondDifferentChecksum(t *testing.T) {
+	t.Parallel()
 	// Two files taken at the same second with different content → different paths.
 	d := date(2022, 3, 1, 10, 0, 0)
 	sha1 := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -133,6 +140,7 @@ func TestBuild_sameSecondDifferentChecksum(t *testing.T) {
 }
 
 func TestMonthDir(t *testing.T) {
+	t.Parallel()
 	// Locale is already pinned to English by TestMain.
 	cases := []struct {
 		month time.Month
@@ -255,11 +263,86 @@ func TestDetectSystemLocale_posixWithEncoding(t *testing.T) {
 }
 
 func TestRunTimestamp(t *testing.T) {
+	t.Parallel()
 	d := time.Date(2026, 3, 6, 10, 30, 0, 0, time.UTC)
 	got := RunTimestamp(d)
 	want := "20260306_103000"
 	if got != want {
 		t.Errorf("RunTimestamp = %q, want %q", got, want)
+	}
+}
+
+// TestBuildPath_adversarialFilenames documents the behaviour of Build when
+// given unusual or adversarial inputs. These tests do not require rejection —
+// they verify that output is deterministic and does not introduce path traversal.
+func TestBuildPath_adversarialFilenames(t *testing.T) {
+	t.Parallel()
+	d := date(2021, 12, 25, 6, 22, 23)
+
+	cases := []struct {
+		name     string
+		checksum string
+		ext      string
+		// wantNoTraversal: the resulting path must not contain ".." components.
+		wantNoTraversal bool
+	}{
+		{
+			name:            "path traversal in checksum",
+			checksum:        "../../etc/passwd",
+			ext:             ".jpg",
+			wantNoTraversal: true,
+		},
+		{
+			name:            "null byte in checksum",
+			checksum:        "abc\x00def",
+			ext:             ".jpg",
+			wantNoTraversal: true,
+		},
+		{
+			name:            "extremely long checksum (>255 chars)",
+			checksum:        strings.Repeat("a", 300),
+			ext:             ".jpg",
+			wantNoTraversal: true,
+		},
+		{
+			name:            "unicode NFC checksum",
+			checksum:        "caf\u00e9", // NFC: é as single codepoint
+			ext:             ".jpg",
+			wantNoTraversal: true,
+		},
+		{
+			name:            "unicode NFD checksum",
+			checksum:        "cafe\u0301", // NFD: e + combining acute accent
+			ext:             ".jpg",
+			wantNoTraversal: true,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Build(d, tc.checksum, tc.ext, false, "")
+			// Output must be non-empty.
+			if got == "" {
+				t.Fatal("Build returned empty path")
+			}
+			// Output must be deterministic — calling again returns the same value.
+			got2 := Build(d, tc.checksum, tc.ext, false, "")
+			if got != got2 {
+				t.Errorf("Build not deterministic:\n  first  %q\n  second %q", got, got2)
+			}
+			if tc.wantNoTraversal {
+				// Clean the path and verify no ".." components remain.
+				cleaned := filepath.Clean(got)
+				parts := splitPath(cleaned)
+				for _, part := range parts {
+					if part == ".." {
+						t.Errorf("Build(%q) produced path with traversal component: %q", tc.checksum, got)
+					}
+				}
+			}
+		})
 	}
 }
 

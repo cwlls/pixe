@@ -27,6 +27,7 @@ import (
 // --- SidecarPath tests ---
 
 func TestSidecarPath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		mediaPath string
 		want      string
@@ -48,6 +49,7 @@ func TestSidecarPath(t *testing.T) {
 // --- WriteSidecar tests ---
 
 func TestWriteSidecar_bothFields(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "photo.arw")
 	if err := os.WriteFile(mediaPath, []byte("fake raw"), 0o644); err != nil {
@@ -107,6 +109,7 @@ func TestWriteSidecar_bothFields(t *testing.T) {
 }
 
 func TestWriteSidecar_copyrightOnly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "photo.dng")
 	if err := os.WriteFile(mediaPath, []byte("fake raw"), 0o644); err != nil {
@@ -140,6 +143,7 @@ func TestWriteSidecar_copyrightOnly(t *testing.T) {
 }
 
 func TestWriteSidecar_cameraOwnerOnly(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "photo.heic")
 	if err := os.WriteFile(mediaPath, []byte("fake heic"), 0o644); err != nil {
@@ -176,6 +180,7 @@ func TestWriteSidecar_cameraOwnerOnly(t *testing.T) {
 }
 
 func TestWriteSidecar_emptyTags_noFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "photo.mp4")
 	if err := os.WriteFile(mediaPath, []byte("fake mp4"), 0o644); err != nil {
@@ -194,6 +199,7 @@ func TestWriteSidecar_emptyTags_noFile(t *testing.T) {
 }
 
 func TestWriteSidecar_atomicWrite(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mediaPath := filepath.Join(dir, "photo.arw")
 	if err := os.WriteFile(mediaPath, []byte("fake raw"), 0o644); err != nil {
@@ -218,6 +224,7 @@ func TestWriteSidecar_atomicWrite(t *testing.T) {
 }
 
 func TestWriteSidecar_errorOnBadPath(t *testing.T) {
+	t.Parallel()
 	// Use a path in a non-existent directory to force a write error.
 	mediaPath := filepath.Join(t.TempDir(), "nonexistent", "photo.arw")
 

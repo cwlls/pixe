@@ -31,6 +31,7 @@ var _ domain.FileTypeHandler = (*Handler)(nil)
 
 // TestHandler_Extensions verifies the correct extension is returned.
 func TestHandler_Extensions(t *testing.T) {
+	t.Parallel()
 	h := New()
 	exts := h.Extensions()
 	if len(exts) != 1 || exts[0] != ".cr3" {
@@ -40,6 +41,7 @@ func TestHandler_Extensions(t *testing.T) {
 
 // TestHandler_MagicBytes verifies the correct magic signature is returned.
 func TestHandler_MagicBytes(t *testing.T) {
+	t.Parallel()
 	h := New()
 	sigs := h.MagicBytes()
 	if len(sigs) != 1 {
@@ -52,6 +54,7 @@ func TestHandler_MagicBytes(t *testing.T) {
 
 // TestHandler_Detect_valid verifies detection with correct extension and magic.
 func TestHandler_Detect_valid(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildFakeCR3(t, dir, "test.cr3")
 
@@ -67,6 +70,7 @@ func TestHandler_Detect_valid(t *testing.T) {
 
 // TestHandler_Detect_wrongExtension verifies detection fails with wrong extension.
 func TestHandler_Detect_wrongExtension(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildFakeCR3(t, dir, "test.heic")
 
@@ -82,6 +86,7 @@ func TestHandler_Detect_wrongExtension(t *testing.T) {
 
 // TestHandler_Detect_heicBrand verifies detection fails for HEIC brand.
 func TestHandler_Detect_heicBrand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.cr3")
 
@@ -109,6 +114,7 @@ func TestHandler_Detect_heicBrand(t *testing.T) {
 
 // TestHandler_Detect_mp4Brand verifies detection fails for MP4 brand.
 func TestHandler_Detect_mp4Brand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.cr3")
 
@@ -136,6 +142,7 @@ func TestHandler_Detect_mp4Brand(t *testing.T) {
 
 // TestHandler_ExtractDate_noEXIF_fallback verifies fallback to Ansel Adams date.
 func TestHandler_ExtractDate_noEXIF_fallback(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildFakeCR3(t, dir, "test.cr3")
 
@@ -154,6 +161,7 @@ func TestHandler_ExtractDate_noEXIF_fallback(t *testing.T) {
 // TestHandler_HashableReader_returnsData verifies non-empty data is returned.
 // The fake CR3 has no moov track metadata, so it falls back to the full mdat.
 func TestHandler_HashableReader_returnsData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildFakeCR3(t, dir, "test.cr3")
 
@@ -176,6 +184,7 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 
 // TestHandler_HashableReader_deterministic verifies two calls return identical bytes.
 func TestHandler_HashableReader_deterministic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	filePath := buildFakeCR3(t, dir, "test.cr3")
 
@@ -210,6 +219,7 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 // has moov track metadata pointing into mdat, HashableReader returns the
 // sensor data region (not the full mdat).
 func TestHandler_HashableReader_returnsSensorData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	sensorBytes := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
 	filePath := buildCR3WithSensorData(t, dir, "test.cr3", sensorBytes)
@@ -234,6 +244,7 @@ func TestHandler_HashableReader_returnsSensorData(t *testing.T) {
 // TestFindCR3SensorData_noMdat verifies that findCR3SensorData returns nil
 // for a CR3 file with no mdat box.
 func TestFindCR3SensorData_noMdat(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.cr3")
 
@@ -267,6 +278,7 @@ func TestFindCR3SensorData_noMdat(t *testing.T) {
 // TestFindCR3SensorData_fallbackFullMdat verifies that when moov track
 // metadata cannot be parsed, findCR3SensorData falls back to the full mdat.
 func TestFindCR3SensorData_fallbackFullMdat(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// buildFakeCR3 has a moov box with no trak children, so track parsing
 	// returns nil and the fallback to full mdat is triggered.
@@ -292,6 +304,7 @@ func TestFindCR3SensorData_fallbackFullMdat(t *testing.T) {
 
 // TestHandler_MetadataSupport verifies that the CR3 handler declares MetadataSidecar.
 func TestHandler_MetadataSupport(t *testing.T) {
+	t.Parallel()
 	h := New()
 	got := h.MetadataSupport()
 	if got != domain.MetadataSidecar {
@@ -302,6 +315,7 @@ func TestHandler_MetadataSupport(t *testing.T) {
 // TestHandler_WriteMetadataTags_noop verifies WriteMetadataTags is a no-op
 // retained for interface compliance. The pipeline no longer calls this directly.
 func TestHandler_WriteMetadataTags_noop(t *testing.T) {
+	t.Parallel()
 	h := New()
 	tags := domain.MetadataTags{Copyright: "test", CameraOwner: "test"}
 	err := h.WriteMetadataTags("dummy.cr3", tags)

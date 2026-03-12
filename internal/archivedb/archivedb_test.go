@@ -2575,3 +2575,138 @@ func TestVacuum_afterInserts(t *testing.T) {
 		t.Errorf("GetFilesByRun returned %d files after VACUUM, want 25", len(files))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Concurrent access tests (Task 10)
+// ---------------------------------------------------------------------------
+
+// TestDB_concurrentAccess validates the architecture's "coordinator goroutine
+// owns DB writes; workers own I/O" pattern at the database layer. It spawns
+// multiple goroutines that simultaneously insert file records and query the
+// database, verifying no data races, deadlocks, or corruption occur.
+//
+// The DB uses SetMaxOpenConns(1) + WAL mode, so all writes are serialised
+// through a single connection while reads can proceed concurrently.
+func TestDB_concurrentAccess(t *testing.T) {
+	db := openTestDB(t)
+
+	const (
+		numRuns     = 5  // number of concurrent "coordinator" goroutines
+		filesPerRun = 10 // files each coordinator inserts
+	)
+
+	// Pre-insert runs so foreign key constraints are satisfied.
+	for i := 0; i < numRuns; i++ {
+		insertTestRun(t, db, fmt.Sprintf("concurrent-run-%d", i))
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, numRuns*filesPerRun)
+
+	// Spawn numRuns goroutines, each inserting filesPerRun file records.
+	for i := 0; i < numRuns; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runID := fmt.Sprintf("concurrent-run-%d", i)
+			for j := 0; j < filesPerRun; j++ {
+				_, err := db.InsertFile(&FileRecord{
+					RunID:      runID,
+					SourcePath: fmt.Sprintf("/src/run%d/photo_%03d.jpg", i, j),
+				})
+				if err != nil {
+					errCh <- fmt.Errorf("goroutine %d insert %d: %w", i, j, err)
+					return
+				}
+			}
+		}()
+	}
+
+	// Spawn concurrent readers that query the runs table while writes proceed.
+	const numReaders = 5
+	for i := 0; i < numReaders; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				var count int
+				if err := db.conn.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil {
+					errCh <- fmt.Errorf("reader %d query %d: %w", i, j, err)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent access error: %v", err)
+	}
+
+	// After all goroutines complete, verify total file count is correct.
+	var totalFiles int
+	if err := db.conn.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&totalFiles); err != nil {
+		t.Fatalf("count files: %v", err)
+	}
+	want := numRuns * filesPerRun
+	if totalFiles != want {
+		t.Errorf("total files = %d, want %d (no rows lost or duplicated)", totalFiles, want)
+	}
+}
+
+// TestDB_concurrentInsertFiles validates that InsertFiles (batch insert) is
+// safe when called from a single goroutine while concurrent readers query.
+func TestDB_concurrentInsertFiles(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "batch-run")
+
+	const batchSize = 20
+	files := make([]*FileRecord, batchSize)
+	for i := range files {
+		files[i] = &FileRecord{
+			RunID:      "batch-run",
+			SourcePath: fmt.Sprintf("/src/batch_%03d.jpg", i),
+		}
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 10)
+
+	// Single writer goroutine doing a batch insert.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ids, err := db.InsertFiles(files)
+		if err != nil {
+			errCh <- fmt.Errorf("InsertFiles: %w", err)
+			return
+		}
+		if len(ids) != batchSize {
+			errCh <- fmt.Errorf("InsertFiles returned %d IDs, want %d", len(ids), batchSize)
+		}
+	}()
+
+	// Concurrent readers.
+	for i := 0; i < 5; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var count int
+			if err := db.conn.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&count); err != nil {
+				errCh <- fmt.Errorf("reader %d: %w", i, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent batch insert error: %v", err)
+	}
+}

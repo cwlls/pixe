@@ -17,6 +17,7 @@ package domain
 import "testing"
 
 func TestFileStatusString(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		status FileStatus
 		want   string
@@ -40,6 +41,7 @@ func TestFileStatusString(t *testing.T) {
 }
 
 func TestFileStatusIsTerminal(t *testing.T) {
+	t.Parallel()
 	terminal := []FileStatus{StatusComplete, StatusFailed, StatusMismatch, StatusTagFailed}
 	nonTerminal := []FileStatus{StatusPending, StatusExtracted, StatusHashed, StatusCopied, StatusVerified, StatusTagged}
 
@@ -56,6 +58,7 @@ func TestFileStatusIsTerminal(t *testing.T) {
 }
 
 func TestFileStatusIsError(t *testing.T) {
+	t.Parallel()
 	errStatuses := []FileStatus{StatusFailed, StatusMismatch, StatusTagFailed}
 	okStatuses := []FileStatus{StatusPending, StatusExtracted, StatusHashed, StatusCopied, StatusVerified, StatusTagged, StatusComplete}
 
@@ -72,6 +75,7 @@ func TestFileStatusIsError(t *testing.T) {
 }
 
 func TestMetadataTagsIsEmpty(t *testing.T) {
+	t.Parallel()
 	if !(MetadataTags{}).IsEmpty() {
 		t.Error("zero-value MetadataTags should be empty")
 	}

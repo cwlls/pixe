@@ -1087,29 +1087,80 @@ CR3 is the exception. It uses an ISOBMFF container (like HEIC and MP4) rather th
 
 ```
 internal/handler/
+├── handlertest/          ← shared test suite for FileTypeHandler implementations
+│   └── suite.go          ← RunSuite() function: 10-test harness for TIFF-based handlers
 ├── tiffraw/              ← shared base for TIFF-based RAW formats
 │   └── tiffraw.go        ← Base struct with common ExtractDate, HashableReader, WriteMetadataTags
 ├── dng/
 │   ├── dng.go            ← thin wrapper: Extensions, MagicBytes, Detect → delegates to tiffraw.Base
-│   └── dng_test.go
+│   └── dng_test.go       ← uses handlertest.RunSuite()
 ├── nef/
 │   ├── nef.go
-│   └── nef_test.go
+│   └── nef_test.go       ← uses handlertest.RunSuite()
 ├── cr2/
 │   ├── cr2.go
-│   └── cr2_test.go
+│   └── cr2_test.go       ← uses handlertest.RunSuite()
 ├── cr3/
 │   ├── cr3.go            ← standalone ISOBMFF-based handler (not using tiffraw)
 │   └── cr3_test.go
 ├── pef/
 │   ├── pef.go
-│   └── pef_test.go
-└── arw/
-    ├── arw.go
-    └── arw_test.go
+│   └── pef_test.go       ← uses handlertest.RunSuite()
+├── arw/
+│   ├── arw.go
+│   └── arw_test.go       ← uses handlertest.RunSuite()
+├── jpeg/
+│   ├── jpeg.go
+│   └── jpeg_test.go
+├── heic/
+│   ├── heic.go
+│   └── heic_test.go
+├── mp4/
+│   ├── mp4.go
+│   └── mp4_test.go
+└── tiffraw/
+    ├── tiffraw.go
+    └── tiffraw_test.go
 ```
 
-#### 6.4.3 Shared Base: `tiffraw.Base`
+#### 6.4.3 Shared Test Suite: `handlertest`
+
+The `handlertest` package provides a reusable test harness (`RunSuite()` function) that exercises the 10 standard behaviors shared by all `FileTypeHandler` implementations. This eliminates ~900 lines of test duplication across the five TIFF-based RAW handler test files (DNG, NEF, CR2, PEF, ARW).
+
+**The 10-test suite covers:**
+
+1. `Extensions()` — handler returns expected file extensions
+2. `MagicBytes()` — handler returns expected magic byte signatures
+3. `Detect(validFile)` — detection succeeds for valid files
+4. `Detect(wrongExtension)` — detection fails for files with wrong extension
+5. `Detect(wrongMagic)` — detection fails for files with wrong magic bytes
+6. `ExtractDate(noEXIF)` — fallback to Ansel Adams date when no EXIF present
+7. `HashableReader(returnsData)` — reader returns non-empty data
+8. `HashableReader(deterministic)` — two reads return identical data
+9. `MetadataSupport()` — handler declares correct metadata capability
+10. `WriteMetadataTags(noop)` — tagging returns no error
+
+**Usage pattern (per-handler test file):**
+
+```go
+// internal/handler/dng/dng_test.go
+func TestHandler(t *testing.T) {
+    handlertest.RunSuite(t, handlertest.SuiteConfig{
+        NewHandler: func() domain.FileTypeHandler { return dng.New() },
+        Extensions: []string{".dng"},
+        MagicSignatures: []domain.MagicSignature{
+            {Offset: 0, Bytes: []byte{0x49, 0x49, 0x2A, 0x00}}, // little-endian TIFF
+        },
+        BuildFakeFile: buildFakeDNG,
+        WrongExtension: "test.jpg",
+        MetadataCapability: domain.MetadataSidecar,
+    })
+}
+```
+
+Each TIFF-based handler test file (DNG, NEF, CR2, PEF, ARW) calls `RunSuite()` with handler-specific configuration. The suite runs all 10 subtests in parallel (via `t.Parallel()` on each subtest) using `t.TempDir()` for isolated file I/O.
+
+#### 6.4.4 Shared Base: `tiffraw.Base`
 
 The `tiffraw` package provides a `Base` struct that implements the three format-agnostic methods of the `FileTypeHandler` interface:
 
@@ -1133,7 +1184,7 @@ Each per-format handler (e.g., `dng.Handler`) embeds `tiffraw.Base` and adds onl
 
 This is standard Go composition via embedding — no inheritance, no interface gymnastics.
 
-#### 6.4.4 Date Extraction (TIFF-based RAW)
+#### 6.4.5 Date Extraction (TIFF-based RAW)
 
 All TIFF-based RAW formats store standard EXIF metadata in IFD0 and sub-IFDs. Date extraction follows the same fallback chain used by JPEG:
 
@@ -1143,7 +1194,7 @@ All TIFF-based RAW formats store standard EXIF metadata in IFD0 and sub-IFDs. Da
 
 The TIFF container is parsed to locate the EXIF IFDs, then standard EXIF tag reading applies. A pure-Go TIFF parser (e.g., `golang.org/x/image/tiff` or equivalent) provides the IFD traversal.
 
-#### 6.4.5 Date Extraction (CR3)
+#### 6.4.6 Date Extraction (CR3)
 
 CR3 files use the ISOBMFF container format, the same box-based structure used by HEIC and MP4. Date extraction follows the ISOBMFF approach already established by the HEIC handler:
 
@@ -1151,7 +1202,7 @@ CR3 files use the ISOBMFF container format, the same box-based structure used by
 2. Extract the raw EXIF bytes from the container.
 3. Parse with the standard EXIF library and apply the same fallback chain: `DateTimeOriginal` → `DateTime` → Ansel Adams date.
 
-#### 6.4.6 Hashable Region: Raw Sensor Data
+#### 6.4.7 Hashable Region: Raw Sensor Data
 
 All supported RAW formats contain the actual sensor data payload — the irreducible content that distinguishes one exposure from another. The `HashableReader()` method extracts this sensor data and returns it as the hashable region.
 
@@ -1183,7 +1234,7 @@ The handler uses these signals in combination to reliably select the sensor data
 
 CR3 files use the ISOBMFF container format. The raw sensor data is stored in the `mdat` (media data) box, referenced by track metadata in the `moov` box. The handler navigates the ISOBMFF box structure to locate the sensor data track (typically the primary image item or the largest `trak` entry), determines the byte offset and length of the sensor data within `mdat`, and returns a reader over that region. If the sensor data track cannot be isolated, the handler falls back to hashing the full `mdat` box contents.
 
-#### 6.4.7 Metadata Capability: XMP Sidecar
+#### 6.4.8 Metadata Capability: XMP Sidecar
 
 All RAW handlers declare `MetadataSidecar` as their metadata capability. Writing metadata into proprietary RAW containers risks corruption of archival originals and is not reliably possible in pure Go. Instead, the pipeline writes an XMP sidecar file alongside the destination copy (see Section 4.8.2).
 
@@ -1205,7 +1256,7 @@ The CR3 handler (standalone, not using `tiffraw.Base`) implements the same patte
 
 **What changed:** Previously, all non-JPEG handlers had no-op `WriteMetadataTags` stubs and the pipeline would call them unconditionally, silently doing nothing. The database would record these files as "tagged" even though no metadata was written. With the new design, the pipeline checks `MetadataSupport()` and routes sidecar-capable handlers to XMP generation. The database status accurately reflects whether metadata was actually persisted.
 
-#### 6.4.8 Magic Byte Signatures
+#### 6.4.9 Magic Byte Signatures
 
 Each RAW format has a distinct file header that enables reliable magic-byte detection:
 
@@ -1220,7 +1271,7 @@ Each RAW format has a distinct file header that enables reliable magic-byte dete
 
 > **Important:** Several TIFF-based RAW formats share the same TIFF magic bytes (`49 49 2A 00`). For these formats, the **extension-based fast path** in the registry is the primary discriminator, with magic bytes serving only to confirm the file is a valid TIFF container. CR2 is the notable exception — it has additional signature bytes at offset 8 that uniquely identify it. The registry's two-phase detection (extension first, then magic byte verification) handles this gracefully.
 
-#### 6.4.9 Handler Registration
+#### 6.4.10 Handler Registration
 
 All RAW handlers are registered in the same three locations as existing handlers (`cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go`):
 
