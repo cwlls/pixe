@@ -81,4 +81,6 @@ This page is generated from the Go package doc comments in the source tree. Each
 **`internal/docgen`** — Package main implements the docgen tool that injects generated content into documentation files using marker-based replacement.
 
 **`internal/fileutil`** — Package fileutil provides shared file-path utilities used across handler and discovery packages.
+
+**`internal/handler/handlertest`** — Package handlertest provides a shared test suite for FileTypeHandler implementations that delegate to tiffraw.Base. Each handler test file calls RunSuite with handler-specific configuration to exercise the standard 10 behaviours without duplicating test logic.
 <!-- pixe:end:package-list -->

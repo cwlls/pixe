@@ -182,6 +182,11 @@ Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdli
       <td></td>
     </tr>
     <tr>
+      <td>HANDLERTEST</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
       <td>HEIC</td>
       <td>.heic, .heif</td>
       <td>XMP sidecar</td>
