@@ -9,6 +9,25 @@ permalink: /changelog/
 
 ---
 
+## [1.9.0] — 2026-03-11
+
+### Added
+
+- **Source Sidecar Carry** — When sorting media files from a source directory, Pixe now detects and carries pre-existing `.aae` and `.xmp` sidecar files alongside their parent media files to the destination archive.
+  - **On by default** — sidecar carry is enabled unless `--no-carry-sidecars` is passed.
+  - **Association by stem matching** — `IMG_1234.xmp` associates with `IMG_1234.HEIC`; `IMG_1234.HEIC.xmp` (full-extension Adobe convention) is also supported and takes priority.
+  - **Case-insensitive** — `img_1234.xmp` matches `IMG_1234.HEIC`.
+  - **Destination naming** — sidecar is renamed to match the destination media file: `20211225_062223_7d97e98f.heic.aae`.
+  - **XMP tag merge** — when a `.xmp` sidecar is carried AND `--copyright`/`--camera-owner` is configured, Pixe merges the tags into the carried sidecar instead of generating a new one. Source `.xmp` values are authoritative by default (existing fields preserved); `--overwrite-sidecar-tags` inverts this.
+  - **Orphan sidecars** — sidecars with no matching media file are reported as `SKIP` with reason `orphan sidecar: no matching media file`.
+  - **Dry-run** — `+sidecar` lines appear in output showing what would be carried, no files copied.
+  - **Duplicates** — sidecars follow their parent to `duplicates/` when the parent is a duplicate; sidecars are not copied when `--skip-duplicates` is active.
+- **New CLI flags on `pixe sort`:**
+  - `--no-carry-sidecars` — disable sidecar carry (default: carry is enabled).
+  - `--overwrite-sidecar-tags` — when merging tags into a carried `.xmp`, replace existing values instead of preserving them (default: preserve).
+- **New stdout output format** — `+sidecar` lines appear indented under their parent media file, showing what sidecar was carried and to where.
+- **Database schema v3** — new `carried_sidecars` column stores the JSON array of carried sidecar relative paths per file. The ledger entry gains a `sidecars` field.
+
 ## [1.8.0] — 2026-03-11
 
 ### Added

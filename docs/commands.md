@@ -30,6 +30,8 @@ Click any command to expand its flags and details.
           <tr><td>--skip-duplicates</td><td>Skip duplicates entirely instead of copying to <code>duplicates/</code></td></tr>
           <tr><td>--copyright</td><td>Copyright template: <code>"Copyright {{.Year}} My Family"</code></td></tr>
           <tr><td>--camera-owner</td><td>Camera owner string to inject into metadata</td></tr>
+          <tr><td>--no-carry-sidecars</td><td>Disable carrying pre-existing <code>.aae</code> and <code>.xmp</code> sidecar files from source to destination (carry is enabled by default)</td></tr>
+          <tr><td>--overwrite-sidecar-tags</td><td>When merging tags into a carried <code>.xmp</code> sidecar, replace existing values instead of preserving them</td></tr>
           <tr><td>--dry-run</td><td>Preview operations without copying any files</td></tr>
           <tr><td>--db-path</td><td>Explicit path to the SQLite archive database</td></tr>
         </tbody>
@@ -49,7 +51,10 @@ Click any command to expand its flags and details.
 <span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --copyright "Copyright {{.Year}} My Family" --skip-duplicates</span>
 
 <span class="term-comment"># Ignore OS junk files</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --ignore ".DS_Store" --ignore "Thumbs.db" --ignore "*.aae"</span></pre>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --ignore ".DS_Store" --ignore "Thumbs.db"</span>
+
+<span class="term-comment"># Sort without carrying sidecar files</span>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --no-carry-sidecars</span></pre>
   </div>
 </div>
 

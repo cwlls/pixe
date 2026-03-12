@@ -20,7 +20,7 @@ Pixe organizes media files into a date-based directory structure with embedded i
 Each file passes through these stages:
 
 ```
-discover → extract → hash → copy → verify → tag → complete
+discover → extract → hash → copy → verify → carry sidecars → tag → complete
 ```
 
 1. **Discover** — Walk the source directory, classify files by type
@@ -28,7 +28,8 @@ discover → extract → hash → copy → verify → tag → complete
 3. **Hash** — Compute checksum over the media payload (excluding metadata)
 4. **Copy** — Write to the destination path
 5. **Verify** — Re-read and re-hash the destination to confirm integrity
-6. **Tag** — Optionally inject Copyright/CameraOwner metadata
+6. **Carry sidecars** — Detect and carry pre-existing `.aae` and `.xmp` sidecar files from source to destination
+7. **Tag** — Optionally inject Copyright/CameraOwner metadata
 
 ### Output Format
 
@@ -36,6 +37,7 @@ Each file produces one output line:
 
 ```
 COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223_abc123.jpg
+     +sidecar IMG_0001.aae -> 2021/12-Dec/20211225_062223_abc123.jpg.aae
 SKIP notes.txt -> unsupported format: .txt
 SKIP IMG_0002.jpg -> previously imported
 DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223_abc123.jpg
@@ -118,6 +120,8 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | `--skip-duplicates` | Skip copying duplicate files instead of copying to `duplicates/` |
 | `--copyright` | Copyright template, e.g. `"Copyright {{.Year}} My Family"` |
 | `--camera-owner` | Camera owner string to inject |
+| `--no-carry-sidecars` | Disable carrying pre-existing `.aae` and `.xmp` sidecar files from source to destination (carry is enabled by default) |
+| `--overwrite-sidecar-tags` | When merging tags into a carried `.xmp` sidecar, replace existing values instead of preserving them |
 | `--dry-run` | Preview operations without copying |
 | `--db-path` | Explicit path to the SQLite archive database |
 

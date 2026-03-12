@@ -23,7 +23,7 @@ Each file moves through these stages in order, with its state tracked in the arc
 
 **Verify** — The temp file is independently re-read and re-hashed. If the checksum matches the source hash, the file is good. If it doesn't match, the temp file is deleted and the file is flagged as a mismatch — the source is untouched and can be reprocessed.
 
-**Tag** — If `--copyright` or `--camera-owner` is configured, metadata is injected. JPEG files receive embedded EXIF tags. All other formats (HEIC, RAW, video) receive an XMP sidecar file alongside the destination copy. If no tags are configured, this stage is skipped.
+**Tag** — If `--copyright` or `--camera-owner` is configured, metadata is injected. JPEG files receive embedded EXIF tags. All other formats (HEIC, RAW, video) receive an XMP sidecar file alongside the destination copy. When a `.xmp` sidecar was carried from the source, tags are merged into it instead of generating a new one — existing values in the source `.xmp` are preserved by default (`--overwrite-sidecar-tags` inverts this). If no tags are configured, this stage is skipped.
 
 **Complete** — The temp file is atomically renamed to its canonical destination path. A file at its canonical path in the archive is always complete and verified.
 
@@ -48,6 +48,32 @@ Every file discovered in the source produces exactly one line of output:
 | `SKIP` | File not copied — already imported in a prior run, or unsupported format |
 | `DUPE` | File is a content duplicate of an already-archived file |
 | `ERR` | File processing failed at some pipeline stage |
+
+---
+
+### Carry sidecars
+
+When sorting media files, Pixe automatically detects and carries pre-existing `.aae` and `.xmp` sidecar files from the source directory to the destination archive. This preserves metadata and edits that were created alongside the original media files.
+
+**How it works:**
+
+- **Automatic detection** — Sidecars are matched to their parent media file by stem (filename without extension). `IMG_1234.xmp` associates with `IMG_1234.HEIC`; the full-extension Adobe convention `IMG_1234.HEIC.xmp` is also supported and takes priority.
+- **Case-insensitive matching** — `img_1234.xmp` matches `IMG_1234.HEIC`.
+- **Destination naming** — The sidecar is renamed to match the destination media file. For example, if `IMG_1234.HEIC` becomes `20211225_062223_7d97e98f.heic`, then `IMG_1234.aae` becomes `20211225_062223_7d97e98f.heic.aae`.
+- **Enabled by default** — Use `--no-carry-sidecars` to disable sidecar carry entirely.
+- **Orphan sidecars** — Sidecars with no matching media file are reported as `SKIP` with reason `orphan sidecar: no matching media file`.
+- **Dry-run preview** — In dry-run mode, `+sidecar` lines appear in the output showing what would be carried, without copying any files.
+- **Duplicate handling** — When a media file is a duplicate, its sidecars follow it to the `duplicates/` directory. When `--skip-duplicates` is active, sidecars are not copied.
+
+**Output format:**
+
+<pre><span class="term-copy">COPY</span> IMG_1234.HEIC -&gt; 2021/12-Dec/20211225_062223_7d97e98f.heic
+     <span class="term-copy">+sidecar</span> IMG_1234.aae -&gt; 2021/12-Dec/20211225_062223_7d97e98f.heic.aae
+     <span class="term-copy">+sidecar</span> IMG_1234.xmp -&gt; 2021/12-Dec/20211225_062223_7d97e98f.heic.xmp (merge tags)</pre>
+
+**XMP tag merge:**
+
+When a `.xmp` sidecar is carried AND `--copyright` or `--camera-owner` is configured, Pixe merges the new tags into the carried sidecar instead of generating a new one. By default, existing values in the source `.xmp` are preserved (source is authoritative). Use `--overwrite-sidecar-tags` to replace existing values with the new tags instead.
 
 ---
 
