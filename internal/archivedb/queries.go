@@ -52,6 +52,12 @@ type InventoryEntry struct {
 	CaptureDate *time.Time
 }
 
+// FormatCount holds a file extension and its count in the archive.
+type FormatCount struct {
+	Extension string `json:"extension"`
+	Count     int    `json:"count"`
+}
+
 // ArchiveStats holds aggregate statistics for the entire archive database.
 // Used to populate summary lines in pixe query output.
 type ArchiveStats struct {
@@ -405,6 +411,57 @@ func (db *DB) ArchiveStats() (*ArchiveStats, error) {
 	}
 
 	return &s, nil
+}
+
+// FormatBreakdown returns file counts grouped by lowercase extension for
+// complete, non-duplicate files. The result maps extension (e.g., ".jpg")
+// to count, ordered by count descending.
+func (db *DB) FormatBreakdown() ([]FormatCount, error) {
+	const q = `
+		SELECT LOWER(SUBSTR(dest_rel, INSTR(dest_rel, '.'))) AS ext,
+		       COUNT(*) AS cnt
+		FROM files
+		WHERE status = 'complete' AND is_duplicate = 0
+		  AND dest_rel IS NOT NULL AND INSTR(dest_rel, '.') > 0
+		GROUP BY ext
+		ORDER BY cnt DESC`
+
+	rows, err := db.conn.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: format breakdown: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []FormatCount
+	for rows.Next() {
+		var fc FormatCount
+		if err := rows.Scan(&fc.Extension, &fc.Count); err != nil {
+			return nil, fmt.Errorf("archivedb: format breakdown scan: %w", err)
+		}
+		result = append(result, fc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("archivedb: format breakdown iterate: %w", err)
+	}
+	return result, nil
+}
+
+// LastRunDate returns the finish time of the most recently completed run,
+// or nil if no completed runs exist.
+func (db *DB) LastRunDate() (*time.Time, error) {
+	const q = `SELECT MAX(finished_at) FROM runs WHERE status = 'completed'`
+	var s sql.NullString
+	if err := db.conn.QueryRow(q).Scan(&s); err != nil {
+		return nil, fmt.Errorf("archivedb: last run date: %w", err)
+	}
+	if !s.Valid || s.String == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, s.String)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: last run date parse: %w", err)
+	}
+	return &t, nil
 }
 
 // CheckSourceProcessed returns true if a file with the given absolute source
