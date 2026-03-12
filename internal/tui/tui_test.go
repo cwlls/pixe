@@ -144,6 +144,131 @@ func TestApp_QuitKeys(t *testing.T) {
 // SortModel tests
 // ---------------------------------------------------------------------------
 
+func TestSortModel_EditSettings_EnterAndSave(t *testing.T) {
+	opts := testAppOptions()
+	opts.Config.Source = "/original/src"
+	opts.Config.Destination = ""
+	m := NewSortModel(opts)
+
+	if m.state != sortStateConfigure {
+		t.Fatalf("initial state = %v, want sortStateConfigure", m.state)
+	}
+
+	// 'e' enters edit mode.
+	updated, _ := pressKey(t, m, "e")
+	m = updated.(SortModel)
+	if m.state != sortStateEdit {
+		t.Fatalf("after 'e': state = %v, want sortStateEdit", m.state)
+	}
+
+	// Focused field should be Source (index 0).
+	if m.focusedEdit != editFieldSource {
+		t.Errorf("focusedEdit = %v, want editFieldSource", m.focusedEdit)
+	}
+
+	// Tab moves focus to Destination.
+	updated, _ = pressSpecialKey(t, m, tea.KeyTab)
+	m = updated.(SortModel)
+	if m.focusedEdit != editFieldDest {
+		t.Errorf("after Tab: focusedEdit = %v, want editFieldDest", m.focusedEdit)
+	}
+
+	// Type a destination path character by character.
+	for _, ch := range "/new/dest" {
+		updated, _ = pressKey(t, m, string(ch))
+		m = updated.(SortModel)
+	}
+
+	// Enter saves.
+	updated, _ = pressSpecialKey(t, m, tea.KeyEnter)
+	m = updated.(SortModel)
+	if m.state != sortStateConfigure {
+		t.Fatalf("after Enter: state = %v, want sortStateConfigure", m.state)
+	}
+	if m.config.Destination != "/new/dest" {
+		t.Errorf("config.Destination = %q, want %q", m.config.Destination, "/new/dest")
+	}
+}
+
+func TestSortModel_EditSettings_EscCancels(t *testing.T) {
+	opts := testAppOptions()
+	opts.Config.Destination = "/original/dest"
+	m := NewSortModel(opts)
+
+	// Enter edit mode.
+	updated, _ := pressKey(t, m, "e")
+	m = updated.(SortModel)
+	if m.state != sortStateEdit {
+		t.Fatalf("after 'e': state = %v, want sortStateEdit", m.state)
+	}
+
+	// Tab to Destination and type something.
+	updated, _ = pressSpecialKey(t, m, tea.KeyTab)
+	m = updated.(SortModel)
+	for _, ch := range "CHANGED" {
+		updated, _ = pressKey(t, m, string(ch))
+		m = updated.(SortModel)
+	}
+
+	// Esc cancels — config must be unchanged.
+	updated, _ = pressSpecialKey(t, m, tea.KeyEsc)
+	m = updated.(SortModel)
+	if m.state != sortStateConfigure {
+		t.Fatalf("after Esc: state = %v, want sortStateConfigure", m.state)
+	}
+	if m.config.Destination != "/original/dest" {
+		t.Errorf("config.Destination = %q after cancel, want %q", m.config.Destination, "/original/dest")
+	}
+}
+
+func TestSortModel_EditSettings_TabCyclesFocus(t *testing.T) {
+	opts := testAppOptions()
+	m := NewSortModel(opts)
+
+	updated, _ := pressKey(t, m, "e")
+	m = updated.(SortModel)
+
+	// Initial focus: Source.
+	if m.focusedEdit != editFieldSource {
+		t.Fatalf("initial focusedEdit = %v, want editFieldSource", m.focusedEdit)
+	}
+
+	// Tab → Dest.
+	updated, _ = pressSpecialKey(t, m, tea.KeyTab)
+	m = updated.(SortModel)
+	if m.focusedEdit != editFieldDest {
+		t.Errorf("after Tab: focusedEdit = %v, want editFieldDest", m.focusedEdit)
+	}
+
+	// Tab wraps back → Source.
+	updated, _ = pressSpecialKey(t, m, tea.KeyTab)
+	m = updated.(SortModel)
+	if m.focusedEdit != editFieldSource {
+		t.Errorf("after second Tab: focusedEdit = %v, want editFieldSource", m.focusedEdit)
+	}
+
+	// ShiftTab → Dest (reverse).
+	updated, _ = pressSpecialKey(t, m, tea.KeyShiftTab)
+	m = updated.(SortModel)
+	if m.focusedEdit != editFieldDest {
+		t.Errorf("after ShiftTab: focusedEdit = %v, want editFieldDest", m.focusedEdit)
+	}
+}
+
+func TestSortModel_ConfigureView_ShowsEditHintWhenNoDest(t *testing.T) {
+	opts := testAppOptions()
+	opts.Config.Destination = ""
+	m := NewSortModel(opts)
+
+	view := m.viewConfigure()
+	if !strings.Contains(view, "[e] Edit Settings") {
+		t.Errorf("viewConfigure with no dest should show '[e] Edit Settings', got:\n%s", view)
+	}
+	if !strings.Contains(view, "--dest is required") {
+		t.Errorf("viewConfigure with no dest should show '--dest is required', got:\n%s", view)
+	}
+}
+
 func TestSortModel_StateTransitions(t *testing.T) {
 	opts := testAppOptions()
 	m := NewSortModel(opts)

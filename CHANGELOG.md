@@ -4,6 +4,16 @@
 
 ---
 
+## [2.0.3] -- 2026-03-11
+
+### Bug Fixes
+
+- **Fixed `pixe gui --dest /path` silently ignored (Viper pflag collision)** — Both `sortCmd` and `guiCmd` called `viper.BindPFlag("dest", ...)` on the global Viper instance. Since Viper stores only one pflag per key, the last `init()` to run won, causing `--dest` (and other flags) passed to `pixe gui` to be silently ignored. Now, `cmd/gui.go` uses `resolveGUIConfig(*cobra.Command)` which reads flag values directly from the cobra flag set, bypassing Viper entirely. All `viper.BindPFlag` calls removed from `gui.go`'s `init()`.
+
+- **Implemented missing in-TUI settings editor** — The `[e]` key was advertised in the UI but never handled. No settings editor existed. Added `sortStateEdit` state to `SortModel` with two `textinput` fields (Source, Destination). `[e]` enters edit mode; `Tab`/`Shift+Tab` cycles focus; `Enter` saves; `Esc` cancels. `viewConfigure()` now always shows the `[e] Edit Settings` hint.
+
+---
+
 ## [2.0.2] -- 2026-03-11
 
 ### Improvements

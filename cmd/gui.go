@@ -16,11 +16,13 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
+	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/hash"
 	"github.com/cwlls/pixe-go/internal/tui"
 )
@@ -42,7 +44,7 @@ Key bindings:
 }
 
 func runGUI(cmd *cobra.Command, args []string) error {
-	cfg, err := resolveConfig()
+	cfg, err := resolveGUIConfig(cmd)
 	if err != nil {
 		return err
 	}
@@ -69,6 +71,71 @@ func runGUI(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolveGUIConfig reads flag values directly from the guiCmd cobra.Command,
+// bypassing the global Viper store to avoid pflag-binding collisions with
+// sortCmd (both commands register flags under the same Viper key names).
+func resolveGUIConfig(cmd *cobra.Command) (*config.AppConfig, error) {
+	flags := cmd.Flags()
+
+	source, _ := flags.GetString("source")
+	dest, _ := flags.GetString("dest")
+	workers, _ := flags.GetInt("workers")
+	algorithm, _ := flags.GetString("algorithm")
+	copyright, _ := flags.GetString("copyright")
+	cameraOwner, _ := flags.GetString("camera-owner")
+	dryRun, _ := flags.GetBool("dry-run")
+	dbPath, _ := flags.GetString("db-path")
+	recursive, _ := flags.GetBool("recursive")
+	skipDuplicates, _ := flags.GetBool("skip-duplicates")
+	ignore, _ := flags.GetStringArray("ignore")
+	noCarrySidecars, _ := flags.GetBool("no-carry-sidecars")
+	overwriteSidecarTags, _ := flags.GetBool("overwrite-sidecar-tags")
+
+	// Inherit persistent flags (workers, algorithm) from root if not overridden.
+	if !flags.Changed("workers") {
+		if pf := cmd.Root().PersistentFlags().Lookup("workers"); pf != nil {
+			workers, _ = cmd.Root().PersistentFlags().GetInt("workers")
+		}
+	}
+	if !flags.Changed("algorithm") {
+		if pf := cmd.Root().PersistentFlags().Lookup("algorithm"); pf != nil {
+			algorithm, _ = cmd.Root().PersistentFlags().GetString("algorithm")
+		}
+	}
+
+	if source == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve current directory: %w", err)
+		}
+		source = cwd
+	}
+
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+
+	if algorithm == "" {
+		algorithm = "sha1"
+	}
+
+	return &config.AppConfig{
+		Source:               source,
+		Destination:          dest,
+		Workers:              workers,
+		Algorithm:            algorithm,
+		Copyright:            copyright,
+		CameraOwner:          cameraOwner,
+		DryRun:               dryRun,
+		DBPath:               dbPath,
+		Recursive:            recursive,
+		SkipDuplicates:       skipDuplicates,
+		Ignore:               ignore,
+		CarrySidecars:        !noCarrySidecars,
+		OverwriteSidecarTags: overwriteSidecarTags,
+	}, nil
+}
+
 func init() {
 	rootCmd.AddCommand(guiCmd)
 
@@ -85,16 +152,4 @@ func init() {
 	guiCmd.Flags().Bool("no-carry-sidecars", false, "disable carrying pre-existing .aae and .xmp sidecar files")
 	guiCmd.Flags().Bool("overwrite-sidecar-tags", false, "overwrite existing sidecar tag values instead of preserving them")
 
-	// Bind to Viper with the same keys as sortCmd.
-	_ = viper.BindPFlag("source", guiCmd.Flags().Lookup("source"))
-	_ = viper.BindPFlag("dest", guiCmd.Flags().Lookup("dest"))
-	_ = viper.BindPFlag("copyright", guiCmd.Flags().Lookup("copyright"))
-	_ = viper.BindPFlag("camera_owner", guiCmd.Flags().Lookup("camera-owner"))
-	_ = viper.BindPFlag("dry_run", guiCmd.Flags().Lookup("dry-run"))
-	_ = viper.BindPFlag("db_path", guiCmd.Flags().Lookup("db-path"))
-	_ = viper.BindPFlag("recursive", guiCmd.Flags().Lookup("recursive"))
-	_ = viper.BindPFlag("skip_duplicates", guiCmd.Flags().Lookup("skip-duplicates"))
-	_ = viper.BindPFlag("ignore", guiCmd.Flags().Lookup("ignore"))
-	_ = viper.BindPFlag("no_carry_sidecars", guiCmd.Flags().Lookup("no-carry-sidecars"))
-	_ = viper.BindPFlag("overwrite_sidecar_tags", guiCmd.Flags().Lookup("overwrite-sidecar-tags"))
 }

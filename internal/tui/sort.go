@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 
@@ -36,6 +37,7 @@ type sortState int
 
 const (
 	sortStateConfigure sortState = iota
+	sortStateEdit
 	sortStateRunning
 	sortStateComplete
 )
@@ -54,6 +56,15 @@ type sortResultMsg struct {
 	err    error
 }
 
+// editField identifies which settings field is focused in sortStateEdit.
+type editField int
+
+const (
+	editFieldSource editField = iota
+	editFieldDest
+	editFieldCount // sentinel — number of editable fields
+)
+
 // SortModel is the Bubble Tea model for the Sort tab.
 type SortModel struct {
 	state    sortState
@@ -67,6 +78,10 @@ type SortModel struct {
 	log      activityLog
 	workers  workerPane
 	overlay  errorOverlay
+
+	// Settings editor (sortStateEdit).
+	editInputs  [editFieldCount]textinput.Model
+	focusedEdit editField
 
 	// Counters.
 	total      int
@@ -83,19 +98,36 @@ type SortModel struct {
 	keymap KeyMap
 }
 
+// newEditInputs builds the two textinput fields used in sortStateEdit.
+func newEditInputs(cfg *config.AppConfig) [editFieldCount]textinput.Model {
+	src := textinput.New()
+	src.Placeholder = "source directory (default: current directory)"
+	src.SetValue(cfg.Source)
+	src.Width = 60
+	_ = src.Focus()
+
+	dst := textinput.New()
+	dst.Placeholder = "destination directory (required)"
+	dst.SetValue(cfg.Destination)
+	dst.Width = 60
+
+	return [editFieldCount]textinput.Model{src, dst}
+}
+
 // NewSortModel creates a SortModel from AppOptions.
 func NewSortModel(opts AppOptions) SortModel {
 	return SortModel{
-		state:    sortStateConfigure,
-		config:   opts.Config,
-		registry: opts.Registry,
-		hasher:   opts.Hasher,
-		version:  opts.Version,
-		progress: newStyledProgress(80),
-		log:      newActivityLog(80, 20),
-		workers:  newWorkerPane(opts.Config.Workers),
-		overlay:  newErrorOverlay(),
-		keymap:   DefaultKeyMap(),
+		state:      sortStateConfigure,
+		config:     opts.Config,
+		registry:   opts.Registry,
+		hasher:     opts.Hasher,
+		version:    opts.Version,
+		progress:   newStyledProgress(80),
+		log:        newActivityLog(80, 20),
+		workers:    newWorkerPane(opts.Config.Workers),
+		overlay:    newErrorOverlay(),
+		editInputs: newEditInputs(opts.Config),
+		keymap:     DefaultKeyMap(),
 	}
 }
 
@@ -132,9 +164,17 @@ func (m SortModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.state {
 		case sortStateConfigure:
-			if msg.String() == "s" && m.config.Destination != "" {
-				return m.startRun()
+			switch msg.String() {
+			case "s":
+				if m.config.Destination != "" {
+					return m.startRun()
+				}
+			case "e":
+				return m.enterEditSettings()
 			}
+
+		case sortStateEdit:
+			return m.updateEditSettings(msg)
 
 		case sortStateRunning:
 			switch msg.String() {
@@ -367,12 +407,76 @@ func (m SortModel) View() string {
 	switch m.state {
 	case sortStateConfigure:
 		return m.viewConfigure()
+	case sortStateEdit:
+		return m.viewEdit()
 	case sortStateRunning:
 		return m.viewRunning()
 	case sortStateComplete:
 		return m.viewComplete()
 	}
 	return ""
+}
+
+// enterEditSettings transitions to sortStateEdit, pre-populating the inputs
+// with the current config values and focusing the Source field.
+func (m SortModel) enterEditSettings() (tea.Model, tea.Cmd) {
+	m.editInputs = newEditInputs(m.config)
+	m.focusedEdit = editFieldSource
+	m.state = sortStateEdit
+	return m, m.editInputs[editFieldSource].Focus()
+}
+
+// updateEditSettings handles key events while in sortStateEdit.
+//
+//   - Tab / Shift+Tab  — move focus between Source and Destination fields.
+//   - Enter            — save values and return to sortStateConfigure.
+//   - Esc              — discard changes and return to sortStateConfigure.
+//   - All other keys   — forwarded to the focused textinput.
+func (m SortModel) updateEditSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Discard — restore inputs to current config and go back.
+		m.editInputs = newEditInputs(m.config)
+		m.state = sortStateConfigure
+		return m, nil
+
+	case "enter":
+		// Save — write input values back into config.
+		m.config.Source = m.editInputs[editFieldSource].Value()
+		m.config.Destination = m.editInputs[editFieldDest].Value()
+		m.state = sortStateConfigure
+		return m, nil
+
+	case "tab", "shift+tab":
+		// Cycle focus between the two fields.
+		m.editInputs[m.focusedEdit].Blur()
+		if msg.String() == "tab" {
+			m.focusedEdit = (m.focusedEdit + 1) % editFieldCount
+		} else {
+			m.focusedEdit = (m.focusedEdit - 1 + editFieldCount) % editFieldCount
+		}
+		return m, m.editInputs[m.focusedEdit].Focus()
+	}
+
+	// Forward all other keys to the focused input.
+	var cmd tea.Cmd
+	m.editInputs[m.focusedEdit], cmd = m.editInputs[m.focusedEdit].Update(msg)
+	return m, cmd
+}
+
+// viewEdit renders the settings editor.
+func (m SortModel) viewEdit() string {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(headerStyle.Render("  Edit Settings"))
+	sb.WriteString("\n\n")
+	fmt.Fprintf(&sb, "  Source:      %s\n", m.editInputs[editFieldSource].View())
+	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "  Destination: %s\n", m.editInputs[editFieldDest].View())
+	sb.WriteString("\n")
+	sb.WriteString(dimStyle.Render("  tab: next field   enter: save   esc: cancel"))
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 func (m SortModel) viewConfigure() string {
@@ -394,6 +498,8 @@ func (m SortModel) viewConfigure() string {
 	sb.WriteString("\n")
 	if m.config.Destination == "" {
 		sb.WriteString(logErrStyle.Render("  --dest is required to start a sort run"))
+		sb.WriteString("\n")
+		sb.WriteString(dimStyle.Render("  [e] Edit Settings"))
 	} else {
 		sb.WriteString(dimStyle.Render("  [s] Start Sort   [e] Edit Settings"))
 	}
