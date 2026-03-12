@@ -2765,13 +2765,9 @@ A developer-facing guide for implementing a new `FileTypeHandler`. Sections:
 **Section label:** `History`  
 **Title:** Changelog
 
-This page renders the project changelog. The content is maintained in the root `CHANGELOG.md` file. The `docs/changelog.md` page uses a Jekyll include or a simple content copy approach:
+This page renders the project changelog. The content is hand-authored in `docs/changelog.md` and updated as part of the release process. The changelog is editorial — it benefits from curation and narrative that automated extraction cannot provide.
 
-**Approach:** The `docs/changelog.md` file contains front matter and a brief intro, then includes the changelog content. Since Jekyll cannot include files outside `docs/`, the changelog content is either:
-- **Option A (recommended):** Manually kept in sync — `docs/changelog.md` contains the full changelog content. When the root `CHANGELOG.md` is updated, the docs version is updated in the same commit.
-- **Option B:** A CI step copies `CHANGELOG.md` content into `docs/changelog.md` before the Jekyll build.
-
-Option A is simpler and avoids CI complexity. The changelog is updated infrequently (on releases) and the duplication is manageable.
+> **Note:** The changelog is one of the hand-authored pages that the `docgen` tool (Section 15) does not touch. See Section 15.6 for the full page classification.
 
 #### 10.5.9 AI Statement (`ai.md`)
 
@@ -2816,7 +2812,7 @@ layout: default
 </section>
 ```
 
-The hero include reads `site.version`, `site.description`, and `site.tagline` from `_config.yml` for the tag, subtitle, and promise text. The Markdown content in `index.md` provides the "Why Pixe" cards and pipeline section.
+The hero include reads `site.version`, `site.description`, and `site.tagline` from `_config.yml` for the tag, subtitle, and promise text. The `version` field in `_config.yml` is maintained by the `docgen` tool (Section 15) — it is extracted from the latest git tag and injected via marker-based replacement. The Markdown content in `index.md` provides the "Why Pixe" cards and pipeline section.
 
 #### 10.6.3 `page.html`
 
@@ -2890,6 +2886,8 @@ The site is deployed via GitHub Pages using Jekyll's built-in processing. Config
 - **Base URL:** `https://cwlls.github.io/pixe-go/`
 - **Build:** GitHub Pages' built-in Jekyll (no GitHub Actions workflow needed for the basic case)
 - **CNAME:** None (standard GitHub Pages URL)
+
+**Stale workflow:** The `.github/workflows/pages.yml` file is an earlier artifact that predates GitHub's automatic Pages deployment. It should be removed — GitHub Pages is configured via repository settings to build from the `docs/` directory using its built-in Jekyll support. See Section 15.9 for the CI workflow updates that replace it.
 
 No `Gemfile` is strictly required for GitHub Pages' built-in Jekyll, but one may be added for local development (`bundle exec jekyll serve`):
 
@@ -3638,3 +3636,532 @@ These items are explicitly **out of scope** for the current build but are acknow
 14. **Extended XMP fields** — The current XMP sidecar writes only Copyright and CameraOwner. Future work could add additional fields (keywords, captions, GPS coordinates, star ratings) to the `MetadataTags` struct and XMP template.
 15. **Split-brain network dedup (multi-machine NAS)** — When two machines run `pixe sort` against the same NAS `dirB`, each with its own local `~/.pixe/databases/<slug>.db`, there is no shared state for dedup. Both may write the same file to the primary archive without detecting the collision. A filesystem-level locking strategy using `O_EXCL` temp file creation could address this — the OS guarantees atomicity of `O_EXCL` even over modern SMB/NFS. Deferred until the multi-machine NAS workflow is actively used.
 16. ~~**Documentation site**~~ — **Promoted to Section 10.** No longer a future consideration.
+17. ~~**Documentation generation from godoc**~~ — **Promoted to Section 15.** No longer a future consideration.
+
+---
+
+## 15. Documentation Generation
+
+### 15.1 Overview
+
+Pixe's codebase conforms strictly to godoc standards — every package, every exported type, every function, constant, and struct field has a doc comment. This is a rich, authoritative source of truth that the hand-authored documentation (`docs/`, `README.md`) currently duplicates and risks drifting from. Section 15 defines a lightweight generation pipeline that extracts machine-sourced facts from the Go source code and injects them into documentation files, while preserving hand-authored narrative prose.
+
+**Core principle: the Go source is the single source of truth for code-derived facts.** Version strings, interface definitions, CLI flags, supported formats, and package descriptions are extracted from code — never maintained as a second copy in Markdown.
+
+### 15.2 Design Goals
+
+1. **Hybrid documents, not full generation.** Most documentation pages contain hand-authored narrative that no tool should touch. The generation pipeline injects code-sourced fragments into designated regions of existing files, leaving everything else untouched.
+2. **Marker-based injection.** Generated regions are delimited by HTML comment markers in the Markdown source. The tool replaces content between markers; content outside markers is never modified.
+3. **Go AST extraction.** Code facts are extracted by parsing the Go AST directly — no built binary required, no `go doc` or `--help` parsing. This is reliable, fast, and works in CI without a build step.
+4. **Staleness detection.** A `make docs-check` target compares the current generated output against the committed files and fails if they differ. This integrates into CI alongside `fmt-check` and `vet`.
+5. **Developer ergonomics.** Running `make docs` regenerates all injectable sections. The workflow is: edit code → `make docs` → commit. No separate documentation step to forget.
+
+### 15.3 Marker Syntax
+
+Generated regions in Markdown files use paired HTML comment markers:
+
+```markdown
+Some hand-authored prose above.
+
+<!-- pixe:begin:section-name -->
+This content is replaced by `docgen` on every run.
+Do not edit manually — changes will be overwritten.
+<!-- pixe:end:section-name -->
+
+More hand-authored prose below.
+```
+
+**Rules:**
+
+- Markers are HTML comments, invisible in rendered Markdown/HTML.
+- The `section-name` is a unique identifier within the file (e.g., `interface`, `format-table`, `sort-flags`, `version`).
+- Everything between `begin` and `end` markers (inclusive of the markers themselves) is replaced. The markers are re-emitted in the output so the file remains re-processable.
+- Content outside markers is never read, modified, or reformatted by the tool.
+- A file with no markers is ignored by the tool (fully hand-authored).
+- Markers can appear in any file type: `.md`, `.yml`, `.html`.
+
+### 15.4 Extraction Targets
+
+The `docgen` tool extracts the following categories of facts from the Go source:
+
+#### 15.4.1 Version String
+
+**Source:** `docs/_config.yml` field `version`, `docs/_includes/hero.html` if it references the version.
+
+**Extraction:** Parse `cmd/version.go` for the `version` variable's default value. For tagged builds, read the latest git tag via `git describe --tags --abbrev=0`. The injected value is the latest git tag (e.g., `v2.0.0`).
+
+**Target markers:**
+
+```yaml
+# In docs/_config.yml:
+# <!-- pixe:begin:version -->
+version: "v2.0.0"
+# <!-- pixe:end:version -->
+```
+
+> **Note:** YAML comment markers (`#`) are used instead of HTML comments since `_config.yml` is not rendered as HTML. The tool recognizes both `<!-- pixe:begin:... -->` and `# <!-- pixe:begin:... -->` patterns.
+
+#### 15.4.2 `FileTypeHandler` Interface
+
+**Source:** `internal/domain/handler.go` — the `FileTypeHandler` interface definition and `MetadataCapability` type.
+
+**Extraction:** Parse the Go AST for the `FileTypeHandler` interface type spec and the `MetadataCapability` const block. Emit as a fenced Go code block with doc comments preserved.
+
+**Target files:**
+- `docs/adding-formats.md` — the interface listing in the "The `FileTypeHandler` interface" section.
+- `README.md` — not currently shown, but available if desired.
+
+**Marker example in `docs/adding-formats.md`:**
+
+```markdown
+### The `FileTypeHandler` interface
+
+<!-- pixe:begin:interface -->
+```go
+// MetadataCapability declares how a handler supports metadata tagging.
+type MetadataCapability int
+...
+```
+<!-- pixe:end:interface -->
+```
+
+#### 15.4.3 CLI Flags (Cobra Command Definitions)
+
+**Source:** `cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go`, `cmd/status.go`, `cmd/clean.go`, `cmd/gui.go`, `cmd/query.go`.
+
+**Extraction:** Parse the Go AST for Cobra flag registration calls — `Flags().StringVarP()`, `Flags().BoolVarP()`, `Flags().IntVarP()`, `PersistentFlags().*`, etc. Extract:
+- Flag name (long form)
+- Short form (if any)
+- Default value
+- Usage description string
+
+Also extract the command's `Use`, `Short`, and `Long` fields from the `cobra.Command` struct literal.
+
+**Target files:**
+- `docs/commands.md` — flag tables for each command.
+- `README.md` — flag tables in the usage section.
+
+**Marker example in `docs/commands.md`:**
+
+```html
+<!-- pixe:begin:sort-flags -->
+<table class="flag-table">
+  <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>-s, --source</td><td>Source directory (default: current working directory)</td></tr>
+    ...
+  </tbody>
+</table>
+<!-- pixe:end:sort-flags -->
+```
+
+**Marker example in `README.md`:**
+
+```markdown
+<!-- pixe:begin:sort-flags -->
+| Flag | Description |
+|------|-------------|
+| `-s, --source` | Source directory containing media files (default: current directory) |
+...
+<!-- pixe:end:sort-flags -->
+```
+
+> **Note:** The same extraction produces different output formats depending on the target file. `docs/commands.md` uses HTML tables (for the accordion styling); `README.md` uses Markdown tables. The `docgen` tool maintains a format mapping per target file, or the marker itself specifies the format: `<!-- pixe:begin:sort-flags format=html -->` vs. `<!-- pixe:begin:sort-flags format=markdown -->`.
+
+#### 15.4.4 Supported Format Table
+
+**Source:** `internal/handler/*/` — each handler package's `Extensions()` return value, `MetadataSupport()` return value, and the package-level doc comment (which describes the date extraction and hashable region strategy).
+
+**Extraction:** For each handler package under `internal/handler/`:
+1. Parse the `Extensions()` method body for the returned string slice literal.
+2. Parse the `MetadataSupport()` method body for the returned `MetadataCapability` constant.
+3. Extract the package-level `// Package` doc comment.
+
+Emit as a table row per handler.
+
+**Target files:**
+- `docs/how-it-works.md` — the "Supported file types" section (or update the `format-grid.html` include data).
+- `README.md` — the "Supported File Types" table.
+
+**Marker example in `README.md`:**
+
+```markdown
+<!-- pixe:begin:format-table -->
+| Format | Extensions | Metadata |
+|--------|------------|----------|
+| JPEG | `.jpg`, `.jpeg` | Embedded EXIF |
+| HEIC | `.heic`, `.heif` | XMP sidecar |
+| MP4/MOV | `.mp4`, `.mov` | XMP sidecar |
+| DNG | `.dng` | XMP sidecar |
+| NEF | `.nef` | XMP sidecar |
+| CR2 | `.cr2` | XMP sidecar |
+| CR3 | `.cr3` | XMP sidecar |
+| PEF | `.pef` | XMP sidecar |
+| ARW | `.arw` | XMP sidecar |
+<!-- pixe:end:format-table -->
+```
+
+#### 15.4.5 Package Reference (Developer Documentation)
+
+**Source:** All packages under `internal/` and `cmd/` — package-level `// Package` doc comments.
+
+**Extraction:** For each package, extract the package name and its full doc comment. Emit as a structured listing grouped by category (core engine, handlers, CLI, infrastructure).
+
+**Target file:** `docs/packages.md` — a new developer-facing page listing all internal packages with their godoc descriptions. This page is **fully generated** (no hand-authored prose between markers — the entire content section is a single marker block).
+
+**Example output:**
+
+```markdown
+### Core Engine
+
+**`internal/pipeline`** — Sort orchestrator. Coordinates the full file processing pipeline...
+
+**`internal/discovery`** — File walking and handler registry. Walks the source directory...
+
+**`internal/copy`** — Atomic file copy and post-copy verification engine...
+
+### File Type Handlers
+
+**`internal/handler/jpeg`** — FileTypeHandler for JPEG images...
+
+**`internal/handler/heic`** — FileTypeHandler for HEIC/HEIF images...
+
+...
+```
+
+**Navigation:** Add `packages.md` to `docs/_data/navigation.yml` under a "Developer" or "Internals" grouping. This creates a clear delineation between end-user pages (Install, Commands, How It Works) and developer pages (Adding Formats, Package Reference, Contributing).
+
+#### 15.4.6 Query Subcommands
+
+**Source:** `cmd/query_*.go` — each query subcommand's `cobra.Command` definition.
+
+**Extraction:** Same AST-based approach as CLI flags (Section 15.4.3). Extract the subcommand name, description, and any subcommand-specific flags.
+
+**Target files:**
+- `docs/commands.md` — the query subcommand table.
+- `README.md` — the query subcommand table.
+
+### 15.5 The `docgen` Tool
+
+#### 15.5.1 Implementation
+
+The tool is a standalone Go program at `internal/docgen/` with a `main.go` entry point, invoked via `go run ./internal/docgen`. It is not a shipped binary — it is a development-time tool that runs during the documentation build.
+
+```
+internal/
+└── docgen/
+    ├── main.go           ← Entry point: orchestrates extraction and injection
+    ├── extract.go        ← AST-based extraction functions (flags, interfaces, handlers, packages)
+    ├── inject.go         ← Marker-based file injection (read file, replace between markers, write)
+    ├── formats.go        ← Output formatters (Markdown table, HTML table, code block, YAML)
+    └── docgen_test.go    ← Tests for extraction and injection logic
+```
+
+**Key design decisions:**
+
+- **Pure `go/ast` + `go/parser`.** No third-party AST libraries. The stdlib parser is sufficient for extracting struct literals, method return values, and const blocks.
+- **No `go/types` or `go/packages`.** The tool parses individual files, not full type-checked packages. This keeps it fast and avoids the complexity of loading the full module dependency graph.
+- **Deterministic output.** Given the same source files, the tool always produces the same output. No timestamps, no random ordering. Handler packages are sorted alphabetically. Flags are emitted in the order they appear in the source file.
+- **Idempotent.** Running the tool twice produces the same result. The tool reads the existing file, replaces marker regions, and writes back only if the content changed. Unchanged files are not touched (preserving filesystem timestamps for build tools).
+
+#### 15.5.2 Injection Algorithm
+
+```
+For each target file in the manifest:
+  1. Read the file into memory.
+  2. Scan for <!-- pixe:begin:NAME --> / <!-- pixe:end:NAME --> marker pairs.
+  3. For each marker pair:
+     a. Look up the extraction function for NAME.
+     b. Run the extraction (AST parse, git tag, etc.).
+     c. Format the result for the target file's format (Markdown, HTML, YAML).
+     d. Replace the content between markers (inclusive) with:
+        <!-- pixe:begin:NAME -->
+        <generated content>
+        <!-- pixe:end:NAME -->
+  4. If any replacements were made and the content differs from the original:
+     Write the file.
+```
+
+**Error handling:**
+
+- Missing marker pairs (begin without end, or end without begin) → fatal error with file and line number.
+- Unknown section name (no extraction function registered) → warning, marker left unchanged.
+- AST parse failure on a source file → fatal error with file path and parse error.
+- Target file not found → fatal error.
+
+#### 15.5.3 Target Manifest
+
+The tool maintains a hardcoded manifest of target files and their marker-to-extractor mappings:
+
+```go
+var targets = []Target{
+    {
+        File: "docs/_config.yml",
+        Sections: map[string]Extractor{
+            "version": extractVersion,
+        },
+    },
+    {
+        File: "docs/adding-formats.md",
+        Sections: map[string]Extractor{
+            "interface": extractInterface,
+        },
+    },
+    {
+        File: "docs/commands.md",
+        Sections: map[string]Extractor{
+            "sort-flags":    extractFlags("cmd/sort.go", "html"),
+            "sort-desc":     extractCommandDesc("cmd/sort.go"),
+            "status-flags":  extractFlags("cmd/status.go", "html"),
+            "verify-flags":  extractFlags("cmd/verify.go", "html"),
+            "resume-flags":  extractFlags("cmd/resume.go", "html"),
+            "clean-flags":   extractFlags("cmd/clean.go", "html"),
+            "gui-flags":     extractFlags("cmd/gui.go", "html"),
+            "query-flags":   extractFlags("cmd/query.go", "html"),
+            "query-subs":    extractQuerySubcommands("html"),
+        },
+    },
+    {
+        File: "docs/how-it-works.md",
+        Sections: map[string]Extractor{
+            "format-table": extractFormats("html"),
+        },
+    },
+    {
+        File: "docs/packages.md",
+        Sections: map[string]Extractor{
+            "package-list": extractPackageReference,
+        },
+    },
+    {
+        File: "README.md",
+        Sections: map[string]Extractor{
+            "sort-flags":    extractFlags("cmd/sort.go", "markdown"),
+            "verify-flags":  extractFlags("cmd/verify.go", "markdown"),
+            "resume-flags":  extractFlags("cmd/resume.go", "markdown"),
+            "status-flags":  extractFlags("cmd/status.go", "markdown"),
+            "clean-flags":   extractFlags("cmd/clean.go", "markdown"),
+            "gui-flags":     extractFlags("cmd/gui.go", "markdown"),
+            "query-flags":   extractFlags("cmd/query.go", "markdown"),
+            "query-subs":    extractQuerySubcommands("markdown"),
+            "format-table":  extractFormats("markdown"),
+        },
+    },
+}
+```
+
+This manifest is the single place that defines what gets generated and where. Adding a new injectable section means adding one entry here and one extraction function.
+
+### 15.6 Page Classification
+
+Documentation pages fall into three categories based on their relationship to generated content:
+
+| Category | Pages | Description |
+|---|---|---|
+| **Hand-authored** | `ai.md`, `technical.md`, `contributing.md`, `changelog.md`, `install.md`, `index.md` | Fully written by humans (or AI agents). No markers. The `docgen` tool does not touch these files. |
+| **Hybrid** | `adding-formats.md`, `commands.md`, `how-it-works.md`, `README.md` | Hand-authored narrative prose with injected code-sourced sections delimited by markers. Humans write the story; the tool fills in the facts. |
+| **Generated** | `packages.md` (new) | Content is entirely generated from code. The file has front matter (hand-authored) and a single large marker block. Editing the content section is pointless — it will be overwritten. |
+
+### 15.7 New Page: Package Reference (`docs/packages.md`)
+
+A new developer-facing documentation page that provides a browsable overview of all internal packages, extracted from their godoc comments.
+
+**Front matter:**
+
+```yaml
+---
+layout: page
+title: Package Reference
+section_label: Developer Guide
+permalink: /packages/
+---
+```
+
+**Content structure:**
+
+The page opens with a brief hand-authored introduction, then a single generated section:
+
+```markdown
+Pixe's internal packages are organized by responsibility. Each package has a
+comprehensive godoc comment describing its purpose, design decisions, and key
+types. This page is generated from those comments — the source code is the
+authoritative reference.
+
+For the full API surface, run `go doc ./internal/<package>` locally or browse
+the source on GitHub.
+
+<!-- pixe:begin:package-list -->
+(generated content — grouped package listings with doc comments)
+<!-- pixe:end:package-list -->
+```
+
+**Grouping:** Packages are organized into logical groups:
+
+| Group | Packages |
+|---|---|
+| **Core Engine** | `pipeline`, `discovery`, `copy`, `verify`, `hash`, `pathbuilder` |
+| **Data & Persistence** | `archivedb`, `manifest`, `migrate`, `dblocator`, `domain`, `config` |
+| **File Type Handlers** | `handler/jpeg`, `handler/heic`, `handler/mp4`, `handler/tiffraw`, `handler/dng`, `handler/nef`, `handler/cr2`, `handler/cr3`, `handler/pef`, `handler/arw` |
+| **Metadata** | `tagging`, `xmp`, `ignore` |
+| **User Interface** | `progress`, `cli`, `tui` |
+
+The grouping is defined in the `docgen` tool, not derived from the filesystem. New packages are added to the appropriate group in the tool's configuration.
+
+**Navigation update:** `docs/_data/navigation.yml` gains a new entry:
+
+```yaml
+- title: Packages
+  url: /packages/
+```
+
+Placed after "Adding Formats" and before "Contributing" to group the developer-facing pages together.
+
+### 15.8 Makefile Integration
+
+Two new targets are added to the Makefile:
+
+```makefile
+# ---------- documentation -----------------------------------
+docs: ## Regenerate documentation from source code
+	go run ./internal/docgen
+
+docs-check: ## Check that generated docs are up to date (CI gate)
+	@go run ./internal/docgen --check
+	@echo "Documentation is up to date."
+```
+
+**`make docs`** runs the tool in write mode. It extracts all facts, injects into all target files, and writes any changed files. Output:
+
+```
+docs: updated docs/commands.md (sort-flags, verify-flags, clean-flags)
+docs: updated docs/packages.md (package-list)
+docs: docs/adding-formats.md is up to date
+docs: README.md is up to date
+docs: updated docs/_config.yml (version)
+```
+
+**`make docs-check`** runs the tool in check mode (`--check` flag). It performs all extractions and comparisons but writes nothing. If any target file would change, it exits with code 1 and lists the stale files:
+
+```
+docs-check: STALE docs/commands.md (sort-flags differs)
+docs-check: STALE docs/_config.yml (version differs)
+Error: 2 files are out of date. Run 'make docs' to update.
+```
+
+**CI integration:** The `check` target is updated to include `docs-check`:
+
+```makefile
+check: fmt-check vet test-unit docs-check ## Run fmt-check + vet + unit tests + docs-check (fast CI gate)
+```
+
+This ensures that documentation staleness is caught in the same pre-commit gate as formatting and test failures.
+
+### 15.9 CI Workflow Update
+
+The existing CI workflow (`.github/workflows/ci.yml`) gains a `docs-check` step in the `test` job:
+
+```yaml
+- name: Check generated docs are up to date
+  run: go run ./internal/docgen --check
+```
+
+This runs after tests and before any deployment step. It requires only Go (already set up) and the repository source — no build step, no external tools.
+
+**The stale `pages.yml` workflow** (`.github/workflows/pages.yml`) can be removed. GitHub Pages is configured via the repository settings to build from the `docs/` directory using its built-in Jekyll support — no custom workflow is needed for deployment. The `pages.yml` workflow was an earlier artifact that is superseded by GitHub's automatic Pages deployment.
+
+### 15.10 README Documentation Strategy
+
+The `README.md` retains its current verbosity — it is the "single-page reference" for users who prefer not to navigate to the docs site. However, the following sections transition from hand-maintained to marker-injected:
+
+| README Section | Marker Name | Extraction Source |
+|---|---|---|
+| `pixe sort` flag table | `sort-flags` | `cmd/sort.go` |
+| `pixe verify` flag table | `verify-flags` | `cmd/verify.go` |
+| `pixe resume` flag table | `resume-flags` | `cmd/resume.go` |
+| `pixe status` flag table | `status-flags` | `cmd/status.go` |
+| `pixe clean` flag table | `clean-flags` | `cmd/clean.go` |
+| `pixe gui` flag table | `gui-flags` | `cmd/gui.go` |
+| `pixe query` flag table | `query-flags` | `cmd/query.go` |
+| Query subcommands table | `query-subs` | `cmd/query_*.go` |
+| Supported File Types table | `format-table` | `internal/handler/*/` |
+
+Sections that remain hand-authored in the README:
+- "What It Does" introduction
+- "Key Principles" bullets
+- "How It Works" pipeline description
+- "Output Format" example
+- "Output Naming Convention"
+- "Duplicates" explanation
+- "Archive Database & Ledger" description
+- "Safety Guarantees" list
+- "Installation" instructions
+- "Configuration File" example
+- "Date Fallback Chain"
+- "RAW Hashing Strategy"
+- "Project Status"
+
+This split keeps the README's narrative voice while eliminating the most common source of drift: flag tables and format lists that must be updated whenever a command gains a new flag or a new handler is added.
+
+### 15.11 Interaction with Existing Documentation Workflow
+
+**Adding a new CLI flag:**
+1. Add the flag in `cmd/<command>.go` (Cobra registration).
+2. Run `make docs`.
+3. The flag automatically appears in `docs/commands.md` and `README.md`.
+4. Commit the code change and the updated docs together.
+
+**Adding a new file format handler:**
+1. Create the handler package under `internal/handler/<format>/`.
+2. Register in `cmd/sort.go`, `cmd/verify.go`, `cmd/resume.go`, `cmd/status.go`.
+3. Add the package to the appropriate group in `docgen`'s package grouping config.
+4. Run `make docs`.
+5. The format appears in the format table in `docs/how-it-works.md` and `README.md`. The package appears in `docs/packages.md`.
+6. Update `docs/adding-formats.md` if the new format introduces a novel pattern (hand-authored — this is narrative, not facts).
+7. Update `docs/changelog.md` (hand-authored).
+
+**Releasing a new version:**
+1. Tag the release: `git tag v2.1.0`.
+2. Run `make docs` — the version in `docs/_config.yml` updates to `v2.1.0`.
+3. Update `docs/changelog.md` (hand-authored).
+4. Commit and push.
+
+**Editing hand-authored pages:**
+1. Edit the `.md` file directly. No tool involvement.
+2. If the file has markers, avoid editing content between markers (it will be overwritten).
+3. `make docs-check` will pass because the markers haven't changed.
+
+### 15.12 Navigation Update
+
+The `docs/_data/navigation.yml` is updated to reflect the audience delineation — end-user pages first, developer pages grouped together:
+
+```yaml
+# End-user documentation
+- title: Install
+  url: /install/
+- title: Commands
+  url: /commands/
+- title: How It Works
+  url: /how-it-works/
+- title: Technical
+  url: /technical/
+
+# Developer documentation
+- title: Adding Formats
+  url: /adding-formats/
+- title: Packages
+  url: /packages/
+- title: Contributing
+  url: /contributing/
+
+# Project
+- title: Changelog
+  url: /changelog/
+```
+
+The "AI" page (`ai.md`) is intentionally omitted from the primary navigation — it is linked from the footer and the Contributing page but is not a primary navigation destination. This keeps the nav bar focused.
+
+### 15.13 Future Considerations
+
+- **Changelog generation** — The changelog (`docs/changelog.md`) is currently hand-authored. A future enhancement could extract changelog entries from git tags and their annotated messages, or from a structured `CHANGELOG.md` at the repo root. This is deferred because changelogs benefit from editorial curation that automated extraction cannot provide.
+- **`go doc` server link** — The packages page could link to `pkg.go.dev/github.com/cwlls/pixe-go/internal/...` for full API documentation. However, `internal/` packages are not visible on pkg.go.dev by design. A self-hosted `godoc` or `pkgsite` instance could be added as a future GitHub Pages deployment, but this adds complexity for marginal benefit given the package reference page.
+- **Cobra `--help` output validation** — A future CI step could build the binary and compare `pixe sort --help` output against the generated flag tables to catch cases where the AST extraction diverges from runtime behavior (e.g., flags registered in `init()` functions that the AST parser doesn't follow). This is a belt-and-suspenders check, not a primary concern.
