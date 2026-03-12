@@ -3,6 +3,22 @@ on:
   push:
     tags:
       - 'v*'
+      -
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'The Git tag to build and release (e.g., v1.0.0)'
+        required: true
+        type: string
+      run_build:
+        description: 'Run the build process?'
+        required: true
+        default: 'true'
+        type: boolean
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'info'
 
 permissions:
   contents: write  # Allows the action to create a release and upload assets
