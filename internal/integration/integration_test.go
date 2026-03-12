@@ -1269,3 +1269,91 @@ func TestSort_verifiedFileAtCanonicalPath(t *testing.T) {
 		t.Errorf("found %d .pixe-tmp files in dirB after sort, want 0", len(tempFiles))
 	}
 }
+
+// TestIntegration_UppercaseExtension verifies that a source file whose
+// extension is uppercase (e.g. "IMG_0001.JPG") is:
+//   - matched by the JPEG handler (not skipped as unrecognised),
+//   - sorted into the correct date-based directory, and
+//   - written to the destination with a lowercase extension (".jpg").
+//
+// This is the end-to-end proof of the extension-normalisation path:
+// Registry.Detect lowercases the extension before the fast-path lookup, and
+// pathbuilder.Build lowercases the extension before constructing the filename.
+func TestIntegration_UppercaseExtension(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Copy the EXIF fixture but give it an uppercase .JPG extension.
+	// fixtureExif1 has capture date 2021-12-25 06:22:23.
+	copyFixture(t, dirA, fixtureExif1, "IMG_0001.JPG")
+
+	result, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The file must be processed, not skipped or errored.
+	if result.Processed != 1 {
+		t.Errorf("Processed = %d, want 1 (IMG_0001.JPG must be matched by JPEG handler)", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// The destination file must exist under the expected date directory.
+	files := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file in 2021/12-Dec/ with prefix 20211225_062223_, got %d", len(files))
+	}
+
+	// The destination extension must be lowercase ".jpg" — never ".JPG".
+	destPath := files[0]
+	if ext := filepath.Ext(destPath); ext != ".jpg" {
+		t.Errorf("destination extension = %q, want %q (uppercase source extension must be lowercased)", ext, ".jpg")
+	}
+}
+
+// TestIntegration_UppercaseExtension_MixedBatch verifies that a batch
+// containing both lowercase and uppercase variants of the same format are all
+// processed correctly and all land with lowercase extensions in the destination.
+func TestIntegration_UppercaseExtension_MixedBatch(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	// Three files: lowercase, uppercase, and mixed-case extension.
+	// All use fixtureExif1 (same image payload → 2 will be duplicates).
+	copyFixture(t, dirA, fixtureExif1, "a.jpg")
+	copyFixture(t, dirA, fixtureExif1, "b.JPG")
+	copyFixture(t, dirA, fixtureExif2, "c.JPEG") // different fixture → different checksum
+
+	result, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// All three files must be processed (not skipped as unrecognised).
+	if result.Processed != 3 {
+		t.Errorf("Processed = %d, want 3", result.Processed)
+	}
+	if result.Errors != 0 {
+		t.Errorf("Errors = %d, want 0", result.Errors)
+	}
+
+	// Walk all files in dirB (excluding .pixe/) and assert every file has a
+	// lowercase extension.
+	_ = filepath.WalkDir(dirB, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		rel, _ := filepath.Rel(dirB, path)
+		// Skip the .pixe/ database directory.
+		if strings.HasPrefix(rel, ".pixe"+string(filepath.Separator)) {
+			return nil
+		}
+		ext := filepath.Ext(path)
+		if ext != strings.ToLower(ext) {
+			t.Errorf("destination file has uppercase extension: %q", rel)
+		}
+		return nil
+	})
+}

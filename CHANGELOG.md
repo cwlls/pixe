@@ -4,6 +4,22 @@
 
 ---
 
+## [2.0.4] -- 2026-03-12
+
+### Test Coverage
+
+- **Added uppercase extension test coverage** — Identified and closed a coverage gap in the discovery and integration test suites for uppercase-extension source files (e.g., `photo.JPG`, `IMG_0001.JPEG`). The feature was already working correctly via `strings.ToLower` in the fast-path handler lookup, but lacked explicit test validation.
+  - **Unit tests** (`internal/discovery/discovery_test.go`):
+    - `TestRegistry_uppercaseExtension_detected` — Table-driven test covering JPG, JPEG, DNG, NEF, MP4, MOV extensions; proves case-insensitive fast-path lookup
+    - `TestWalk_uppercaseExtensionDiscovered` — Verifies `photo.JPG` with valid JPEG magic lands in `discovered`, not `skipped`
+    - `TestWalk_mixedCaseExtensions` — Confirms `lower.jpg`, `upper.JPG`, `mixed.Jpg` all discovered correctly
+  - **Integration tests** (`internal/integration/integration_test.go`):
+    - `TestIntegration_UppercaseExtension` — Real `IMG_0001.JPG` fixture: processed=1, correct date path, destination ext=`.jpg` (normalized)
+    - `TestIntegration_UppercaseExtension_MixedBatch` — Three files (a.jpg, b.JPG, c.JPEG): all processed, all destinations have lowercase extensions
+  - **Result:** `make lint` → 0 issues | `make test-all` → all packages pass
+
+---
+
 ## [2.0.3] -- 2026-03-11
 
 ### Bug Fixes

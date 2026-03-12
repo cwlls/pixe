@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -642,6 +643,162 @@ func TestWalk_nestedPixeignore(t *testing.T) {
 	}
 	if subLogFound {
 		t.Error("sub/app.log should be invisible (matched sub/.pixeignore pattern *.log)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Uppercase extension tests
+// ---------------------------------------------------------------------------
+
+// TestRegistry_uppercaseExtension_detected verifies that the registry's
+// fast-path lookup is case-insensitive: a file whose extension is uppercase
+// (e.g. ".JPG") is matched to the same handler as its lowercase counterpart.
+// This is the unit-level proof that strings.ToLower in Detect covers all
+// registered formats.
+func TestRegistry_uppercaseExtension_detected(t *testing.T) {
+	// Each case pairs an uppercase extension with the magic bytes that the
+	// corresponding handler expects, so the magic-byte verification also passes.
+	cases := []struct {
+		name      string
+		upperExt  string
+		magic     []domain.MagicSignature
+		fileBytes []byte
+	}{
+		{
+			name:      "JPG",
+			upperExt:  ".JPG",
+			magic:     jpegMagic,
+			fileBytes: append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...),
+		},
+		{
+			name:      "JPEG",
+			upperExt:  ".JPEG",
+			magic:     jpegMagic,
+			fileBytes: append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...),
+		},
+		{
+			// TIFF LE magic — used by DNG, NEF, PEF, ARW.
+			name:     "DNG",
+			upperExt: ".DNG",
+			magic: []domain.MagicSignature{
+				{Offset: 0, Bytes: []byte{0x49, 0x49, 0x2A, 0x00}},
+			},
+			fileBytes: []byte{0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name:     "NEF",
+			upperExt: ".NEF",
+			magic: []domain.MagicSignature{
+				{Offset: 0, Bytes: []byte{0x49, 0x49, 0x2A, 0x00}},
+			},
+			fileBytes: []byte{0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			// MP4/MOV: ftyp box magic.
+			name:     "MP4",
+			upperExt: ".MP4",
+			magic: []domain.MagicSignature{
+				{Offset: 4, Bytes: []byte{0x66, 0x74, 0x79, 0x70}}, // "ftyp"
+			},
+			fileBytes: []byte{0x00, 0x00, 0x00, 0x18,
+				0x66, 0x74, 0x79, 0x70, // "ftyp"
+				0x6D, 0x70, 0x34, 0x32, // brand "mp42"
+				0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name:     "MOV",
+			upperExt: ".MOV",
+			magic: []domain.MagicSignature{
+				{Offset: 4, Bytes: []byte{0x66, 0x74, 0x79, 0x70}},
+			},
+			fileBytes: []byte{0x00, 0x00, 0x00, 0x18,
+				0x66, 0x74, 0x79, 0x70,
+				0x71, 0x74, 0x20, 0x20, // brand "qt  "
+				0x00, 0x00, 0x00, 0x00},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			reg := NewRegistry()
+			h := &mockHandler{
+				exts:  []string{strings.ToLower(tc.upperExt)},
+				magic: tc.magic,
+				name:  tc.name,
+			}
+			reg.Register(h)
+
+			dir := t.TempDir()
+			f := filepath.Join(dir, "photo"+tc.upperExt)
+			writeFile(t, f, tc.fileBytes)
+
+			got, err := reg.Detect(f)
+			if err != nil {
+				t.Fatalf("Detect(%q): %v", tc.upperExt, err)
+			}
+			if got != h {
+				t.Errorf("Detect(%q): got %v, want handler %q", tc.upperExt, got, tc.name)
+			}
+		})
+	}
+}
+
+// TestWalk_uppercaseExtensionDiscovered verifies that Walk classifies a file
+// whose extension is uppercase (e.g. "photo.JPG") as a DiscoveredFile, not a
+// SkippedFile. This exercises the full extension-normalisation path through
+// Walk → Registry.Detect.
+func TestWalk_uppercaseExtensionDiscovered(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a file with uppercase .JPG extension and valid JPEG magic bytes.
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+	writeFile(t, filepath.Join(dir, "photo.JPG"), jpegBytes)
+
+	reg := NewRegistry()
+	// Register the handler with the lowercase extension only — the registry
+	// must normalise the file's extension before lookup.
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: false})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (photo.JPG should be classified)", len(discovered))
+	}
+	if len(skipped) != 0 {
+		t.Errorf("skipped: got %d, want 0 (photo.JPG must not be skipped)", len(skipped))
+	}
+	if len(discovered) == 1 && discovered[0].RelPath != "photo.JPG" {
+		t.Errorf("RelPath = %q, want %q", discovered[0].RelPath, "photo.JPG")
+	}
+}
+
+// TestWalk_mixedCaseExtensions verifies that a directory containing files with
+// both lowercase and uppercase extensions of the same format are all discovered.
+func TestWalk_mixedCaseExtensions(t *testing.T) {
+	dir := t.TempDir()
+
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+	writeFile(t, filepath.Join(dir, "lower.jpg"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "upper.JPG"), jpegBytes)
+	writeFile(t, filepath.Join(dir, "mixed.Jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: false})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(discovered) != 3 {
+		t.Errorf("discovered: got %d, want 3 (lower.jpg, upper.JPG, mixed.Jpg)", len(discovered))
+	}
+	if len(skipped) != 0 {
+		t.Errorf("skipped: got %d, want 0", len(skipped))
 	}
 }
 
