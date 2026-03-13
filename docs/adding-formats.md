@@ -11,6 +11,7 @@ Pixe's format support is modular. Each format is an isolated package under `inte
 ## The `FileTypeHandler` interface
 
 <!-- pixe:begin:interface -->
+
 ```go
 // MetadataCapability declares how a handler supports metadata tagging.
 type MetadataCapability int
@@ -85,6 +86,7 @@ type FileTypeHandler interface {
 	MagicBytes() []MagicSignature
 }
 ```
+
 <!-- pixe:end:interface -->
 
 **Method-by-method:**

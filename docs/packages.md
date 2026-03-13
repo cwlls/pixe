@@ -7,6 +7,7 @@ title: Package Reference
 This page is generated from the Go package doc comments in the source tree. Each entry reflects the `// Package` comment at the top of the package's primary `.go` file. Run `make docs` to regenerate after adding or updating packages.
 
 <!-- pixe:begin:package-list -->
+
 ### Core Engine
 
 **`internal/pipeline`** — Package pipeline implements the sort orchestrator that wires together discovery, extraction, hashing, path building, copy, verify, tagging, and archive-DB / ledger persistence.
@@ -92,4 +93,5 @@ This page is generated from the Go package doc comments in the source tree. Each
 **`internal/handler/rw2`** — Package rw2 implements the FileTypeHandler contract for Panasonic RW2 RAW images.
 
 **`internal/handler/tiff`** — Package tiff implements the FileTypeHandler contract for standalone TIFF images.
+
 <!-- pixe:end:package-list -->

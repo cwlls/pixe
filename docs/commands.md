@@ -15,6 +15,7 @@ $ pixe sort --dest /path/to/archive [options]
 ```
 
 <!-- pixe:begin:sort-flags -->
+
 | Flag                     | Default | Description                                                                                         |
 | ------------------------ | ------- | --------------------------------------------------------------------------------------------------- |
 | --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                             |
@@ -38,6 +39,7 @@ $ pixe sort --dest /path/to/archive [options]
 | --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                     |
 | --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                    |
 | --path-template          |         | token-based template for destination directory structure (default: "{year}/{month}-{monthname}")    |
+
 <!-- pixe:end:sort-flags -->
 
 ### Examples
@@ -75,6 +77,7 @@ $ pixe status [options]
 ```
 
 <!-- pixe:begin:status-flags -->
+
 | Flag            | Default | Description                                                          |
 | --------------- | ------- | -------------------------------------------------------------------- |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)              |
@@ -87,6 +90,7 @@ $ pixe status [options]
 | -r, --recursive | false   | recursively inspect subdirectories of --source                       |
 | --ignore        |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt") |
 | --json          | false   | emit JSON output instead of a human-readable listing                 |
+
 <!-- pixe:end:status-flags -->
 
 Categories: `SORTED` · `DUPLICATE` · `ERRORED` · `UNSORTED` · `UNRECOGNIZED`
@@ -104,6 +108,7 @@ $ pixe verify --dir /path/to/archive [options]
 ```
 
 <!-- pixe:begin:verify-flags -->
+
 | Flag            | Default | Description                                                               |
 | --------------- | ------- | ------------------------------------------------------------------------- |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                   |
@@ -114,6 +119,7 @@ $ pixe verify --dir /path/to/archive [options]
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml             |
 | -d, --dir       |         | archive directory to verify (required)                                    |
 | --progress      | false   | show a live progress bar instead of per-file text output (requires a TTY) |
+
 <!-- pixe:end:verify-flags -->
 
 Exit code `0` = all verified. Exit code `1` = one or more mismatches.
@@ -131,6 +137,7 @@ $ pixe resume --dir /path/to/archive
 ```
 
 <!-- pixe:begin:resume-flags -->
+
 | Flag            | Default | Description                                                              |
 | --------------- | ------- | ------------------------------------------------------------------------ |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                  |
@@ -141,6 +148,7 @@ $ pixe resume --dir /path/to/archive
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml            |
 | -d, --dir       |         | destination directory containing the archive database (required)         |
 | --db-path       |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+
 <!-- pixe:end:resume-flags -->
 
 ---
@@ -156,16 +164,19 @@ $ pixe query <subcommand> --dir /path/to/archive [--json]
 ```
 
 <!-- pixe:begin:query-flags -->
+
 | Flag      | Default | Description                                                              |
 | --------- | ------- | ------------------------------------------------------------------------ |
 | -d, --dir |         | archive directory containing the database (required)                     |
 | --db-path |         | explicit path to the SQLite archive database (overrides auto-resolution) |
 | --json    | false   | emit JSON output instead of a table                                      |
+
 <!-- pixe:end:query-flags -->
 
 ### Subcommands
 
 <!-- pixe:begin:query-subs -->
+
 | Subcommand | Description                                           |
 | ---------- | ----------------------------------------------------- |
 | runs       | List all sort runs recorded in the archive database   |
@@ -175,6 +186,7 @@ $ pixe query <subcommand> --dir /path/to/archive [--json]
 | skipped    | List all files that were skipped during sorting       |
 | files      | Search for files in the archive by date or source     |
 | inventory  | List all canonical files in the archive               |
+
 <!-- pixe:end:query-subs -->
 
 ### Examples
@@ -200,6 +212,7 @@ $ pixe clean --dir /path/to/archive [options]
 ```
 
 <!-- pixe:begin:clean-flags -->
+
 | Flag          | Default | Description                                              |
 | ------------- | ------- | -------------------------------------------------------- |
 | -d, --dir     |         | destination directory (dirB) to clean (required)         |
@@ -207,6 +220,7 @@ $ pixe clean --dir /path/to/archive [options]
 | --dry-run     | false   | preview what would be cleaned without modifying anything |
 | --temp-only   | false   | only clean orphaned files, skip database compaction      |
 | --vacuum-only | false   | only compact the database, skip file scanning            |
+
 <!-- pixe:end:clean-flags -->
 
 ---

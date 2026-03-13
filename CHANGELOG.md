@@ -8,6 +8,8 @@
 
 ### Bug Fixes
 
+- **Fixed docgen blank-line injection for GitHub Pages kramdown** — `injectContent()` in `internal/docgen/inject.go` was not emitting blank lines between begin/end markers and injected content. GitHub Pages (kramdown) requires a blank line before Markdown tables for correct rendering. Updated `injectContent()` to append blank lines before and after trimmed content, and updated test assertions in `docgen_test.go` to match. All 27 docgen tests pass; documentation regenerated via `go run ./internal/docgen`.
+
 - **Fixed GHA integration test flakiness** — `TestVerbosity_Verbose` was checking for `"ms)"` in timing output, but on fast systems (GHA Linux runners), file processing takes <1ms, producing `"(0s)"` instead of `"(Xms)"`. Changed assertion to check for parenthesized timing info without requiring a specific duration unit, making the test system-speed agnostic.
 
 ### Testing & Quality Improvements

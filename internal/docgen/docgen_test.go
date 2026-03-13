@@ -69,7 +69,7 @@ func TestInjectFile_basicReplacement(t *testing.T) {
 		t.Fatalf("InjectFile: %v", err)
 	}
 
-	want := "before\n<!-- pixe:begin:foo -->\nnew content\n<!-- pixe:end:foo -->\nafter\n"
+	want := "before\n<!-- pixe:begin:foo -->\n\nnew content\n\n<!-- pixe:end:foo -->\nafter\n"
 	if result != want {
 		t.Errorf("got:\n%q\nwant:\n%q", result, want)
 	}

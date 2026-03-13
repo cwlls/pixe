@@ -83,11 +83,13 @@ func injectContent(content string, replacements []Replacement) (string, error) {
 			// Emit the replacement content if we have one.
 			if newContent, ok := repMap[name]; ok {
 				if newContent != "" {
-					// Ensure content ends with a newline before the end marker.
+					// Blank line after begin marker so Markdown renderers
+					// (GitHub Pages / kramdown) recognise tables and fenced
+					// blocks that start immediately after the marker.
 					trimmed := strings.TrimRight(newContent, "\n")
 					// Re-apply yaml prefix to content lines if needed.
 					_ = yamlPrefix // yaml prefix only applies to markers, not content
-					out = append(out, trimmed)
+					out = append(out, "", trimmed, "")
 				}
 			}
 			continue

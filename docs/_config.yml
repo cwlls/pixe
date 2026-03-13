@@ -4,7 +4,9 @@ description: Safe, deterministic photo and video sorting
 url: "https://cwlls.github.io"
 baseurl: "/pixe"
 # <!-- pixe:begin:version -->
-version: "v2.6.1"
+
+version: "v2.6.2"
+
 # <!-- pixe:end:version -->
 exclude:
   - README.md

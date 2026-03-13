@@ -153,6 +153,7 @@ The progress bar is powered by a pipeline event bus (`internal/progress/`) — a
 ## Supported file types
 
 <!-- pixe:begin:format-table -->
+
 | Format  | Extensions   | Metadata    |
 | ------- | ------------ | ----------- |
 | ARW     | .arw         | XMP sidecar |
@@ -170,6 +171,7 @@ The progress bar is powered by a pipeline event bus (`internal/progress/`) — a
 | RAF     | .raf         | XMP sidecar |
 | RW2     | .rw2         | XMP sidecar |
 | TIFF    | .tif, .tiff  | XMP sidecar |
+
 <!-- pixe:end:format-table -->
 
 All formats support the full pipeline: date extraction, content hashing, copy-then-verify, and metadata tagging (via embedded EXIF for JPEG, or XMP sidecar for all others).
