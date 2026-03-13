@@ -10,7 +10,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 ### North Star Principles
 
-1. **Safety above all else.** Source files are never modified or moved. Every copy is verified before being considered complete.
+1. **Safety above all else.** No file is ever modified — source or destination. Destination files are byte-identical copies of their source. Every copy is verified before being considered complete.
 2. **Native Go execution.** All functionality uses native Go packages. No shelling out to external binaries.
 3. **Deterministic output.** Given the same input files, configuration, and system locale, Pixe always produces the same directory structure and filenames.
 4. **Modular by design.** New file types are added by implementing a Go interface.
@@ -24,7 +24,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **Language** | Go | Performance, concurrency primitives, single-binary distribution |
 | **CLI Framework** | `spf13/cobra` | Industry-standard Go CLI framework, subcommand support |
 | **Configuration** | `spf13/viper` | Config file + env var + flag merging, pairs with Cobra |
-| **Image EXIF** | `rwcarlsen/goexif` | No external binary dependency |
+| **Image EXIF (read)** | `rwcarlsen/goexif` | No external binary dependency; read-only — no EXIF writing libraries |
 | **HEIC/AVIF Parsing** | `dsoprea/go-heic-exif-extractor` | ISOBMFF container-level EXIF extraction |
 | **MP4 Parsing** | `abema/go-mp4` | Atom-level access for metadata and keyframe extraction |
 | **TIFF/RAW Parsing** | `golang.org/x/image/tiff` | IFD traversal for EXIF extraction in TIFF-based RAW formats |
@@ -84,11 +84,11 @@ pending → extracted → hashed → copied → verified → sidecars carried �
 
 1. **Pending** — Discovered in `dirA`.
 2. **Extracted** — Capture date extracted, hashable data region identified.
-3. **Hashed** — Checksum computed over media payload (data only, excluding metadata).
+3. **Hashed** — Checksum computed over the complete file contents.
 4. **Copied** — Written to temp file (`.<filename>.pixe-tmp`) in destination directory.
 5. **Verified** — Temp file re-hashed; on match, atomically renamed to canonical path. On mismatch, temp file deleted.
 6. **Sidecars Carried** — Pre-existing `.aae`/`.xmp` sidecars copied alongside parent. Non-fatal on failure.
-7. **Tagged** — Metadata persisted via handler's `MetadataSupport()` capability: `MetadataEmbed` (JPEG), `MetadataSidecar` (all others), or `MetadataNone`.
+7. **Tagged** — Metadata persisted via XMP sidecar for all formats. Handler's `MetadataSupport()` capability is consulted but all current handlers return `MetadataSidecar`.
 8. **Complete** — All operations successful.
 
 ### 4.3 Pipeline Output
@@ -142,15 +142,17 @@ Filesystem timestamps are explicitly **not used**.
 
 ### 4.8 Metadata Tagging
 
-Tags (`--copyright` with `{{.Year}}` template, `--camera-owner`) are written **after** copy and verify. Strategy depends on handler capability:
+Tags (`--copyright` with `{{.Year}}` template, `--camera-owner`) are written **after** copy and verify. All formats use XMP sidecars — no handler modifies destination files.
 
 | Capability | Strategy | Formats |
 |---|---|---|
-| `MetadataEmbed` | Write directly into file | JPEG |
-| `MetadataSidecar` | XMP sidecar file (`*.ext.xmp`) | All others |
+| `MetadataEmbed` | Write directly into file | (none currently — capability retained in interface for future use) |
+| `MetadataSidecar` | XMP sidecar file (`*.ext.xmp`) | All formats including JPEG |
 | `MetadataNone` | Skip | (none currently) |
 
 XMP sidecars follow the Adobe naming convention (`<filename>.<ext>.xmp`) and use standard XMP namespaces (`dc:rights`, `xmpRights:Marked`, `aux:OwnerName`). Implementation: `internal/xmp/`.
+
+> **Design rationale:** Pixe never modifies any file — source or destination. Destination files are byte-identical copies of their source. Metadata is always expressed as an accompanying XMP sidecar. This strengthens the integrity guarantee: a verified copy can be re-verified at any point in the future and the hash will always match, regardless of what tagging operations were performed. The `MetadataEmbed` capability is retained in the `FileTypeHandler` interface as a future extension point but no handler currently uses it.
 
 ### 4.9 Recursive Source Processing
 
@@ -187,7 +189,9 @@ Implementation: `internal/discovery/sidecar.go` — `associateSidecars()`.
 > [!IMPORTANT]
 > ### 5.1 Operational Safety
 > - **`dirA` is read-only.** Only `.pixe_ledger.json` is written there.
+> - **No file modification.** Destination files are byte-identical copies of their source. Metadata is expressed exclusively via XMP sidecars — never written into media files.
 > - **Atomic copy-then-verify.** Temp file → re-hash → rename on match.
+> - **Full-file hashing.** All handlers hash the complete file contents. Verification is a simple full-file re-hash — no format-specific scoping.
 > - **Database-backed resumability.** Per-file state tracked across runs.
 > - **Streaming JSONL ledger.** Partial but valid on interruption.
 > - **No silent outcomes.** Every file produces stdout output and a ledger entry.
@@ -218,7 +222,7 @@ The `FileTypeHandler` interface (defined in `internal/domain/handler.go`) is the
 
 - `Detect(filePath) (bool, error)` — Magic-byte verified after extension-based assumption.
 - `ExtractDate(filePath) (time.Time, error)` — Capture date with fallback chain.
-- `HashableReader(filePath) (io.ReadCloser, error)` — Media payload only.
+- `HashableReader(filePath) (io.ReadCloser, error)` — Complete file contents.
 - `MetadataSupport() MetadataCapability` — Embed, Sidecar, or None.
 - `WriteMetadataTags(filePath, tags) error` — Only called for `MetadataEmbed` handlers.
 - `Extensions() []string` — Claimed extensions for fast-path detection.
@@ -228,7 +232,7 @@ The `FileTypeHandler` interface (defined in `internal/domain/handler.go`) is the
 
 | Handler | Extensions | Container | Metadata | Notes |
 |---|---|---|---|---|
-| JPEG | `.jpg`, `.jpeg` | — | Embed | EXIF in-file |
+| JPEG | `.jpg`, `.jpeg` | — | Sidecar | |
 | HEIC | `.heic`, `.heif` | ISOBMFF | Sidecar | |
 | AVIF | `.avif` | ISOBMFF | Sidecar | iPhone 16+, modern Android |
 | PNG | `.png` | PNG chunks | Sidecar | `eXIf`/`tEXt` EXIF extraction |
@@ -250,7 +254,7 @@ The `FileTypeHandler` interface (defined in `internal/domain/handler.go`) is the
 
 CR3 and RAF are exceptions — they use non-TIFF containers and have standalone handlers.
 
-**Hashable region:** Raw sensor data (not embedded JPEG preview) for TIFF-based formats. Full-file hash for ISOBMFF formats (HEIC, AVIF, PNG). Sensor data is identified by IFD analysis: compression type, image dimensions, and `NewSubfileType` tag.
+**Hashable region:** Full file for all handlers. Every handler's `HashableReader()` returns a reader over the complete file contents. This ensures destination files can be re-verified at any time with a simple full-file hash, and eliminates format-specific hash scoping logic.
 
 **Registration:** All handlers registered via `buildRegistry()` in `cmd/helpers.go` — single source of truth. TIFF handler registered last to avoid claiming RAW files with standard TIFF magic bytes.
 
@@ -285,7 +289,7 @@ All multi-byte integers are big-endian. The offset directory version field (at b
 
 This is a single offset lookup followed by standard EXIF parsing — simpler than CR3's nested ISOBMFF/UUID traversal.
 
-**Hashable region:** The CFA offset and CFA length fields (at 0x64 and 0x68) point directly to the raw sensor data. The handler returns a `sectionReadCloser` bounded to this region, excluding the header, embedded JPEG, and metadata container. This ensures metadata edits (tagging, XMP sidecars) do not invalidate the content hash.
+**Hashable region:** Full file. Consistent with all other handlers — `HashableReader()` returns a reader over the complete file contents.
 
 **Magic bytes:** `"FUJIFILMCCD-RAW "` (16 bytes at offset 0) — fully distinctive, no collision risk with any other format. Fits exactly within the registry's 16-byte `magicReadSize`.
 
@@ -487,12 +491,11 @@ The following files and directories are artifacts of the custom theme and must b
 
 ## 13. Open Questions & Future Considerations
 
-1. **MP4/MOV embedded metadata writing** — Currently uses `MetadataSidecar`. Could implement `udta/©cpy` atom writing in pure Go.
-2. **HEIC embedded metadata writing** — Awaiting reliable pure-Go HEIC EXIF writer.
-3. **Cloud storage targets** — `dirB` on S3, GCS, etc.
-4. **Multi-archive federation** — Querying across multiple `dirB` databases.
-5. **Extended XMP fields** — Additional fields beyond Copyright and CameraOwner (keywords, captions, GPS, ratings).
-6. **Split-brain network dedup** — Multi-machine NAS scenarios with separate local databases. `O_EXCL` temp file locking strategy deferred.
+1. **Re-enabling `MetadataEmbed` for JPEG** — The interface capability is retained. A future decision could re-enable EXIF embedding for JPEG destinations if the tradeoff (stronger tagging vs. byte-identical copies) shifts.
+2. **Cloud storage targets** — `dirB` on S3, GCS, etc.
+3. **Multi-archive federation** — Querying across multiple `dirB` databases.
+4. **Extended XMP fields** — Additional fields beyond Copyright and CameraOwner (keywords, captions, GPS, ratings).
+5. **Split-brain network dedup** — Multi-machine NAS scenarios with separate local databases. `O_EXCL` temp file locking strategy deferred.
 
 ---
 
