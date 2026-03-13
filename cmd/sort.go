@@ -15,6 +15,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -177,12 +178,6 @@ func runSort(cmd *cobra.Command, args []string) error {
 	_, noColor := os.LookupEnv("NO_COLOR")
 	useProgress := viper.GetBool("progress") && isTTY
 
-	// Wire SIGINT/SIGTERM to a cancellable context so the pipeline can drain
-	// gracefully. signal.NotifyContext restores default signal behaviour on the
-	// second signal, allowing a hard exit if the user insists.
-	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
-
 	destLabel := "..." + filepath.Base(cfg.Destination)
 	opts := pipeline.SortOptions{
 		Config:       cfg,
@@ -195,18 +190,28 @@ func runSort(cmd *cobra.Command, args []string) error {
 		DB:           db,
 		RunID:        runID,
 		ColorOutput:  isTTY && !noColor && cfg.Verbosity >= 0,
-		Context:      ctx,
 		DestLabel:    destLabel,
 	}
 
 	var result pipeline.SortResult
 	if useProgress {
+		// Progress mode: let Bubble Tea own signal handling. Using
+		// signal.NotifyContext here would conflict with Bubble Tea's own
+		// SIGINT handler and cause a startup hang. Instead we use a plain
+		// context.WithCancel and cancel it after p.Run() returns.
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+		opts.Context = ctx
+
 		bus := progress.NewBus(256)
 		opts.EventBus = bus
 		opts.Output = io.Discard
 
 		model := cli.NewProgressModel(bus, cfg.Source, cfg.Destination, "sort")
-		p := tea.NewProgram(model)
+		// WithoutSignalHandler prevents Bubble Tea from registering its own
+		// OS-level SIGINT handler. Ctrl+C is still delivered as a tea.KeyMsg
+		// from Bubble Tea's raw-mode stdin reader.
+		p := tea.NewProgram(model, tea.WithoutSignalHandler())
 
 		// Run pipeline in background; close bus when done.
 		var pipelineErr error
@@ -218,13 +223,25 @@ func runSort(cmd *cobra.Command, args []string) error {
 		}()
 
 		if _, err := p.Run(); err != nil {
+			cancel()
+			<-done
 			return fmt.Errorf("progress UI: %w", err)
 		}
+		// Bubble Tea exited (bus closed or user quit). Cancel the pipeline
+		// context so any in-flight work drains gracefully.
+		cancel()
 		<-done
 		if pipelineErr != nil {
 			return fmt.Errorf("sort failed: %w", pipelineErr)
 		}
 	} else {
+		// Non-progress mode: wire SIGINT/SIGTERM to a cancellable context so
+		// the pipeline can drain gracefully. signal.NotifyContext restores
+		// default signal behaviour on the second signal, allowing a hard exit.
+		ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stopSignals()
+		opts.Context = ctx
+
 		var err error
 		result, err = pipeline.Run(opts)
 		if err != nil {

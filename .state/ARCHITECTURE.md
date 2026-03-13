@@ -495,15 +495,193 @@ A structured event channel (`internal/progress/`) decouples pipelines from outpu
 
 See `internal/progress/event.go` for the full `EventKind` enum and `Event` struct.
 
+### 9.1 Byte-Level Progress Events
+
+The event bus supports sub-file progress reporting via `EventByteProgress` events. These are emitted during I/O-heavy pipeline stages (copy, hash, verify) to enable per-file progress bars in the UI.
+
+**New event kind:**
+
+| EventKind | When Emitted | Key Fields |
+|---|---|---|
+| `EventByteProgress` | Periodically during copy/hash/verify I/O | `RelPath`, `WorkerID`, `BytesWritten`, `BytesTotal`, `Stage` |
+
+**New `Event` fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `BytesWritten` | `int64` | Bytes processed so far in the current stage |
+| `BytesTotal` | `int64` | Total file size (from `os.Stat` at pipeline entry) |
+| `Stage` | `string` | Current pipeline stage label (see §10.2) |
+
+**Emission strategy:**
+
+- A `ProgressReader` wrapper (in `internal/progress/`) wraps any `io.Reader` and emits `EventByteProgress` at regular intervals (100ms default). A `ProgressWriter` wrapper wraps any `io.Writer` and emits at the same interval. This avoids flooding the bus with per-32KB-buffer events.
+- The `ProgressReader` is injected at the call sites in `internal/verify/` (for hash computation) and in `internal/copy/` (for `Verify`), only when an event bus is configured. The `ProgressWriter` is injected in `internal/copy/` (for `Execute`). When the bus is nil, the raw reader/writer is used unchanged — zero overhead for non-progress mode.
+- `BytesTotal` is populated from the `os.Stat` performed at the start of `processFile()` / `runWorker()`. The file size is carried on the `Event.FileSize` field (already present in the `Event` struct) and set on `EventFileStart`.
+
+**Throttling:** Both `ProgressReader` and `ProgressWriter` use a time-based throttle (100ms interval) to ensure consistent UI update rates regardless of I/O speed. `ProgressReader` emits a final "100%" event when the reader reaches EOF. `ProgressWriter` provides an `EmitFinal()` method that the pipeline calls after `copy.Execute` completes to ensure the UI sees 100% before the stage-transition event arrives.
+
+### 9.2 File Size on EventFileStart
+
+`EventFileStart` now carries `FileSize` (populated from `os.Stat`). This allows the UI to display file sizes in worker lines and compute byte-level percentages before any `EventByteProgress` arrives. The stat is already performed in the pipeline for mtime preservation — no additional syscall.
+
 ---
 
-## 10. CLI Progress Bars
+## 10. CLI Progress Display
 
-Opt-in via `--progress` flag on `sort` and `verify`. Lightweight Bubble Tea program rendering an inline progress bar with ETA, status counters, and current file. Auto-disabled when stdout is not a TTY.
+Opt-in via `--progress` flag on `sort` and `verify`. Bubble Tea program rendering a multi-line progress display with an overall progress bar and per-worker file status. Auto-disabled when stdout is not a TTY.
 
-When active, `opts.Output` is set to `io.Discard` (progress bar replaces scrolling text). Ledger and database continue recording.
+When active, `opts.Output` is set to `io.Discard` (progress display replaces scrolling text). Ledger and database continue recording.
 
 Implementation: `internal/cli/` — `ProgressModel` struct.
+
+### 10.1 Startup Hang Fix (Signal Handler Conflict)
+
+**Bug:** When `--progress` is used, the sort command hangs indefinitely on startup until Ctrl+C is pressed, at which point the sort proceeds normally with the progress bar visible.
+
+**Root cause:** In `cmd/sort.go`, `signal.NotifyContext()` registers a Go-level signal handler for `SIGINT`/`SIGTERM` **before** `tea.NewProgram(model).Run()` starts. Bubble Tea's `Run()` also installs its own signal handler for `SIGINT` (to deliver `tea.KeyMsg{Type: tea.KeyCtrlC}` to the model). Go's `signal.Notify` is additive — both handlers receive the signal. However, `signal.NotifyContext` consumes the signal from the OS, and Bubble Tea's internal signal handler never fires. The result: Bubble Tea's terminal initialization completes, but its internal signal relay goroutine is blocked waiting for a signal that the Go runtime's `signal.NotifyContext` intercepts first. This manifests as a hang because Bubble Tea's `Run()` enters its event loop but the terminal is not fully configured — specifically, Bubble Tea waits for its input reader goroutine to start, and the raw-mode terminal switch may be gated on signal setup completion.
+
+When the user presses Ctrl+C: `signal.NotifyContext` fires and cancels the context. The pipeline goroutine's context is cancelled. But Bubble Tea also receives the `SIGINT` (the second signal after `NotifyContext` restores default handling via `stopSignals()`), which causes Bubble Tea's `Run()` to unblock. The pipeline has already started (discovery was happening during the "hang"), so it proceeds with whatever work remains.
+
+**Fix:** Move `signal.NotifyContext` registration to **after** `p.Run()` returns, or better: when `useProgress` is true, do **not** call `signal.NotifyContext` at all. Instead, let Bubble Tea own signal handling. The Bubble Tea model's `Update()` already handles `ctrl+c` / `q` by returning `tea.Quit`. When Bubble Tea quits, `p.Run()` returns, and the `cmd/sort.go` code can cancel the pipeline context explicitly (via a `context.WithCancel` that the progress-mode branch controls). This avoids the dual-handler conflict entirely.
+
+**Implementation pattern:**
+
+```
+if useProgress {
+    ctx, cancel := context.WithCancel(cmd.Context())   // no signal.NotifyContext
+    defer cancel()
+    // ... launch pipeline goroutine with ctx ...
+    // ... p.Run() blocks (Bubble Tea owns signals) ...
+    cancel()  // cancel pipeline context when Bubble Tea exits
+    <-done
+} else {
+    ctx, stopSignals := signal.NotifyContext(...)       // existing behavior
+    defer stopSignals()
+    // ... run pipeline synchronously ...
+}
+```
+
+Bubble Tea handles Ctrl+C → model returns `tea.Quit` → `p.Run()` returns → `cancel()` fires → pipeline drains gracefully via `ctx.Done()`. No signal conflict.
+
+### 10.2 Display Layout
+
+The progress display renders a fixed-height, multi-line view:
+
+```
+pixe sort  /path/to/source → /path/to/dest
+
+ ████████████░░░░░░░░░░░░░░░░░░  42 / 145  (29%)  ETA 1m 23s
+
+ HASH    IMG_0042.jpg           ████████░░  78%   12.4 MB   ~2s
+ COPY    DSC_1234.nef           ██████████  100%  24.8 MB   ~0s
+ VERIFY  IMG_0039.jpg           ██████░░░░  61%    8.1 MB   ~1s
+ TAG     IMG_0038.heic          ████████░░  done   4.2 MB
+
+ copied: 38  │  dupes: 2  │  skipped: 1  │  errors: 0
+```
+
+**Structure (top to bottom):**
+
+1. **Header line** — command, source, destination.
+2. **Overall progress bar** — files completed / total files (file-count based, not byte-based). Percentage and ETA.
+3. **Worker lines** — one line per active worker. Number of visible lines = `cfg.Workers` (or 1 for sequential mode). Each line shows:
+   - **Stage label** (first column, fixed width) — the pipeline stage the file is currently in.
+   - **Filename** — basename of the file being processed (truncated if needed).
+   - **Per-file progress bar** — byte-level progress within the current I/O stage (copy, hash, verify). Non-I/O stages (extract, tag) show a spinner or "done".
+   - **Percentage** — byte-level percentage, or "done" for non-I/O stages.
+   - **File size** — human-readable (e.g., "12.4 MB").
+   - **Time estimate** — per-file ETA based on byte throughput in the current stage.
+4. **Status counters** — aggregate counts (copied, dupes, skipped, errors for sort; verified, mismatches, unrecognised for verify).
+
+**Stage labels:**
+
+| Label | Pipeline Stage | Has Byte Progress? |
+|---|---|---|
+| `DISC` | Discovery/walk phase (pre-file) | No (overall bar only) |
+| `HASH` | Computing checksum (`hash.Sum`) | Yes |
+| `COPY` | Streaming to temp file (`copy.Execute`) | Yes |
+| `VERIFY` | Re-hashing temp file (`copy.Verify`) | Yes |
+| `TAG` | Writing metadata sidecar | No |
+| `DONE` | File complete, waiting for next assignment | No |
+
+For verify mode, the stage labels are:
+
+| Label | Verify Stage | Has Byte Progress? |
+|---|---|---|
+| `HASH` | Re-computing checksum for verification | Yes |
+| `DONE` | File verified | No |
+
+**Worker line lifecycle:**
+
+1. `EventFileStart` → worker line appears with filename and stage `HASH`.
+2. `EventByteProgress` → per-file progress bar updates.
+3. `EventFileExtracted` → (no visible stage change — extraction is sub-second).
+4. `EventFileHashed` → stage changes to `COPY`, byte progress resets to 0.
+5. `EventFileCopied` → stage changes to `VERIFY`, byte progress resets to 0.
+6. `EventFileVerified` → stage changes to `TAG`.
+7. `EventFileTagged` / `EventFileComplete` / `EventFileDuplicate` → worker line cleared (ready for next file).
+8. When no file is assigned, the worker line is blank (not rendered).
+
+**Idle workers:** Worker lines are only rendered for workers that are actively processing a file. If 4 workers are configured but only 2 have active files (e.g., near the end of a run), only 2 worker lines are shown. This keeps the display compact.
+
+### 10.3 Model State
+
+The `ProgressModel` struct tracks per-worker state in addition to aggregate counters:
+
+```go
+type WorkerState struct {
+    WorkerID     int
+    RelPath      string    // filename being processed
+    Stage        string    // current stage label
+    FileSize     int64     // total bytes
+    BytesWritten int64     // bytes processed in current I/O stage
+    StageStart   time.Time // when the current stage began (for per-file ETA)
+}
+```
+
+The model maintains a `map[int]*WorkerState` keyed by `WorkerID`. Entries are created on `EventFileStart` and removed on terminal events. The `View()` function iterates over active workers in `WorkerID` order to render stable, non-jumping lines.
+
+### 10.4 Discovery Phase Display
+
+During the discovery walk (before `EventDiscoverDone`), the overall progress bar shows an indeterminate state (e.g., a spinner or pulsing bar) with the text "Discovering files..." instead of "0 / 0 (0%)". This provides immediate visual feedback that the command is running, eliminating the perception of a hang even for large directories.
+
+Once `EventDiscoverDone` arrives, the bar switches to determinate mode with the file count.
+
+### 10.5 Verify Parallelization
+
+The `pixe verify` command is parallelized to match the sort command's worker pool pattern:
+
+**Design:**
+
+- `verify.Options` gains a `Workers int` field (defaults to `cfg.Workers` from `--workers` flag, minimum 1).
+- When `Workers > 1`, `verify.Run()` uses a worker pool: the coordinator goroutine walks the directory and feeds file paths into a work channel; workers read files, recompute hashes, and send results back.
+- Workers own I/O (reading files, computing hashes). The coordinator owns result aggregation and event emission (to maintain ordered `Completed` counters).
+- Each worker emits `EventByteProgress` events with its `WorkerID` during hash computation, enabling per-worker progress lines in the UI.
+- The `--workers` flag on the verify command uses the same Viper key as sort (`workers`), so a global config value applies to both commands.
+
+**Event changes for verify:**
+
+- `EventVerifyOK`, `EventVerifyMismatch`, and `EventVerifyUnrecognised` gain a `WorkerID` field (currently unused — set to 0 for the single-threaded walker).
+- New: `EventVerifyFileStart` — emitted when a worker begins processing a file. Carries `RelPath`, `WorkerID`, `FileSize`. This enables the UI to show the file in the worker line before any byte progress arrives.
+
+**Verify worker line stages:**
+
+| Label | Stage | Has Byte Progress? |
+|---|---|---|
+| `HASH` | Reading and hashing file contents | Yes |
+
+Verify workers only have one I/O stage (hash), so the per-file progress bar directly reflects hash progress. The worker line appears on `EventVerifyFileStart` and disappears on the terminal event (`EventVerifyOK` / `EventVerifyMismatch` / `EventVerifyUnrecognised`).
+
+**Concurrency safety:** Verify is read-only (no DB writes, no file mutations), so workers need no coordinator-mediated serialization. The only shared state is the `Result` struct, which the coordinator updates from the result channel.
+
+### 10.6 Bubble Tea Program Configuration
+
+The Bubble Tea program is created with `tea.WithoutSignalHandler()` when running in progress mode. This prevents Bubble Tea from installing its own `SIGINT` handler, which would conflict with the explicit `context.WithCancel` pattern described in §10.1. Instead, the model handles `ctrl+c` via `tea.KeyMsg` (which Bubble Tea delivers from its raw-mode terminal input reader, independent of OS signals). This is cleaner than letting two signal handlers compete.
+
+Additionally, `tea.WithoutSignals()` is **not** used (that would disable the `tea.KeyMsg` delivery for Ctrl+C). The distinction:
+- `tea.WithoutSignalHandler()` — disables the OS-level `signal.Notify` for `SIGINT`. Bubble Tea still reads Ctrl+C from stdin as a key event.
+- The model's `Update()` handles `tea.KeyMsg` for "ctrl+c" by returning `tea.Quit`, which causes `p.Run()` to return, which triggers the `cancel()` on the pipeline context.
 
 ---
 

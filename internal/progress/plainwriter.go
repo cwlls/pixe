@@ -104,6 +104,17 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 					s.Processed, s.Duplicates, s.Skipped, s.Errors)
 			}
 
+		// EventByteProgress is intentionally ignored — the plain writer is
+		// text-based and does not render per-byte progress bars.
+		case EventByteProgress:
+			// no-op
+
+		// EventVerifyFileStart is intentionally ignored — the terminal events
+		// (EventVerifyOK, EventVerifyMismatch, EventVerifyUnrecognised) already
+		// print the per-file outcome.
+		case EventVerifyFileStart:
+			// no-op
+
 		// Verify events.
 		case EventVerifyOK:
 			if pw.verbosity >= 0 {

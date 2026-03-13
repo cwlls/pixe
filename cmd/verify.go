@@ -15,9 +15,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
@@ -68,21 +72,39 @@ func runVerify(cmd *cobra.Command, args []string) error {
 
 	useProgress := viper.GetBool("verify_progress") && isatty.IsTerminal(os.Stdout.Fd())
 
+	// Resolve worker count: explicit flag > config > CPU count.
+	workers := viper.GetInt("verify_workers")
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+
 	opts := verify.Options{
 		Dir:      dir,
 		Hasher:   h,
 		Registry: reg,
 		Output:   os.Stdout,
+		Workers:  workers,
 	}
 
 	var result verify.Result
 	if useProgress {
+		// Progress mode: let Bubble Tea own signal handling. Using
+		// signal.NotifyContext here would conflict with Bubble Tea's own
+		// SIGINT handler and cause a startup hang. Instead we use a plain
+		// context.WithCancel and cancel it after p.Run() returns.
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+		opts.Context = ctx
+
 		bus := progress.NewBus(256)
 		opts.EventBus = bus
 		opts.Output = io.Discard
 
 		model := cli.NewProgressModel(bus, dir, "", "verify")
-		p := tea.NewProgram(model)
+		// WithoutSignalHandler prevents Bubble Tea from registering its own
+		// OS-level SIGINT handler. Ctrl+C is still delivered as a tea.KeyMsg
+		// from Bubble Tea's raw-mode stdin reader.
+		p := tea.NewProgram(model, tea.WithoutSignalHandler())
 
 		var verifyErr error
 		done := make(chan struct{})
@@ -93,13 +115,25 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		}()
 
 		if _, err := p.Run(); err != nil {
+			cancel()
+			<-done
 			return fmt.Errorf("progress UI: %w", err)
 		}
+		// Bubble Tea exited (bus closed or user quit). Cancel the verify
+		// context so any in-flight work drains gracefully.
+		cancel()
 		<-done
 		if verifyErr != nil {
 			return fmt.Errorf("verify failed: %w", verifyErr)
 		}
 	} else {
+		// Non-progress mode: wire SIGINT/SIGTERM to a cancellable context so
+		// verify can drain gracefully. signal.NotifyContext restores default
+		// signal behaviour on the second signal, allowing a hard exit.
+		ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stopSignals()
+		opts.Context = ctx
+
 		var err error
 		result, err = verify.Run(opts)
 		if err != nil {
@@ -118,10 +152,12 @@ func init() {
 
 	verifyCmd.Flags().StringP("dest", "d", "", "destination archive directory to verify (required)")
 	verifyCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
+	verifyCmd.Flags().IntP("workers", "w", 0, "number of concurrent workers for verification (default: number of CPUs)")
 	// Note: --algorithm is inherited from the root command. For new-format files
 	// (YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>), the algorithm is auto-detected from the
 	// embedded ID and this flag is ignored. For legacy files, it is used as a
 	// fallback when the digest length is ambiguous.
 	_ = viper.BindPFlag("verify_dest", verifyCmd.Flags().Lookup("dest"))
 	_ = viper.BindPFlag("verify_progress", verifyCmd.Flags().Lookup("progress"))
+	_ = viper.BindPFlag("verify_workers", verifyCmd.Flags().Lookup("workers"))
 }

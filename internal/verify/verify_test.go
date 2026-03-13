@@ -28,6 +28,7 @@ import (
 	"github.com/cwlls/pixe/internal/discovery"
 	"github.com/cwlls/pixe/internal/domain"
 	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/progress"
 )
 
 // ---------------------------------------------------------------------------
@@ -559,5 +560,220 @@ func TestParseChecksum_longChecksumAccepted(t *testing.T) {
 	}
 	if got != longChecksum {
 		t.Errorf("parseChecksum returned %q, want %q", got, longChecksum)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Concurrent verify tests
+// ---------------------------------------------------------------------------
+
+// TestRun_Concurrent_Correctness verifies that concurrent verification with
+// Workers:4 produces correct results for known Pixe-named files.
+func TestRun_Concurrent_Correctness(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+
+	// Create 5 files with correct checksums in their names.
+	contents := [][]byte{
+		[]byte("file one content"),
+		[]byte("file two content"),
+		[]byte("file three content"),
+		[]byte("file four content"),
+		[]byte("file five content"),
+	}
+	for _, content := range contents {
+		jpegContent := buildJPEGContent(content)
+		checksum := sha1Hex(jpegContent)
+		name := pixeFilename(checksum, ".jpg")
+		writeTestFile(t, dir, name, jpegContent)
+	}
+
+	var out bytes.Buffer
+	result, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &out,
+		Workers:  4,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Verified != 5 {
+		t.Errorf("Verified = %d, want 5", result.Verified)
+	}
+	if result.Mismatches != 0 {
+		t.Errorf("Mismatches = %d, want 0", result.Mismatches)
+	}
+	if result.Unrecognised != 0 {
+		t.Errorf("Unrecognised = %d, want 0", result.Unrecognised)
+	}
+}
+
+// TestRun_Concurrent_MatchesSequential verifies that concurrent and sequential
+// verification produce identical results for the same files.
+func TestRun_Concurrent_MatchesSequential(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+
+	// Create a mix of valid, mismatched, and unrecognised files.
+	// Valid file.
+	content1 := []byte("valid content")
+	jpegContent1 := buildJPEGContent(content1)
+	checksum1 := sha1Hex(jpegContent1)
+	writeTestFile(t, dir, pixeFilename(checksum1, ".jpg"), jpegContent1)
+
+	// Mismatched file.
+	fakeChecksum := strings.Repeat("a", 40)
+	jpegContent2 := buildJPEGContent([]byte("different content"))
+	writeTestFile(t, dir, pixeFilename(fakeChecksum, ".jpg"), jpegContent2)
+
+	// Unrecognised file (wrong extension).
+	writeTestFile(t, dir, pixeFilename(strings.Repeat("b", 40), ".xyz"), []byte("some content"))
+
+	// Run sequential.
+	var outSeq bytes.Buffer
+	resultSeq, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &outSeq,
+		Workers:  1,
+	})
+	if err != nil {
+		t.Fatalf("sequential Run: %v", err)
+	}
+
+	// Run concurrent.
+	var outConc bytes.Buffer
+	resultConc, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &outConc,
+		Workers:  4,
+	})
+	if err != nil {
+		t.Fatalf("concurrent Run: %v", err)
+	}
+
+	// Results should match.
+	if resultSeq.Verified != resultConc.Verified {
+		t.Errorf("Verified: sequential=%d, concurrent=%d, want equal", resultSeq.Verified, resultConc.Verified)
+	}
+	if resultSeq.Mismatches != resultConc.Mismatches {
+		t.Errorf("Mismatches: sequential=%d, concurrent=%d, want equal", resultSeq.Mismatches, resultConc.Mismatches)
+	}
+	if resultSeq.Unrecognised != resultConc.Unrecognised {
+		t.Errorf("Unrecognised: sequential=%d, concurrent=%d, want equal", resultSeq.Unrecognised, resultConc.Unrecognised)
+	}
+}
+
+// TestRun_Concurrent_Race runs concurrent verification with -race flag.
+// The test runner will detect any data races.
+func TestRun_Concurrent_Race(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+
+	// Create several files to exercise concurrent access.
+	for i := 0; i < 10; i++ {
+		content := []byte("file " + string(rune('0'+i)))
+		jpegContent := buildJPEGContent(content)
+		checksum := sha1Hex(jpegContent)
+		name := pixeFilename(checksum, ".jpg")
+		writeTestFile(t, dir, name, jpegContent)
+	}
+
+	var out bytes.Buffer
+	result, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &out,
+		Workers:  4,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Verified != 10 {
+		t.Errorf("Verified = %d, want 10", result.Verified)
+	}
+}
+
+// TestRun_Concurrent_EventEmission verifies that concurrent verification
+// emits EventVerifyFileStart and terminal events with correct WorkerIDs.
+func TestRun_Concurrent_EventEmission(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+	bus := progress.NewBus(64)
+
+	// Create 3 files.
+	for i := 0; i < 3; i++ {
+		content := []byte("file " + string(rune('0'+i)))
+		jpegContent := buildJPEGContent(content)
+		checksum := sha1Hex(jpegContent)
+		name := pixeFilename(checksum, ".jpg")
+		writeTestFile(t, dir, name, jpegContent)
+	}
+
+	// Run in a goroutine so we can collect events.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = Run(Options{
+			Dir:      dir,
+			Hasher:   hasher,
+			Registry: reg,
+			Output:   io.Discard,
+			EventBus: bus,
+			Workers:  2,
+		})
+		bus.Close()
+	}()
+
+	// Collect events.
+	var fileStartEvents []progress.Event
+	var terminalEvents []progress.Event
+	for e := range bus.Events() {
+		if e.Kind == progress.EventVerifyFileStart {
+			fileStartEvents = append(fileStartEvents, e)
+		}
+		if e.Kind == progress.EventVerifyOK || e.Kind == progress.EventVerifyMismatch || e.Kind == progress.EventVerifyUnrecognised {
+			terminalEvents = append(terminalEvents, e)
+		}
+	}
+
+	<-done
+
+	// Should have 3 file-start events.
+	if len(fileStartEvents) != 3 {
+		t.Errorf("got %d EventVerifyFileStart events, want 3", len(fileStartEvents))
+	}
+
+	// All file-start events should have WorkerID > 0 (workers are 1, 2, ...).
+	for _, e := range fileStartEvents {
+		if e.WorkerID <= 0 {
+			t.Errorf("EventVerifyFileStart has WorkerID=%d, want > 0", e.WorkerID)
+		}
+	}
+
+	// Should have 3 terminal events.
+	if len(terminalEvents) != 3 {
+		t.Errorf("got %d terminal events, want 3", len(terminalEvents))
+	}
+
+	// All terminal events should have WorkerID > 0.
+	for _, e := range terminalEvents {
+		if e.WorkerID <= 0 {
+			t.Errorf("terminal event has WorkerID=%d, want > 0", e.WorkerID)
+		}
 	}
 }

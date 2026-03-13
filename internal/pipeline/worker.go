@@ -625,10 +625,15 @@ func runWorker(ctx context.Context, id int,
 				return
 			}
 
+			var fileSize int64
+			if fi, statErr := os.Stat(item.df.Path); statErr == nil {
+				fileSize = fi.Size()
+			}
 			emit(opts.EventBus, progress.Event{
 				Kind:     progress.EventFileStart,
 				RelPath:  item.df.RelPath,
 				WorkerID: id,
+				FileSize: fileSize,
 			})
 
 			// --- Extract date ---
@@ -686,7 +691,9 @@ func runWorker(ctx context.Context, id int,
 				resultCh <- workResult{df: item.df, fileID: item.fileID, workerID: id, err: err}
 				continue
 			}
-			checksum, err := opts.Hasher.Sum(rc)
+			// Wrap with ProgressReader for byte-level progress (no-op when bus is nil).
+			hashReader := progress.NewProgressReader(rc, opts.EventBus, item.df.RelPath, id, "HASH", fileSize)
+			checksum, err := opts.Hasher.Sum(hashReader)
 			_ = rc.Close()
 			if err != nil {
 				err = fmt.Errorf("hash: %w", err)
@@ -765,7 +772,12 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			// --- Copy (atomic: write to temp file) ---
-			tmpPath, err := copypkg.Execute(item.df.Path, assign.absDest)
+			// Wrap the destination writer with ProgressWriter for byte-level progress.
+			var copyWriter *progress.ProgressWriter
+			tmpPath, err := copypkg.ExecuteWithProgress(item.df.Path, assign.absDest, func(w io.Writer) io.Writer {
+				copyWriter = progress.NewProgressWriter(w, opts.EventBus, item.df.RelPath, id, "COPY", fileSize)
+				return copyWriter
+			})
 			if err != nil {
 				ferr := fmt.Errorf("copy: %w", err)
 				var copyDBErr error
@@ -774,6 +786,11 @@ func runWorker(ctx context.Context, id int,
 				}
 				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr, dbErr: copyDBErr}
 				continue
+			}
+			// Emit a final 100% byte-progress event so the UI sees completion
+			// before the stage-transition EventFileCopied arrives.
+			if copyWriter != nil {
+				copyWriter.EmitFinal()
 			}
 			if db != nil {
 				// Record the intended final destination; the temp path is an
@@ -789,7 +806,10 @@ func runWorker(ctx context.Context, id int,
 			})
 
 			// --- Verify (hash the temp file) ---
-			vr := copypkg.Verify(tmpPath, checksum, item.df.Handler, opts.Hasher)
+			// Wrap the hashable reader with ProgressReader for byte-level progress.
+			vr := copypkg.VerifyWithProgress(tmpPath, checksum, item.df.Handler, opts.Hasher, func(r io.Reader) io.Reader {
+				return progress.NewProgressReader(r, opts.EventBus, item.df.RelPath, id, "VERIFY", fileSize)
+			})
 			if !vr.Success {
 				// If the temp file no longer exists, another worker won the race
 				// to the same destination (same checksum, no-DB mode). The file

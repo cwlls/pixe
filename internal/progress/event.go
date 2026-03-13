@@ -52,8 +52,12 @@ const (
 	// Run-level events.
 	EventRunComplete // All files processed; Summary field populated.
 
+	// Byte-level I/O progress (emitted periodically during copy/hash/verify).
+	EventByteProgress // Sub-file byte progress within a pipeline stage.
+
 	// Verify-specific events.
 	EventVerifyStart        // Verify walk began; Total field set.
+	EventVerifyFileStart    // Verify worker began processing a file.
 	EventVerifyOK           // File checksum matches filename-embedded checksum.
 	EventVerifyMismatch     // File checksum does not match, or read error.
 	EventVerifyUnrecognised // File not parseable by any registered handler.
@@ -89,6 +93,11 @@ type Event struct {
 	// Skip / error info.
 	Reason string // human-readable skip reason or error message.
 	Err    error  // underlying error (EventFileError, EventVerifyMismatch).
+
+	// Byte-level progress (EventByteProgress).
+	BytesWritten int64  // bytes processed so far in the current I/O stage.
+	BytesTotal   int64  // total file size for the current file.
+	Stage        string // pipeline stage label: "HASH", "COPY", "VERIFY".
 
 	// Verify-specific fields (EventVerifyMismatch).
 	ExpectedChecksum string

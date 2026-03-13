@@ -34,14 +34,32 @@ var errorCountStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#cc0000", Dark: "#ff6666"}).
 	Bold(true)
 
-// currentFileStyle renders the current file being processed (dim, truncated).
-var currentFileStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.AdaptiveColor{Light: "#777777", Dark: "#888888"})
-
-// etaStyle renders the ETA estimate (dim, right-aligned).
+// etaStyle renders the overall ETA estimate (dim).
 var etaStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#777777", Dark: "#888888"})
 
 // labelStyle renders counter labels.
 var labelStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#555555", Dark: "#aaaaaa"})
+
+// stageStyle renders the pipeline stage label (HASH, COPY, VERIFY, TAG).
+var stageStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#2266aa", Dark: "#66aaff"}).
+	Bold(true)
+
+// workerFileStyle renders the filename in a worker line.
+var workerFileStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#444444", Dark: "#bbbbbb"})
+
+// fileSizeStyle renders the file size in a worker line (dim).
+var fileSizeStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#777777"})
+
+// workerETAStyle renders the per-file ETA estimate.
+var workerETAStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#777777"})
+
+// discoveryStyle renders the "Discovering files..." text.
+var discoveryStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#555555", Dark: "#aaaaaa"}).
+	Italic(true)

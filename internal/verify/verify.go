@@ -26,11 +26,14 @@
 package verify
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cwlls/pixe/internal/discovery"
 	"github.com/cwlls/pixe/internal/hash"
@@ -54,14 +57,26 @@ type FileResult struct {
 
 // Options configures a verify run.
 type Options struct {
-	Dir      string              // Dir is the destination directory (dirB) to verify.
-	Hasher   *hash.Hasher        // Hasher computes content checksums for verification.
-	Registry *discovery.Registry // Registry maps file extensions to their FileTypeHandler implementations.
-	Output   io.Writer           // Output is where per-file result lines are written.
+	// Dir is the destination directory (dirB) to verify.
+	Dir string
+	// Hasher computes content checksums for verification.
+	Hasher *hash.Hasher
+	// Registry maps file extensions to their FileTypeHandler implementations.
+	Registry *discovery.Registry
+	// Output is where per-file result lines are written.
+	Output io.Writer
 	// EventBus, when non-nil, receives structured progress events alongside
 	// the plain-text Output writer. Both can be active simultaneously.
 	// When nil, no events are emitted (existing behaviour is unchanged).
 	EventBus *progress.Bus
+	// Workers is the number of concurrent verification workers. When <= 1,
+	// verification runs sequentially (existing behaviour). When > 1, a worker
+	// pool is used for parallel hash computation.
+	Workers int
+	// Context, when non-nil, is used for graceful cancellation (e.g. SIGINT).
+	// Workers finish their current file before exiting. When nil,
+	// context.Background() is used (no cancellation).
+	Context context.Context
 }
 
 // emitVerify sends an event to the bus if one is configured. It is a no-op
@@ -72,12 +87,49 @@ func emitVerify(bus *progress.Bus, e progress.Event) {
 	}
 }
 
+// verifyItem is sent from the coordinator to a worker.
+type verifyItem struct {
+	path     string // absolute path
+	relPath  string // relative to opts.Dir
+	name     string // filename (for parseChecksum)
+	fileSize int64  // from os.Stat; 0 if stat failed
+}
+
+// verifyResult is sent from a worker back to the coordinator.
+type verifyResult struct {
+	relPath  string
+	absPath  string
+	workerID int
+	status   string // "OK", "MISMATCH", "UNRECOGNISED", "ERROR"
+	expected string
+	actual   string
+	err      error
+}
+
 // Run walks dir, parses checksums from filenames, recomputes hashes, and
 // reports results. Returns a non-nil error only for fatal walk errors.
 // Per-file mismatches are reported but do not cause Run to return an error —
 // callers check Result.Mismatches to determine exit code.
+//
+// When opts.Workers > 1, Run uses a worker pool for parallel hash computation.
+// When opts.Workers <= 1, verification runs sequentially.
 func Run(opts Options) (Result, error) {
+	if opts.Workers > 1 {
+		return runConcurrent(opts)
+	}
+	return runSequential(opts)
+}
+
+// runSequential walks the directory sequentially, verifying each file's
+// checksum against the filename-embedded value. It emits events to the bus
+// (if configured) and writes per-file results to opts.Output.
+func runSequential(opts Options) (Result, error) {
 	var result Result
+
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// Pre-scan: count non-directory, non-dotfile entries so consumers can
 	// show a determinate progress bar. This is a lightweight walk that does
@@ -115,6 +167,12 @@ func Run(opts Options) (Result, error) {
 		if walkErr != nil {
 			return walkErr
 		}
+		// Check for cancellation between files.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		// Skip dot-directories entirely (e.g. .pixe/ containing manifest.json).
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") && path != opts.Dir {
@@ -132,6 +190,21 @@ func Run(opts Options) (Result, error) {
 		// Compute relative path for event reporting.
 		relPath, _ := filepath.Rel(opts.Dir, path)
 
+		// Stat for file size (used in progress events).
+		var fileSize int64
+		if fi, statErr := os.Stat(path); statErr == nil {
+			fileSize = fi.Size()
+		}
+
+		// Emit file-start event for the UI.
+		emitVerify(opts.EventBus, progress.Event{
+			Kind:     progress.EventVerifyFileStart,
+			RelPath:  relPath,
+			AbsPath:  path,
+			WorkerID: 0,
+			FileSize: fileSize,
+		})
+
 		// Parse the expected checksum and algorithm from the filename.
 		expected, algo, ok := parseChecksum(name)
 		if !ok {
@@ -142,28 +215,15 @@ func Run(opts Options) (Result, error) {
 				Kind:      progress.EventVerifyUnrecognised,
 				RelPath:   relPath,
 				AbsPath:   path,
+				WorkerID:  0,
 				Completed: completed,
 				Total:     total,
 			})
 			return nil
 		}
 
-		// Resolve the hasher for this file. New-format files carry the algorithm
-		// ID in the filename; legacy files use length inference. Fall back to the
-		// configured opts.Hasher when the algorithm cannot be determined.
-		fileHasher := opts.Hasher
-		if algo != "" && algo != opts.Hasher.Algorithm() {
-			if cached, exists := hasherCache[algo]; exists {
-				fileHasher = cached
-			} else {
-				newH, newErr := hash.NewHasher(algo)
-				if newErr == nil {
-					hasherCache[algo] = newH
-					fileHasher = newH
-				}
-				// If NewHasher fails (unknown algo), fall back to opts.Hasher.
-			}
-		}
+		// Resolve the hasher for this file.
+		fileHasher := resolveHasher(opts.Hasher, algo, hasherCache)
 
 		// Detect the file type.
 		handler, err := opts.Registry.Detect(path)
@@ -175,6 +235,7 @@ func Run(opts Options) (Result, error) {
 				Kind:      progress.EventVerifyUnrecognised,
 				RelPath:   relPath,
 				AbsPath:   path,
+				WorkerID:  0,
 				Completed: completed,
 				Total:     total,
 			})
@@ -194,12 +255,15 @@ func Run(opts Options) (Result, error) {
 				ExpectedChecksum: expected,
 				Reason:           err.Error(),
 				Err:              err,
+				WorkerID:         0,
 				Completed:        completed,
 				Total:            total,
 			})
 			return nil
 		}
-		actual, err := fileHasher.Sum(rc)
+		// Wrap with ProgressReader for byte-level progress (no-op when bus is nil).
+		hashReader := progress.NewProgressReader(rc, opts.EventBus, relPath, 0, "HASH", fileSize)
+		actual, err := fileHasher.Sum(hashReader)
 		_ = rc.Close()
 		if err != nil {
 			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
@@ -212,6 +276,7 @@ func Run(opts Options) (Result, error) {
 				ExpectedChecksum: expected,
 				Reason:           err.Error(),
 				Err:              err,
+				WorkerID:         0,
 				Completed:        completed,
 				Total:            total,
 			})
@@ -227,6 +292,7 @@ func Run(opts Options) (Result, error) {
 				RelPath:   relPath,
 				AbsPath:   path,
 				Checksum:  actual,
+				WorkerID:  0,
 				Completed: completed,
 				Total:     total,
 			})
@@ -240,6 +306,7 @@ func Run(opts Options) (Result, error) {
 				AbsPath:          path,
 				ExpectedChecksum: expected,
 				ActualChecksum:   actual,
+				WorkerID:         0,
 				Completed:        completed,
 				Total:            total,
 			})
@@ -261,6 +328,286 @@ func Run(opts Options) (Result, error) {
 	})
 
 	return result, err
+}
+
+// runConcurrent verifies files using a worker pool. The coordinator goroutine
+// pre-scans the directory to collect all items and count the total, then feeds
+// items to workers; workers own I/O (read + hash) and send results back to the
+// coordinator for aggregation and event emission. Workers emit EventByteProgress
+// events during hash computation, enabling per-worker progress lines in the UI.
+func runConcurrent(opts Options) (Result, error) {
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	workers := opts.Workers
+
+	// Pre-scan: collect all items and count total for the progress bar.
+	var items []verifyItem
+	_ = filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && path != opts.Dir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+		relPath, _ := filepath.Rel(opts.Dir, path)
+		var fileSize int64
+		if fi, statErr := os.Stat(path); statErr == nil {
+			fileSize = fi.Size()
+		}
+		items = append(items, verifyItem{
+			path:     path,
+			relPath:  relPath,
+			name:     name,
+			fileSize: fileSize,
+		})
+		return nil
+	})
+
+	total := len(items)
+	emitVerify(opts.EventBus, progress.Event{
+		Kind:  progress.EventVerifyStart,
+		Total: total,
+	})
+
+	workCh := make(chan verifyItem, workers*2)
+	resultCh := make(chan verifyResult, workers*2)
+
+	// Launch worker goroutines.
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			runVerifyWorker(ctx, workerID, opts, workCh, resultCh)
+		}(i + 1) // WorkerIDs start at 1 (0 is reserved for sequential/coordinator)
+	}
+
+	// Close resultCh when all workers are done.
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Feed items to workers.
+	go func() {
+		defer close(workCh)
+		for _, item := range items {
+			select {
+			case <-ctx.Done():
+				return
+			case workCh <- item:
+			}
+		}
+	}()
+
+	// Coordinator: aggregate results and emit events.
+	var result Result
+	completed := 0
+	for res := range resultCh {
+		completed++
+		switch res.status {
+		case "OK":
+			_, _ = fmt.Fprintf(opts.Output, "  OK            %s\n", res.absPath)
+			result.Verified++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:      progress.EventVerifyOK,
+				RelPath:   res.relPath,
+				AbsPath:   res.absPath,
+				Checksum:  res.actual,
+				WorkerID:  res.workerID,
+				Completed: completed,
+				Total:     total,
+			})
+		case "MISMATCH":
+			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
+				res.absPath, res.expected, res.actual)
+			result.Mismatches++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:             progress.EventVerifyMismatch,
+				RelPath:          res.relPath,
+				AbsPath:          res.absPath,
+				ExpectedChecksum: res.expected,
+				ActualChecksum:   res.actual,
+				WorkerID:         res.workerID,
+				Completed:        completed,
+				Total:            total,
+			})
+		case "ERROR":
+			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", res.absPath, res.err)
+			result.Mismatches++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:             progress.EventVerifyMismatch,
+				RelPath:          res.relPath,
+				AbsPath:          res.absPath,
+				ExpectedChecksum: res.expected,
+				Reason:           res.err.Error(),
+				Err:              res.err,
+				WorkerID:         res.workerID,
+				Completed:        completed,
+				Total:            total,
+			})
+		case "UNRECOGNISED":
+			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", res.absPath)
+			result.Unrecognised++
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:      progress.EventVerifyUnrecognised,
+				RelPath:   res.relPath,
+				AbsPath:   res.absPath,
+				WorkerID:  res.workerID,
+				Completed: completed,
+				Total:     total,
+			})
+		}
+	}
+
+	_, _ = fmt.Fprintf(opts.Output, "\nDone. verified=%d mismatches=%d unrecognised=%d\n",
+		result.Verified, result.Mismatches, result.Unrecognised)
+
+	emitVerify(opts.EventBus, progress.Event{
+		Kind:  progress.EventVerifyDone,
+		Total: total,
+		Summary: &progress.RunSummary{
+			Verified:     result.Verified,
+			Mismatches:   result.Mismatches,
+			Unrecognised: result.Unrecognised,
+		},
+	})
+
+	return result, nil
+}
+
+// runVerifyWorker processes items from workCh and sends results to resultCh.
+// Each worker maintains its own hasher cache to avoid re-allocating hashers
+// for each file. Workers emit EventVerifyFileStart and EventByteProgress events
+// to the bus (if configured) during hash computation.
+func runVerifyWorker(ctx context.Context, workerID int, opts Options, workCh <-chan verifyItem, resultCh chan<- verifyResult) {
+	// Per-worker hasher cache to avoid re-allocating hashers for each file.
+	hasherCache := map[string]*hash.Hasher{
+		opts.Hasher.Algorithm(): opts.Hasher,
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case item, ok := <-workCh:
+			if !ok {
+				return
+			}
+
+			// Emit file-start event for the UI.
+			emitVerify(opts.EventBus, progress.Event{
+				Kind:     progress.EventVerifyFileStart,
+				RelPath:  item.relPath,
+				AbsPath:  item.path,
+				WorkerID: workerID,
+				FileSize: item.fileSize,
+			})
+
+			// Parse the expected checksum and algorithm from the filename.
+			expected, algo, ok := parseChecksum(item.name)
+			if !ok {
+				resultCh <- verifyResult{
+					relPath:  item.relPath,
+					absPath:  item.path,
+					workerID: workerID,
+					status:   "UNRECOGNISED",
+				}
+				continue
+			}
+
+			// Resolve the hasher for this file.
+			fileHasher := resolveHasher(opts.Hasher, algo, hasherCache)
+
+			// Detect the file type.
+			handler, err := opts.Registry.Detect(item.path)
+			if err != nil || handler == nil {
+				resultCh <- verifyResult{
+					relPath:  item.relPath,
+					absPath:  item.path,
+					workerID: workerID,
+					status:   "UNRECOGNISED",
+				}
+				continue
+			}
+
+			// Recompute the hash via the handler's HashableReader.
+			rc, err := handler.HashableReader(item.path)
+			if err != nil {
+				resultCh <- verifyResult{
+					relPath:  item.relPath,
+					absPath:  item.path,
+					workerID: workerID,
+					status:   "ERROR",
+					expected: expected,
+					err:      err,
+				}
+				continue
+			}
+			// Wrap with ProgressReader for byte-level progress (no-op when bus is nil).
+			hashReader := progress.NewProgressReader(rc, opts.EventBus, item.relPath, workerID, "HASH", item.fileSize)
+			actual, err := fileHasher.Sum(hashReader)
+			_ = rc.Close()
+			if err != nil {
+				resultCh <- verifyResult{
+					relPath:  item.relPath,
+					absPath:  item.path,
+					workerID: workerID,
+					status:   "ERROR",
+					expected: expected,
+					err:      err,
+				}
+				continue
+			}
+
+			if actual == expected {
+				resultCh <- verifyResult{
+					relPath:  item.relPath,
+					absPath:  item.path,
+					workerID: workerID,
+					status:   "OK",
+					expected: expected,
+					actual:   actual,
+				}
+			} else {
+				resultCh <- verifyResult{
+					relPath:  item.relPath,
+					absPath:  item.path,
+					workerID: workerID,
+					status:   "MISMATCH",
+					expected: expected,
+					actual:   actual,
+				}
+			}
+		}
+	}
+}
+
+// resolveHasher returns the appropriate hasher for the given algorithm name.
+// It uses the cache to avoid re-allocating hashers for each file.
+func resolveHasher(defaultHasher *hash.Hasher, algo string, cache map[string]*hash.Hasher) *hash.Hasher {
+	if algo == "" || algo == defaultHasher.Algorithm() {
+		return defaultHasher
+	}
+	if cached, exists := cache[algo]; exists {
+		return cached
+	}
+	newH, err := hash.NewHasher(algo)
+	if err != nil {
+		return defaultHasher
+	}
+	cache[algo] = newH
+	return newH
 }
 
 // parseChecksum extracts the checksum and algorithm from a Pixe filename.

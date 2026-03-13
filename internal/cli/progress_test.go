@@ -82,13 +82,66 @@ func TestProgressModel_DiscoverDone(t *testing.T) {
 	}
 }
 
-func TestProgressModel_CurrentFile(t *testing.T) {
+func TestProgressModel_WorkerTracking(t *testing.T) {
 	m, bus := newTestModel("sort")
 	defer bus.Close()
 
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileStart, RelPath: "IMG_001.jpg"})
-	if m.currentFile != "IMG_001.jpg" {
-		t.Errorf("currentFile = %q, want %q", m.currentFile, "IMG_001.jpg")
+	// EventFileStart should create a WorkerState entry.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileStart,
+		RelPath:  "IMG_001.jpg",
+		WorkerID: 1,
+		FileSize: 1024,
+	})
+	ws, ok := m.workers[1]
+	if !ok {
+		t.Fatal("workers[1] not found after EventFileStart")
+	}
+	if ws.RelPath != "IMG_001.jpg" {
+		t.Errorf("workers[1].RelPath = %q, want %q", ws.RelPath, "IMG_001.jpg")
+	}
+	if ws.Stage != "HASH" {
+		t.Errorf("workers[1].Stage = %q, want %q", ws.Stage, "HASH")
+	}
+	if ws.FileSize != 1024 {
+		t.Errorf("workers[1].FileSize = %d, want 1024", ws.FileSize)
+	}
+
+	// EventByteProgress should update BytesWritten.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:         pixeprogress.EventByteProgress,
+		RelPath:      "IMG_001.jpg",
+		WorkerID:     1,
+		Stage:        "HASH",
+		BytesWritten: 512,
+		BytesTotal:   1024,
+	})
+	if m.workers[1].BytesWritten != 512 {
+		t.Errorf("workers[1].BytesWritten = %d, want 512", m.workers[1].BytesWritten)
+	}
+
+	// EventFileHashed should advance stage to COPY and reset BytesWritten.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileHashed,
+		RelPath:  "IMG_001.jpg",
+		WorkerID: 1,
+	})
+	if m.workers[1].Stage != "COPY" {
+		t.Errorf("workers[1].Stage = %q, want %q", m.workers[1].Stage, "COPY")
+	}
+	if m.workers[1].BytesWritten != 0 {
+		t.Errorf("workers[1].BytesWritten = %d, want 0 after stage reset", m.workers[1].BytesWritten)
+	}
+
+	// EventFileComplete should remove the worker entry.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:      pixeprogress.EventFileComplete,
+		RelPath:   "IMG_001.jpg",
+		WorkerID:  1,
+		Completed: 1,
+	})
+	if _, ok := m.workers[1]; ok {
+		t.Error("workers[1] still present after EventFileComplete, want removed")
 	}
 }
 
@@ -177,5 +230,169 @@ func TestProgressModel_VerifyMode(t *testing.T) {
 	}
 	if !strings.Contains(view, "mismatches") {
 		t.Errorf("View() missing 'mismatches' in verify mode\ngot:\n%s", view)
+	}
+}
+
+// TestProgressModel_DiscoveringState verifies that discovering is true initially
+// and becomes false after EventDiscoverDone.
+func TestProgressModel_DiscoveringState(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	// Initially discovering should be true.
+	if !m.discovering {
+		t.Error("discovering = false initially, want true")
+	}
+
+	// After EventDiscoverDone, discovering should be false.
+	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventDiscoverDone, Total: 10})
+	if m.discovering {
+		t.Error("discovering = true after EventDiscoverDone, want false")
+	}
+}
+
+// TestProgressModel_MultipleWorkers verifies that multiple workers are tracked
+// independently.
+func TestProgressModel_MultipleWorkers(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	// Send EventFileStart for workers 1, 2, 3 simultaneously.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileStart,
+		RelPath:  "IMG_001.jpg",
+		WorkerID: 1,
+		FileSize: 1024,
+	})
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileStart,
+		RelPath:  "IMG_002.jpg",
+		WorkerID: 2,
+		FileSize: 2048,
+	})
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileStart,
+		RelPath:  "IMG_003.jpg",
+		WorkerID: 3,
+		FileSize: 4096,
+	})
+
+	// All three workers should be tracked.
+	if len(m.workers) != 3 {
+		t.Errorf("len(workers) = %d, want 3", len(m.workers))
+	}
+
+	// Each should have correct RelPath and FileSize.
+	if m.workers[1].RelPath != "IMG_001.jpg" || m.workers[1].FileSize != 1024 {
+		t.Errorf("worker 1: RelPath=%q FileSize=%d, want IMG_001.jpg 1024", m.workers[1].RelPath, m.workers[1].FileSize)
+	}
+	if m.workers[2].RelPath != "IMG_002.jpg" || m.workers[2].FileSize != 2048 {
+		t.Errorf("worker 2: RelPath=%q FileSize=%d, want IMG_002.jpg 2048", m.workers[2].RelPath, m.workers[2].FileSize)
+	}
+	if m.workers[3].RelPath != "IMG_003.jpg" || m.workers[3].FileSize != 4096 {
+		t.Errorf("worker 3: RelPath=%q FileSize=%d, want IMG_003.jpg 4096", m.workers[3].RelPath, m.workers[3].FileSize)
+	}
+}
+
+// TestProgressModel_StageTransitions verifies the full lifecycle of a single
+// worker through HASH → COPY → VERIFY → TAG → complete.
+func TestProgressModel_StageTransitions(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	workerID := 1
+
+	// EventFileStart: stage should be HASH.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileStart,
+		RelPath:  "photo.jpg",
+		WorkerID: workerID,
+		FileSize: 1000,
+	})
+	if m.workers[workerID].Stage != "HASH" {
+		t.Errorf("after EventFileStart: Stage=%q, want HASH", m.workers[workerID].Stage)
+	}
+
+	// EventFileHashed: stage should advance to COPY.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileHashed,
+		RelPath:  "photo.jpg",
+		WorkerID: workerID,
+	})
+	if m.workers[workerID].Stage != "COPY" {
+		t.Errorf("after EventFileHashed: Stage=%q, want COPY", m.workers[workerID].Stage)
+	}
+
+	// EventFileCopied: stage should advance to VERIFY.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileCopied,
+		RelPath:  "photo.jpg",
+		WorkerID: workerID,
+	})
+	if m.workers[workerID].Stage != "VERIFY" {
+		t.Errorf("after EventFileCopied: Stage=%q, want VERIFY", m.workers[workerID].Stage)
+	}
+
+	// EventFileVerified: stage should advance to TAG.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileVerified,
+		RelPath:  "photo.jpg",
+		WorkerID: workerID,
+	})
+	if m.workers[workerID].Stage != "TAG" {
+		t.Errorf("after EventFileVerified: Stage=%q, want TAG", m.workers[workerID].Stage)
+	}
+
+	// EventFileComplete: worker should be removed.
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:      pixeprogress.EventFileComplete,
+		RelPath:   "photo.jpg",
+		WorkerID:  workerID,
+		Completed: 1,
+	})
+	if _, ok := m.workers[workerID]; ok {
+		t.Error("after EventFileComplete: worker still present, want removed")
+	}
+}
+
+// TestProgressModel_ViewContainsWorkerLine verifies that after EventFileStart,
+// View() contains the stage label and filename.
+func TestProgressModel_ViewContainsWorkerLine(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind:     pixeprogress.EventFileStart,
+		RelPath:  "vacation_photo.jpg",
+		WorkerID: 1,
+		FileSize: 2048,
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "vacation_photo.jpg") {
+		t.Errorf("View() missing filename 'vacation_photo.jpg'\ngot:\n%s", view)
+	}
+	if !strings.Contains(view, "HASH") {
+		t.Errorf("View() missing stage label 'HASH'\ngot:\n%s", view)
+	}
+}
+
+// TestProgressModel_ViewDiscoverySpinner verifies that before EventDiscoverDone,
+// View() contains "Discovering" or similar discovery indicator.
+func TestProgressModel_ViewDiscoverySpinner(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	// Before EventDiscoverDone, discovering is true.
+	view := m.View()
+	if !strings.Contains(view, "Discovering") {
+		t.Errorf("View() missing 'Discovering' before EventDiscoverDone\ngot:\n%s", view)
+	}
+
+	// After EventDiscoverDone, "Discovering" should no longer appear.
+	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventDiscoverDone, Total: 10})
+	view = m.View()
+	if strings.Contains(view, "Discovering") {
+		t.Errorf("View() still contains 'Discovering' after EventDiscoverDone\ngot:\n%s", view)
 	}
 }

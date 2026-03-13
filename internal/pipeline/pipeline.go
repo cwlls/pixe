@@ -177,6 +177,7 @@ func Run(opts SortOptions) (SortResult, error) {
 	// ------------------------------------------------------------------
 	// 2. Walk dirA.
 	// ------------------------------------------------------------------
+	emit(opts.EventBus, progress.Event{Kind: progress.EventDiscoverStart})
 	walkOpts := discovery.WalkOptions{
 		Recursive:     cfg.Recursive,
 		Ignore:        ignore.New(cfg.Ignore),
@@ -380,14 +381,19 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 			}
 		}
 
+		var fileSize int64
+		if fi, statErr := os.Stat(df.Path); statErr == nil {
+			fileSize = fi.Size()
+		}
 		emit(opts.EventBus, progress.Event{
 			Kind:     progress.EventFileStart,
 			RelPath:  df.RelPath,
 			WorkerID: -1,
+			FileSize: fileSize,
 		})
 
 		fileStart := time.Now()
-		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen, fmtr, destLabel)
+		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen, fmtr, destLabel, fileSize)
 		if err != nil {
 			var dfs *dateFilterSkip
 			if errors.As(err, &dfs) {
@@ -493,6 +499,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 // isDuplicate is true when the file was routed to the duplicates directory.
 // memSeen is an in-memory dedup map used when db is nil; it maps checksum → relDest.
 // destLabel is the display prefix for destination paths (e.g. "...Photos"); see displayDest.
+// fileSize is the source file size in bytes (from os.Stat), used for byte-level progress events.
 func processFile(
 	df discovery.DiscoveredFile,
 	fileID int64,
@@ -502,10 +509,13 @@ func processFile(
 	memSeen map[string]string,
 	fmtr *Formatter,
 	destLabel string,
+	fileSize int64,
 ) (*domain.LedgerEntry, bool, error) {
 	cfg := opts.Config
 	db := opts.DB
 	now := func() time.Time { return time.Now().UTC() }
+	bus := opts.EventBus
+	const workerID = -1 // sequential mode uses coordinator ID
 
 	// --- Extract date ---
 	captureDate, err := df.Handler.ExtractDate(df.Path)
@@ -516,11 +526,11 @@ func processFile(
 		_ = db.UpdateFileStatus(fileID, "extracted",
 			archivedb.WithCaptureDate(captureDate))
 	}
-	emit(opts.EventBus, progress.Event{
+	emit(bus, progress.Event{
 		Kind:        progress.EventFileExtracted,
 		RelPath:     df.RelPath,
 		CaptureDate: captureDate,
-		WorkerID:    -1,
+		WorkerID:    workerID,
 	})
 
 	// --- Date filter gate ---
@@ -542,7 +552,9 @@ func processFile(
 	if err != nil {
 		return nil, false, fmt.Errorf("open hashable reader: %w", err)
 	}
-	checksum, err := opts.Hasher.Sum(rc)
+	// Wrap with ProgressReader for byte-level progress (no-op when bus is nil).
+	hashReader := progress.NewProgressReader(rc, bus, df.RelPath, workerID, "HASH", fileSize)
+	checksum, err := opts.Hasher.Sum(hashReader)
 	_ = rc.Close()
 	if err != nil {
 		return nil, false, fmt.Errorf("hash payload: %w", err)
@@ -552,11 +564,11 @@ func processFile(
 			archivedb.WithChecksum(checksum),
 			archivedb.WithAlgorithm(opts.Hasher.Algorithm()))
 	}
-	emit(opts.EventBus, progress.Event{
+	emit(bus, progress.Event{
 		Kind:     progress.EventFileHashed,
 		RelPath:  df.RelPath,
 		Checksum: checksum,
-		WorkerID: -1,
+		WorkerID: workerID,
 	})
 
 	// --- Dedup check ---
@@ -632,25 +644,36 @@ func processFile(
 	}
 
 	// --- Copy (atomic: write to temp file) ---
-	tmpPath, err := copypkg.Execute(df.Path, absDest)
+	// Wrap the destination writer with ProgressWriter for byte-level progress.
+	copyWriter := progress.NewProgressWriter(nil, bus, df.RelPath, workerID, "COPY", fileSize)
+	tmpPath, err := copypkg.ExecuteWithProgress(df.Path, absDest, func(w io.Writer) io.Writer {
+		copyWriter = progress.NewProgressWriter(w, bus, df.RelPath, workerID, "COPY", fileSize)
+		return copyWriter
+	})
 	if err != nil {
 		return nil, false, fmt.Errorf("copy: %w", err)
 	}
+	// Emit a final 100% byte-progress event so the UI sees completion before
+	// the stage-transition EventFileCopied arrives.
+	copyWriter.EmitFinal()
 	if db != nil {
 		// Record the intended final destination; the temp path is an
 		// implementation detail not tracked in the DB.
 		_ = db.UpdateFileStatus(fileID, "copied",
 			archivedb.WithDestination(absDest, relDest))
 	}
-	emit(opts.EventBus, progress.Event{
+	emit(bus, progress.Event{
 		Kind:        progress.EventFileCopied,
 		RelPath:     df.RelPath,
 		Destination: relDest,
-		WorkerID:    -1,
+		WorkerID:    workerID,
 	})
 
 	// --- Verify (hash the temp file) ---
-	vr := copypkg.Verify(tmpPath, checksum, df.Handler, opts.Hasher)
+	// Wrap the hashable reader with ProgressReader for byte-level progress.
+	vr := copypkg.VerifyWithProgress(tmpPath, checksum, df.Handler, opts.Hasher, func(r io.Reader) io.Reader {
+		return progress.NewProgressReader(r, bus, df.RelPath, workerID, "VERIFY", fileSize)
+	})
 	if !vr.Success {
 		copypkg.CleanupTempFile(tmpPath)
 		if db != nil {
@@ -675,11 +698,11 @@ func processFile(
 	if db != nil {
 		_ = db.UpdateFileStatus(fileID, "verified")
 	}
-	emit(opts.EventBus, progress.Event{
+	emit(bus, progress.Event{
 		Kind:        progress.EventFileVerified,
 		RelPath:     df.RelPath,
 		Destination: relDest,
-		WorkerID:    -1,
+		WorkerID:    workerID,
 	})
 
 	// --- Carry sidecars (after verify, before tag) ---
@@ -693,25 +716,25 @@ func processFile(
 				if cfg.Verbosity >= 0 {
 					_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("sidecar carry failed for %s: %v", sc.RelPath, err)))
 				}
-				emit(opts.EventBus, progress.Event{
+				emit(bus, progress.Event{
 					Kind:           progress.EventSidecarFailed,
 					RelPath:        df.RelPath,
 					SidecarRelPath: sc.RelPath,
 					SidecarExt:     sc.Ext,
 					Reason:         err.Error(),
 					Err:            err,
-					WorkerID:       -1,
+					WorkerID:       workerID,
 				})
 				continue
 			}
 			carriedSidecarRels = append(carriedSidecarRels, sidecarRel)
-			emit(opts.EventBus, progress.Event{
+			emit(bus, progress.Event{
 				Kind:           progress.EventSidecarCarried,
 				RelPath:        df.RelPath,
 				SidecarRelPath: sc.RelPath,
 				SidecarExt:     sc.Ext,
 				Destination:    sidecarRel,
-				WorkerID:       -1,
+				WorkerID:       workerID,
 			})
 			if sc.Ext == ".xmp" {
 				carriedXMPAbs = sidecarDest
@@ -736,10 +759,10 @@ func processFile(
 			if db != nil {
 				_ = db.UpdateFileStatus(fileID, "tagged")
 			}
-			emit(opts.EventBus, progress.Event{
+			emit(bus, progress.Event{
 				Kind:     progress.EventFileTagged,
 				RelPath:  df.RelPath,
-				WorkerID: -1,
+				WorkerID: workerID,
 			})
 		}
 	}

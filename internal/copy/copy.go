@@ -87,6 +87,13 @@ func TempPath(dest string) string {
 // temp file permissions to 0644, and preserves the source file's modification
 // time on the temp file via os.Chtimes.
 func Execute(src, dest string) (tmpPath string, err error) {
+	return ExecuteWithProgress(src, dest, nil)
+}
+
+// ExecuteWithProgress is like Execute but wraps the destination writer with
+// wrapWriter before streaming, enabling byte-level progress reporting. When
+// wrapWriter is nil, behaviour is identical to Execute.
+func ExecuteWithProgress(src, dest string, wrapWriter func(io.Writer) io.Writer) (tmpPath string, err error) {
 	// Stat the source so we can preserve its mtime.
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -124,9 +131,15 @@ func Execute(src, dest string) (tmpPath string, err error) {
 		return "", fmt.Errorf("copy: chmod temp file %q: %w", tmpPath, err)
 	}
 
+	// Optionally wrap the destination writer for progress reporting.
+	var dst io.Writer = out
+	if wrapWriter != nil {
+		dst = wrapWriter(out)
+	}
+
 	// Stream with a fixed-size buffer.
 	buf := make([]byte, copyBufSize)
-	if _, err := io.CopyBuffer(out, in, buf); err != nil {
+	if _, err := io.CopyBuffer(dst, in, buf); err != nil {
 		_ = out.Close()
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("copy: stream %q → %q: %w", src, tmpPath, err)
@@ -161,6 +174,13 @@ func Execute(src, dest string) (tmpPath string, err error) {
 // On mismatch the caller should call CleanupTempFile to remove the temp file.
 // Verify itself does not delete anything.
 func Verify(tmpPath, expectedChecksum string, handler domain.FileTypeHandler, hasher *hash.Hasher) CopyResult {
+	return VerifyWithProgress(tmpPath, expectedChecksum, handler, hasher, nil)
+}
+
+// VerifyWithProgress is like Verify but wraps the hashable reader with
+// wrapReader before hashing, enabling byte-level progress reporting. When
+// wrapReader is nil, behaviour is identical to Verify.
+func VerifyWithProgress(tmpPath, expectedChecksum string, handler domain.FileTypeHandler, hasher *hash.Hasher, wrapReader func(io.Reader) io.Reader) CopyResult {
 	rc, err := handler.HashableReader(tmpPath)
 	if err != nil {
 		return CopyResult{
@@ -169,7 +189,12 @@ func Verify(tmpPath, expectedChecksum string, handler domain.FileTypeHandler, ha
 	}
 	defer func() { _ = rc.Close() }()
 
-	actual, err := hasher.Sum(rc)
+	var r io.Reader = rc
+	if wrapReader != nil {
+		r = wrapReader(rc)
+	}
+
+	actual, err := hasher.Sum(r)
 	if err != nil {
 		return CopyResult{
 			Error: fmt.Errorf("copy: hash temp file %q: %w", tmpPath, err),
