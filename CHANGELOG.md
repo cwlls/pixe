@@ -8,8 +8,6 @@
 
 ### Added
 
-- **Graceful signal handling for SIGINT/SIGTERM** — The sort and resume pipelines now respond gracefully to interrupt signals. Workers drain cleanly, finishing their current file before exiting. A second signal restores default behavior for hard exit. Implemented via `signal.NotifyContext` wired to pipeline context.
-
 - **Changelog sync via docgen** — `docs/changelog.md` is now a generated file. `extractChangelog()` in `internal/docgen/extract.go` reads the root `CHANGELOG.md`, strips the title and preamble, and injects the full version history into `docs/changelog.md` via the existing marker-based injection system. Running `make docs` keeps both files in sync; `make docs-check` (CI gate) detects drift. Three new tests added to `internal/docgen/docgen_test.go`.
 
 ### Bug Fixes
@@ -17,14 +15,6 @@
 - **Fixed docgen blank-line injection for GitHub Pages kramdown** — `injectContent()` in `internal/docgen/inject.go` was not emitting blank lines between begin/end markers and injected content. GitHub Pages (kramdown) requires a blank line before Markdown tables for correct rendering. Updated `injectContent()` to append blank lines before and after trimmed content, and updated test assertions in `docgen_test.go` to match. All 27 docgen tests pass; documentation regenerated via `go run ./internal/docgen`.
 
 - **Fixed GHA integration test flakiness** — `TestVerbosity_Verbose` was checking for `"ms)"` in timing output, but on fast systems (GHA Linux runners), file processing takes <1ms, producing `"(0s)"` instead of `"(Xms)"`. Changed assertion to check for parenthesized timing info without requiring a specific duration unit, making the test system-speed agnostic.
-
-- **Fixed pipeline terminal UpdateFileStatus error handling** — Intermediate database status updates in worker goroutines now properly check for errors and log them without interrupting the pipeline.
-
-- **Fixed manifest SafeLedgerWriter thread safety** — Serialized `WriteEntry` calls to prevent concurrent writes to the ledger file.
-
-- **Fixed copy sidecar sync to disk** — Added `Sync()` call before `Close()` in `CopySidecar` to ensure data is flushed to stable storage.
-
-- **Fixed copy temp file cleanup on all error paths** — Orphaned temp files are now properly cleaned up when copy operations fail.
 
 ### Chore
 
