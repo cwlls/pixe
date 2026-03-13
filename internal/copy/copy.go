@@ -128,6 +128,7 @@ func Execute(src, dest string) (tmpPath string, err error) {
 	buf := make([]byte, copyBufSize)
 	if _, err := io.CopyBuffer(out, in, buf); err != nil {
 		_ = out.Close()
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("copy: stream %q → %q: %w", src, tmpPath, err)
 	}
 
@@ -138,10 +139,12 @@ func Execute(src, dest string) (tmpPath string, err error) {
 	// important on network filesystems where Close does not imply fsync.
 	if err := out.Sync(); err != nil {
 		_ = out.Close()
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("copy: sync temp file %q: %w", tmpPath, err)
 	}
 
 	if err := out.Close(); err != nil {
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("copy: close temp file %q: %w", tmpPath, err)
 	}
 
