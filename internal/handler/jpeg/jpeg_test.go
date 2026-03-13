@@ -152,9 +152,9 @@ func TestHandler_HashableReader_returnsData(t *testing.T) {
 	if len(data) == 0 {
 		t.Error("HashableReader returned empty payload")
 	}
-	// Payload must start with SOS marker.
-	if len(data) < 2 || data[0] != 0xFF || data[1] != 0xDA {
-		t.Errorf("payload should start with SOS (0xFF 0xDA), got 0x%02X 0x%02X", data[0], data[1])
+	// Full-file hash: payload must start with JPEG SOI marker (0xFF 0xD8).
+	if len(data) < 2 || data[0] != 0xFF || data[1] != 0xD8 {
+		t.Errorf("payload should start with SOI (0xFF 0xD8), got 0x%02X 0x%02X", data[0], data[1])
 	}
 }
 
@@ -201,16 +201,44 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 	}
 }
 
+// TestHandler_HashableReader_fullFile verifies that HashableReader returns the
+// complete file contents (full-file hash, not a data-region subset).
+func TestHandler_HashableReader_fullFile(t *testing.T) {
+	t.Parallel()
+	h := New()
+	rc, err := h.HashableReader(fixtureWithExif)
+	if err != nil {
+		t.Fatalf("HashableReader: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	want, err := os.ReadFile(fixtureWithExif)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	if len(got) != len(want) {
+		t.Errorf("HashableReader returned %d bytes, want %d (full file)", len(got), len(want))
+	}
+}
+
 func TestHandler_MetadataSupport(t *testing.T) {
 	t.Parallel()
 	h := New()
 	got := h.MetadataSupport()
-	if got != domain.MetadataEmbed {
-		t.Errorf("MetadataSupport() = %v, want MetadataEmbed", got)
+	if got != domain.MetadataSidecar {
+		t.Errorf("MetadataSupport() = %v, want MetadataSidecar", got)
 	}
 }
 
-func TestHandler_WriteMetadataTags_noop_whenEmpty(t *testing.T) {
+// TestHandler_WriteMetadataTags_noop verifies that WriteMetadataTags is a
+// no-op retained for interface compliance — it never modifies any file.
+func TestHandler_WriteMetadataTags_noop(t *testing.T) {
 	t.Parallel()
 	h := New()
 	dir := t.TempDir()
@@ -218,13 +246,17 @@ func TestHandler_WriteMetadataTags_noop_whenEmpty(t *testing.T) {
 	copyFile(t, fixtureWithExif, dst)
 
 	statBefore, _ := os.Stat(dst)
-	if err := h.WriteMetadataTags(dst, domain.MetadataTags{}); err != nil {
-		t.Fatalf("WriteMetadataTags with empty tags: %v", err)
+	tags := domain.MetadataTags{Copyright: "Copyright 2026 Test", CameraOwner: "Test Owner"}
+	if err := h.WriteMetadataTags(dst, tags); err != nil {
+		t.Fatalf("WriteMetadataTags: %v", err)
 	}
 	statAfter, _ := os.Stat(dst)
-	// File should be untouched.
+	// File must be completely untouched — no modification, even with non-empty tags.
 	if statBefore.ModTime() != statAfter.ModTime() {
-		t.Error("WriteMetadataTags modified the file when tags were empty")
+		t.Error("WriteMetadataTags modified the file — it must be a no-op")
+	}
+	if statBefore.Size() != statAfter.Size() {
+		t.Error("WriteMetadataTags changed file size — it must be a no-op")
 	}
 }
 
@@ -348,9 +380,10 @@ func TestHandler_HashableReader_nonexistentFile(t *testing.T) {
 	}
 }
 
+// TestHandler_HashableReader_truncatedJPEG verifies that a truncated JPEG
+// (SOI only) is still hashable — full-file hashing has no SOS requirement.
 func TestHandler_HashableReader_truncatedJPEG(t *testing.T) {
 	t.Parallel()
-	// A file that starts with SOI but has no SOS — findSOSOffset should error.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "truncated.jpg")
 	// SOI only — no segments, no SOS
@@ -359,69 +392,19 @@ func TestHandler_HashableReader_truncatedJPEG(t *testing.T) {
 	}
 
 	h := New()
-	_, err := h.HashableReader(path)
-	if err == nil {
-		t.Fatal("HashableReader should return error for JPEG with no SOS marker")
-	}
-}
-
-func TestHandler_WriteMetadataTags_withCopyright(t *testing.T) {
-	t.Parallel()
-	h := New()
-	dir := t.TempDir()
-	dst := filepath.Join(dir, "photo.jpg")
-	copyFile(t, fixtureWithExif, dst)
-
-	tags := domain.MetadataTags{Copyright: "Copyright 2026 Test"}
-	if err := h.WriteMetadataTags(dst, tags); err != nil {
-		t.Fatalf("WriteMetadataTags with copyright: %v", err)
-	}
-	// File must still be a valid JPEG after tagging.
-	ok, err := h.Detect(dst)
+	rc, err := h.HashableReader(path)
 	if err != nil {
-		t.Fatalf("Detect after tagging: %v", err)
+		t.Fatalf("HashableReader should succeed for any openable file, got: %v", err)
 	}
-	if !ok {
-		t.Error("file should still be detected as JPEG after tagging")
-	}
-}
+	defer func() { _ = rc.Close() }()
 
-func TestHandler_WriteMetadataTags_withBothTags(t *testing.T) {
-	t.Parallel()
-	h := New()
-	dir := t.TempDir()
-	dst := filepath.Join(dir, "photo.jpg")
-	copyFile(t, fixtureWithExif, dst)
-
-	tags := domain.MetadataTags{
-		Copyright:   "Copyright 2026 Test",
-		CameraOwner: "Test Owner",
-	}
-	if err := h.WriteMetadataTags(dst, tags); err != nil {
-		t.Fatalf("WriteMetadataTags with both tags: %v", err)
-	}
-	// File must still be detectable as JPEG.
-	ok, err := h.Detect(dst)
+	data, err := io.ReadAll(rc)
 	if err != nil {
-		t.Fatalf("Detect after tagging: %v", err)
+		t.Fatalf("ReadAll: %v", err)
 	}
-	if !ok {
-		t.Error("file should still be detected as JPEG after tagging")
-	}
-}
-
-func TestHandler_WriteMetadataTags_noExifFile_graceful(t *testing.T) {
-	t.Parallel()
-	// A JPEG with no EXIF block — WriteMetadataTags should return nil (graceful skip).
-	h := New()
-	dir := t.TempDir()
-	dst := filepath.Join(dir, "no_exif.jpg")
-	copyFile(t, fixtureNoExif, dst)
-
-	tags := domain.MetadataTags{Copyright: "Copyright 2026 Test"}
-	err := h.WriteMetadataTags(dst, tags)
-	if err != nil {
-		t.Fatalf("WriteMetadataTags on no-EXIF file: %v (should be graceful)", err)
+	// Should return the 2 SOI bytes.
+	if len(data) != 2 {
+		t.Errorf("expected 2 bytes for SOI-only file, got %d", len(data))
 	}
 }
 

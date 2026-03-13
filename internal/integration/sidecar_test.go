@@ -23,8 +23,6 @@ import (
 	"testing"
 	"time"
 
-	rwexif "github.com/rwcarlsen/goexif/exif"
-
 	"github.com/cwlls/pixe-go/internal/config"
 	"github.com/cwlls/pixe-go/internal/discovery"
 	"github.com/cwlls/pixe-go/internal/domain"
@@ -67,9 +65,10 @@ func buildOptsWithTags(t *testing.T, dirA, dirB string, handlers ...domain.FileT
 	}
 }
 
-// TestSidecar_RAW_getsSidecar_JPEG_getsEmbed verifies the end-to-end tagging
-// routing: RAW files receive an XMP sidecar, JPEG files get EXIF embedded.
-func TestSidecar_RAW_getsSidecar_JPEG_getsEmbed(t *testing.T) {
+// TestSidecar_RAW_getsSidecar_JPEG_getsSidecar verifies the end-to-end tagging
+// routing: both RAW and JPEG files receive an XMP sidecar (no handler embeds
+// metadata directly into the destination file).
+func TestSidecar_RAW_getsSidecar_JPEG_getsSidecar(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -115,34 +114,28 @@ func TestSidecar_RAW_getsSidecar_JPEG_getsEmbed(t *testing.T) {
 		t.Fatal("no ARW destination file found in dirB")
 	}
 
-	// --- JPEG: EXIF tags must be embedded, no XMP sidecar ---
-	t.Run("JPEG_has_embedded_EXIF", func(t *testing.T) {
-		f, err := os.Open(jpegDest)
+	// --- JPEG: metadata expressed via XMP sidecar (no EXIF embedding) ---
+	t.Run("JPEG_has_XMP_sidecar", func(t *testing.T) {
+		sidecarPath := jpegDest + ".xmp"
+		data, err := os.ReadFile(sidecarPath)
 		if err != nil {
-			t.Fatalf("open JPEG dest: %v", err)
+			t.Fatalf("JPEG XMP sidecar not found at %q: %v", sidecarPath, err)
 		}
-		defer func() { _ = f.Close() }()
+		content := string(data)
 
-		x, err := rwexif.Decode(f)
-		if err != nil {
-			t.Fatalf("decode EXIF from JPEG dest: %v", err)
+		if !strings.Contains(content, "Wells Family") {
+			t.Errorf("JPEG sidecar missing 'Wells Family'; content:\n%s", content)
 		}
-
-		// Copyright tag (IFD0 tag 0x8298).
-		if tag, err := x.Get(rwexif.Copyright); err == nil {
-			s, _ := tag.StringVal()
-			if !strings.Contains(s, "Wells Family") {
-				t.Errorf("JPEG Copyright = %q, want to contain 'Wells Family'", s)
-			}
-		} else {
-			t.Errorf("JPEG missing Copyright EXIF tag: %v", err)
+		if !strings.Contains(content, "dc:rights") {
+			t.Error("JPEG sidecar missing dc:rights element")
 		}
 	})
 
-	t.Run("JPEG_has_no_XMP_sidecar", func(t *testing.T) {
+	t.Run("JPEG_sidecar_follows_Adobe_naming", func(t *testing.T) {
+		// Adobe convention: <filename>.<ext>.xmp
 		sidecarPath := jpegDest + ".xmp"
-		if _, err := os.Stat(sidecarPath); !os.IsNotExist(err) {
-			t.Errorf("JPEG destination should NOT have an XMP sidecar, but %q exists", sidecarPath)
+		if !strings.HasSuffix(sidecarPath, ".jpg.xmp") {
+			t.Errorf("sidecar path %q should end with .jpg.xmp (Adobe convention)", sidecarPath)
 		}
 	})
 

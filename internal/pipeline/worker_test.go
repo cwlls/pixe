@@ -137,11 +137,12 @@ func TestRunConcurrent_skipDuplicates(t *testing.T) {
 	dirB := t.TempDir()
 
 	// Copy 4 files: 1 unique + 3 duplicates.
-	// All test fixtures have the same image payload, so we use them all as duplicates.
+	// photo2, photo3, photo4 are byte-identical copies of photo1 — full-file
+	// hashing means only truly identical files are detected as duplicates.
 	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo1.jpg")
-	copyFixtureN(t, dirA, "with_exif_date2.jpg", "photo2.jpg") // duplicate of photo1 (same image payload)
-	copyFixtureN(t, dirA, "no_exif.jpg", "photo3.jpg")         // duplicate of photo1 (same image payload)
-	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo4.jpg")  // duplicate of photo1
+	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo2.jpg") // byte-identical copy of photo1
+	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo3.jpg") // byte-identical copy of photo1
+	copyFixtureN(t, dirA, "with_exif_date.jpg", "photo4.jpg") // byte-identical copy of photo1
 
 	var out bytes.Buffer
 	cfg := &config.AppConfig{

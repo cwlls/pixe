@@ -16,10 +16,7 @@
 //
 // Package selection:
 //   - Atom parsing: github.com/abema/go-mp4 — pure Go, atom-level access to
-//     mvhd (creation date), stss (sync samples), stco/co64 (chunk offsets),
-//     stsz (sample sizes).
-//   - Metadata write: udta/©cpy and udta/©own atoms for Copyright and
-//     CameraOwner. Written via go-mp4's box builder.
+//     mvhd (creation date).
 //
 // Date extraction:
 //
@@ -28,14 +25,8 @@
 //
 // Hashable region:
 //
-//	The hashable region is the concatenated raw bytes of all video keyframes
-//	(sync samples). Keyframe locations are derived from:
-//	  stss → sync sample indices
-//	  stco/co64 → chunk byte offsets in the file
-//	  stsc → samples-per-chunk mapping
-//	  stsz → individual sample sizes
-//	This excludes audio, metadata atoms, and non-keyframe video frames, so
-//	the checksum is stable across metadata edits.
+//	The complete file contents. Destination files are byte-identical copies
+//	of their source; metadata is expressed via XMP sidecar only.
 //
 // Magic bytes:
 //
@@ -148,43 +139,15 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-// HashableReader returns an io.ReadCloser that yields the concatenated raw
-// bytes of all video keyframes (sync samples) in presentation order.
-//
-// The implementation uses io.SectionReader + io.MultiReader to stream
-// keyframe data directly from the file without loading it into memory.
-// This bounds peak memory usage to O(1) regardless of video size or
-// keyframe count, which is important when many workers run concurrently.
-//
-// If keyframe extraction fails (e.g. the file has no video track or no stss
-// box), the full file is returned as a fallback so the file is always hashable.
+// HashableReader returns an io.ReadCloser over the complete file contents.
+// Destination files are byte-identical copies of their source; the full-file
+// hash ensures re-verification is always a simple open-and-hash operation.
 func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("mp4: open %q: %w", filePath, err)
 	}
-
-	r, err := extractKeyframePayload(f)
-	if err != nil {
-		// Fallback: hash the full file. Seek back to start.
-		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("mp4: seek %q: %w", filePath, seekErr)
-		}
-		return f, nil
-	}
-
-	return &mp4ReadCloser{Reader: r, file: f}, nil
-}
-
-// mp4ReadCloser wraps an io.Reader with the file it reads from.
-type mp4ReadCloser struct {
-	io.Reader
-	file *os.File
-}
-
-func (rc *mp4ReadCloser) Close() error {
-	return rc.file.Close()
+	return f, nil
 }
 
 // MetadataSupport declares that MP4/MOV uses XMP sidecar files.
@@ -198,183 +161,4 @@ func (h *Handler) MetadataSupport() domain.MetadataCapability {
 // generation instead of calling this method.
 func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 	return nil
-}
-
-// extractKeyframePayload parses the stss, stco/co64, stsc, and stsz boxes to
-// locate video keyframes and returns a streaming io.Reader over their byte
-// ranges. It uses io.SectionReader + io.MultiReader so no keyframe data is
-// loaded into memory — each SectionReader reads directly from f on demand.
-//
-// The caller must keep f open for the lifetime of the returned reader.
-func extractKeyframePayload(f *os.File) (io.Reader, error) {
-	// Extract stss (sync sample table) — lists keyframe sample numbers.
-	stssBoxes, err := mp4lib.ExtractBoxWithPayload(f, nil, mp4lib.BoxPath{
-		mp4lib.BoxTypeMoov(),
-		mp4lib.BoxTypeTrak(),
-		mp4lib.BoxTypeMdia(),
-		mp4lib.BoxTypeMinf(),
-		mp4lib.BoxTypeStbl(),
-		mp4lib.BoxTypeStss(),
-	})
-	if err != nil || len(stssBoxes) == 0 {
-		return nil, fmt.Errorf("no stss box")
-	}
-	stss, ok := stssBoxes[0].Payload.(*mp4lib.Stss)
-	if !ok || len(stss.SampleNumber) == 0 {
-		return nil, fmt.Errorf("empty stss")
-	}
-
-	// Extract stsz (sample sizes).
-	stszBoxes, err := mp4lib.ExtractBoxWithPayload(f, nil, mp4lib.BoxPath{
-		mp4lib.BoxTypeMoov(),
-		mp4lib.BoxTypeTrak(),
-		mp4lib.BoxTypeMdia(),
-		mp4lib.BoxTypeMinf(),
-		mp4lib.BoxTypeStbl(),
-		mp4lib.BoxTypeStsz(),
-	})
-	if err != nil || len(stszBoxes) == 0 {
-		return nil, fmt.Errorf("no stsz box")
-	}
-	stsz, ok := stszBoxes[0].Payload.(*mp4lib.Stsz)
-	if !ok {
-		return nil, fmt.Errorf("invalid stsz")
-	}
-
-	// Extract stco (chunk offsets) — try co64 first for large files.
-	chunkOffsets, err := extractChunkOffsets(f)
-	if err != nil || len(chunkOffsets) == 0 {
-		return nil, fmt.Errorf("no chunk offsets")
-	}
-
-	// Extract stsc (sample-to-chunk mapping).
-	stscBoxes, err := mp4lib.ExtractBoxWithPayload(f, nil, mp4lib.BoxPath{
-		mp4lib.BoxTypeMoov(),
-		mp4lib.BoxTypeTrak(),
-		mp4lib.BoxTypeMdia(),
-		mp4lib.BoxTypeMinf(),
-		mp4lib.BoxTypeStbl(),
-		mp4lib.BoxTypeStsc(),
-	})
-	if err != nil || len(stscBoxes) == 0 {
-		return nil, fmt.Errorf("no stsc box")
-	}
-	stsc, ok := stscBoxes[0].Payload.(*mp4lib.Stsc)
-	if !ok {
-		return nil, fmt.Errorf("invalid stsc")
-	}
-
-	// Build sample → file offset map.
-	sampleOffsets := buildSampleOffsets(stsc, chunkOffsets, stsz)
-
-	// Build a slice of SectionReaders — one per keyframe — and combine with
-	// MultiReader. No keyframe data is loaded into memory; each SectionReader
-	// reads directly from f when the caller reads from the returned io.Reader.
-	var readers []io.Reader
-	for _, sampleNum := range stss.SampleNumber {
-		idx := int(sampleNum) - 1 // 1-based → 0-based
-		if idx < 0 || idx >= len(sampleOffsets) {
-			continue
-		}
-		so := sampleOffsets[idx]
-		if so.size == 0 {
-			continue
-		}
-		readers = append(readers, io.NewSectionReader(f, int64(so.offset), int64(so.size)))
-	}
-	if len(readers) == 0 {
-		return nil, fmt.Errorf("no keyframes found")
-	}
-	return io.MultiReader(readers...), nil
-}
-
-// sampleLocation identifies a byte range within the mdat box for a single sample.
-type sampleLocation struct {
-	offset uint64
-	size   uint32
-}
-
-// buildSampleOffsets maps each sample index to its file offset and size.
-func buildSampleOffsets(stsc *mp4lib.Stsc, chunkOffsets []uint64, stsz *mp4lib.Stsz) []sampleLocation {
-	if len(stsc.Entries) == 0 || len(chunkOffsets) == 0 {
-		return nil
-	}
-
-	totalSamples := len(stsz.EntrySize)
-	if stsz.SampleSize != 0 {
-		// Fixed sample size — compute total from stsz.SampleCount.
-		totalSamples = int(stsz.SampleCount)
-	}
-
-	locs := make([]sampleLocation, 0, totalSamples)
-	sampleIdx := 0
-
-	for chunkIdx := 0; chunkIdx < len(chunkOffsets); chunkIdx++ {
-		samplesInChunk := samplesPerChunk(stsc, chunkIdx+1) // 1-based chunk number
-		chunkOffset := chunkOffsets[chunkIdx]
-
-		offset := chunkOffset
-		for s := 0; s < int(samplesInChunk); s++ {
-			var size uint32
-			if stsz.SampleSize != 0 {
-				size = stsz.SampleSize
-			} else if sampleIdx < len(stsz.EntrySize) {
-				size = stsz.EntrySize[sampleIdx]
-			}
-			locs = append(locs, sampleLocation{offset: offset, size: size})
-			offset += uint64(size)
-			sampleIdx++
-		}
-	}
-	return locs
-}
-
-// samplesPerChunk returns the number of samples in the given 1-based chunk
-// number by walking the stsc entries.
-func samplesPerChunk(stsc *mp4lib.Stsc, chunkNum int) uint32 {
-	var result uint32 = 1
-	for _, e := range stsc.Entries {
-		if int(e.FirstChunk) <= chunkNum {
-			result = e.SamplesPerChunk
-		} else {
-			break
-		}
-	}
-	return result
-}
-
-// extractChunkOffsets returns chunk offsets from co64 (preferred) or stco.
-func extractChunkOffsets(f *os.File) ([]uint64, error) {
-	basePath := mp4lib.BoxPath{
-		mp4lib.BoxTypeMoov(),
-		mp4lib.BoxTypeTrak(),
-		mp4lib.BoxTypeMdia(),
-		mp4lib.BoxTypeMinf(),
-		mp4lib.BoxTypeStbl(),
-	}
-
-	// Try co64 first (large file support).
-	co64Boxes, err := mp4lib.ExtractBoxWithPayload(f, nil, append(basePath, mp4lib.BoxTypeCo64()))
-	if err == nil && len(co64Boxes) > 0 {
-		if co64, ok := co64Boxes[0].Payload.(*mp4lib.Co64); ok {
-			offsets := make([]uint64, len(co64.ChunkOffset))
-			copy(offsets, co64.ChunkOffset)
-			return offsets, nil
-		}
-	}
-
-	// Fall back to stco.
-	stcoBoxes, err := mp4lib.ExtractBoxWithPayload(f, nil, append(basePath, mp4lib.BoxTypeStco()))
-	if err != nil || len(stcoBoxes) == 0 {
-		return nil, fmt.Errorf("no stco/co64 box")
-	}
-	stco, ok := stcoBoxes[0].Payload.(*mp4lib.Stco)
-	if !ok {
-		return nil, fmt.Errorf("invalid stco")
-	}
-	offsets := make([]uint64, len(stco.ChunkOffset))
-	for i, o := range stco.ChunkOffset {
-		offsets[i] = uint64(o)
-	}
-	return offsets, nil
 }

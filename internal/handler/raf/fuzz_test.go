@@ -95,10 +95,10 @@ func FuzzHashableReader(f *testing.F) {
 	f.Add(validRAFHeader())
 	f.Add(append(validRAFHeader(), minimalJPEG...))
 	f.Add([]byte{})
-	// Adversarial: max offsets
+	// Adversarial: max offsets in the header offset directory.
 	adversarial := make([]byte, headerMinSize)
 	copy(adversarial[0:], rafMagic)
-	for i := cfaOffsetPos; i < headerMinSize; i++ {
+	for i := jpegOffsetPos; i < headerMinSize; i++ {
 		adversarial[i] = 0xFF
 	}
 	f.Add(adversarial)

@@ -17,7 +17,7 @@
 // RAF uses a custom binary container (not TIFF, not ISOBMFF) with a fixed
 // header, an offset directory, and three data regions: embedded JPEG preview,
 // metadata container, and CFA (raw sensor data). Date extraction reads EXIF
-// from the embedded JPEG. Hashing covers the CFA region only. Metadata is
+// from the embedded JPEG. Hashing covers the complete file. Metadata is
 // written via XMP sidecar.
 //
 // Container layout (Big Endian):
@@ -76,8 +76,6 @@ const (
 	rafMagic      = "FUJIFILMCCD-RAW " // 16 bytes at offset 0x00
 	jpegOffsetPos = 0x54               // JPEG preview offset (uint32, big-endian)
 	jpegLengthPos = 0x58               // JPEG preview length (uint32, big-endian)
-	cfaOffsetPos  = 0x64               // CFA data offset (uint32, big-endian)
-	cfaLengthPos  = 0x68               // CFA data length (uint32, big-endian)
 	headerMinSize = 0x6C               // minimum bytes to read the full offset directory (108)
 )
 
@@ -170,48 +168,15 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 	return anselsAdams, nil
 }
 
-// HashableReader returns an io.ReadCloser scoped to the CFA (raw sensor data)
-// region of the RAF file. The CFA offset and length are read from the RAF
-// header's offset directory.
-//
-// This excludes the file header, embedded JPEG preview, and metadata container,
-// ensuring that metadata edits (tagging, XMP sidecars) do not invalidate the
-// content hash.
-//
-// Falls back to the full file if the CFA region cannot be determined.
+// HashableReader returns an io.ReadCloser over the complete file contents.
+// Destination files are byte-identical copies of their source; the full-file
+// hash ensures re-verification is always a simple open-and-hash operation.
 func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("raf: open %q: %w", filePath, err)
 	}
-
-	cfaOffset, cfaLength, err := readCFAOffsets(f)
-	if err != nil || cfaOffset == 0 || cfaLength == 0 {
-		// Fallback: hash the full file.
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("raf: seek %q: %w", filePath, err)
-		}
-		return f, nil
-	}
-
-	// Validate that the CFA region is within the file.
-	fileSize, err := f.Seek(0, io.SeekEnd)
-	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("raf: seek end %q: %w", filePath, err)
-	}
-	if int64(cfaOffset) >= fileSize || int64(cfaOffset)+int64(cfaLength) > fileSize {
-		// CFA region out of bounds — fall back to full file.
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("raf: seek %q: %w", filePath, err)
-		}
-		return f, nil
-	}
-
-	sr := io.NewSectionReader(f, int64(cfaOffset), int64(cfaLength))
-	return &sectionReadCloser{Reader: sr, Closer: f}, nil
+	return f, nil
 }
 
 // MetadataSupport declares that RAF uses XMP sidecar files for metadata.
@@ -247,29 +212,3 @@ func readJPEGOffsets(r io.Reader) (offset, length uint32, err error) {
 	length = binary.BigEndian.Uint32(buf[jpegLengthPos:])
 	return offset, length, nil
 }
-
-// readCFAOffsets reads the RAF header and returns the CFA data offset and
-// length from the offset directory. Returns zeros on any read error.
-func readCFAOffsets(r io.Reader) (offset, length uint32, err error) {
-	buf, err := readHeader(r)
-	if err != nil {
-		return 0, 0, err
-	}
-	offset = binary.BigEndian.Uint32(buf[cfaOffsetPos:])
-	length = binary.BigEndian.Uint32(buf[cfaLengthPos:])
-	return offset, length, nil
-}
-
-// sectionReadCloser wraps an io.Reader with a separate io.Closer.
-// Used to return a bounded file section while keeping the underlying
-// file open until the caller explicitly closes it.
-type sectionReadCloser struct {
-	Reader io.Reader
-	Closer io.Closer
-}
-
-// Read implements io.Reader by reading from a bounded file section.
-func (s *sectionReadCloser) Read(p []byte) (int, error) { return s.Reader.Read(p) }
-
-// Close implements io.Closer by closing the underlying file.
-func (s *sectionReadCloser) Close() error { return s.Closer.Close() }

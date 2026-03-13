@@ -232,11 +232,17 @@ func TestHandler_HashableReader_deterministic(t *testing.T) {
 	}
 }
 
-func TestHandler_HashableReader_returnsCFAData(t *testing.T) {
+func TestHandler_HashableReader_returnsFullFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfaData := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
 	filePath := buildFakeRAFWithCFA(t, dir, "test.raf", cfaData)
+
+	// Read the full file bytes for comparison.
+	wantData, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 
 	h := New()
 	rc, err := h.HashableReader(filePath)
@@ -250,8 +256,13 @@ func TestHandler_HashableReader_returnsCFAData(t *testing.T) {
 		t.Fatalf("ReadAll failed: %v", err)
 	}
 
-	if !bytes.Equal(data, cfaData) {
-		t.Fatalf("HashableReader returned %x, want CFA data %x", data, cfaData)
+	// HashableReader must return the complete file contents (full-file hashing).
+	if !bytes.Equal(data, wantData) {
+		t.Fatalf("HashableReader returned %d bytes, want full file (%d bytes)", len(data), len(wantData))
+	}
+	// Sanity check: full file must contain the CFA bytes at the end.
+	if !bytes.HasSuffix(data, cfaData) {
+		t.Fatalf("full file does not end with expected CFA bytes %x", cfaData)
 	}
 }
 
