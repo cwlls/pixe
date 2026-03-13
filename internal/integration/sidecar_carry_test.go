@@ -90,6 +90,14 @@ func buildCarrySidecarOpts(t *testing.T, dirA, dirB string, cfg *config.AppConfi
 	cfg.Algorithm = "sha1"
 	cfg.CarrySidecars = true
 
+	if cfg.Copyright != "" {
+		ct, err := pathbuilder.ParseCopyrightTemplate(cfg.Copyright)
+		if err != nil {
+			t.Fatalf("ParseCopyrightTemplate: %v", err)
+		}
+		cfg.CopyrightTemplate = ct
+	}
+
 	return pipeline.SortOptions{
 		Config:       cfg,
 		Hasher:       h,

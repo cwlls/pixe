@@ -24,9 +24,21 @@ import (
 	"time"
 
 	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/pathbuilder"
 )
 
 // --- RenderCopyright tests ---
+
+// mustParseCopyrightTemplate is a test helper that parses a copyright template
+// and fatals if parsing fails.
+func mustParseCopyrightTemplate(t *testing.T, raw string) *pathbuilder.CopyrightTemplate {
+	t.Helper()
+	tmpl, err := pathbuilder.ParseCopyrightTemplate(raw)
+	if err != nil {
+		t.Fatalf("ParseCopyrightTemplate(%q): %v", raw, err)
+	}
+	return tmpl
+}
 
 func TestRenderCopyright_yearSubstitution(t *testing.T) {
 	cases := []struct {
@@ -34,52 +46,62 @@ func TestRenderCopyright_yearSubstitution(t *testing.T) {
 		year int
 		want string
 	}{
-		{"Copyright {{.Year}} My Family", 2021, "Copyright 2021 My Family"},
-		{"Copyright {{.Year}} My Family", 2026, "Copyright 2026 My Family"},
-		{"Copyright {{.Year}} My Family, all rights reserved", 1902, "Copyright 1902 My Family, all rights reserved"},
+		{"Copyright {year} My Family", 2021, "Copyright 2021 My Family"},
+		{"Copyright {year} My Family", 2026, "Copyright 2026 My Family"},
+		{"Copyright {year} My Family, all rights reserved", 1902, "Copyright 1902 My Family, all rights reserved"},
 	}
 	for _, tc := range cases {
+		ct := mustParseCopyrightTemplate(t, tc.tmpl)
 		date := time.Date(tc.year, 1, 1, 0, 0, 0, 0, time.UTC)
-		got := RenderCopyright(tc.tmpl, date)
+		got := RenderCopyright(ct, date)
 		if got != tc.want {
 			t.Errorf("RenderCopyright(%q, %d) = %q, want %q", tc.tmpl, tc.year, got, tc.want)
 		}
 	}
 }
 
-func TestRenderCopyright_noTemplate(t *testing.T) {
+func TestRenderCopyright_noTokens(t *testing.T) {
+	ct := mustParseCopyrightTemplate(t, "No tokens here")
 	date := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
-	got := RenderCopyright("No template here", date)
-	if got != "No template here" {
-		t.Errorf("RenderCopyright with no template = %q, want %q", got, "No template here")
+	got := RenderCopyright(ct, date)
+	if got != "No tokens here" {
+		t.Errorf("RenderCopyright with no tokens = %q, want %q", got, "No tokens here")
 	}
 }
 
-func TestRenderCopyright_emptyString(t *testing.T) {
+func TestRenderCopyright_nilTemplate(t *testing.T) {
 	date := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
-	got := RenderCopyright("", date)
+	got := RenderCopyright(nil, date)
 	if got != "" {
-		t.Errorf("RenderCopyright('') = %q, want empty string", got)
+		t.Errorf("RenderCopyright(nil) = %q, want empty string", got)
 	}
 }
 
-func TestRenderCopyright_malformedTemplate_returnsRaw(t *testing.T) {
-	// Unclosed action — should return the raw string, not panic.
-	raw := "Copyright {{.Year My Family"
-	date := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
-	got := RenderCopyright(raw, date)
-	if got != raw {
-		t.Errorf("malformed template: got %q, want raw %q", got, raw)
+func TestRenderCopyright_malformedTemplate_parseError(t *testing.T) {
+	// Unclosed brace — ParseCopyrightTemplate must return an error.
+	_, err := pathbuilder.ParseCopyrightTemplate("Copyright {year My Family")
+	if err == nil {
+		t.Fatal("expected error for unclosed brace in copyright template")
 	}
 }
 
 func TestRenderCopyright_multipleYearReferences(t *testing.T) {
-	tmpl := "© {{.Year}}-{{.Year}} My Family"
+	ct := mustParseCopyrightTemplate(t, "© {year}-{year} My Family")
 	date := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-	got := RenderCopyright(tmpl, date)
+	got := RenderCopyright(ct, date)
 	want := "© 2024-2024 My Family"
 	if got != want {
 		t.Errorf("RenderCopyright multiple refs = %q, want %q", got, want)
+	}
+}
+
+func TestRenderCopyright_multipleTokens(t *testing.T) {
+	ct := mustParseCopyrightTemplate(t, "© {year}-{month} My Family")
+	date := time.Date(2021, 12, 25, 0, 0, 0, 0, time.UTC)
+	got := RenderCopyright(ct, date)
+	want := "© 2021-12 My Family"
+	if got != want {
+		t.Errorf("RenderCopyright multiple tokens = %q, want %q", got, want)
 	}
 }
 

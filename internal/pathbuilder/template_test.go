@@ -275,3 +275,162 @@ func TestTemplate_String(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ParseCopyrightTemplate — valid inputs
+// ---------------------------------------------------------------------------
+
+func TestParseCopyrightTemplate_valid(t *testing.T) {
+	t.Parallel()
+	tmpl, err := ParseCopyrightTemplate("Copyright {year} My Family")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tmpl == nil {
+		t.Fatal("expected non-nil template")
+	}
+}
+
+func TestParseCopyrightTemplate_allTokens(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("{year}-{month}-{monthname}-{day}")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseCopyrightTemplate_literalOnly(t *testing.T) {
+	t.Parallel()
+	tmpl, err := ParseCopyrightTemplate("All Rights Reserved")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	date := time.Date(2021, 12, 25, 6, 22, 23, 0, time.UTC)
+	if got := tmpl.Expand(date); got != "All Rights Reserved" {
+		t.Errorf("Expand() = %q, want %q", got, "All Rights Reserved")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseCopyrightTemplate — invalid inputs
+// ---------------------------------------------------------------------------
+
+func TestParseCopyrightTemplate_emptyString(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("")
+	if err == nil {
+		t.Fatal("expected error for empty template")
+	}
+}
+
+func TestParseCopyrightTemplate_unknownToken_hour(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("Copyright {hour} Family")
+	if err == nil {
+		t.Fatal("expected error for {hour} token (not in copyright set)")
+	}
+	if !strings.Contains(err.Error(), "{hour}") {
+		t.Errorf("error should mention the bad token, got: %v", err)
+	}
+}
+
+func TestParseCopyrightTemplate_unknownToken_ext(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("{ext}")
+	if err == nil {
+		t.Fatal("expected error for {ext} token (not in copyright set)")
+	}
+}
+
+func TestParseCopyrightTemplate_unknownToken_second(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("{second}")
+	if err == nil {
+		t.Fatal("expected error for {second} token (not in copyright set)")
+	}
+}
+
+func TestParseCopyrightTemplate_unclosedBrace(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("Copyright {year Family")
+	if err == nil {
+		t.Fatal("expected error for unclosed brace")
+	}
+}
+
+func TestParseCopyrightTemplate_strayCloseBrace(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("Copyright year} Family")
+	if err == nil {
+		t.Fatal("expected error for stray closing brace")
+	}
+}
+
+func TestParseCopyrightTemplate_emptyToken(t *testing.T) {
+	t.Parallel()
+	_, err := ParseCopyrightTemplate("Copyright {} Family")
+	if err == nil {
+		t.Fatal("expected error for empty token {}")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CopyrightTemplate.Expand
+// ---------------------------------------------------------------------------
+
+func TestCopyrightTemplate_Expand_year(t *testing.T) {
+	// Not parallel — calls SetLocaleForTesting which modifies package-level locale.
+	SetLocaleForTesting(language.English)
+	tmpl, err := ParseCopyrightTemplate("Copyright {year} My Family")
+	if err != nil {
+		t.Fatalf("ParseCopyrightTemplate: %v", err)
+	}
+	date := time.Date(2021, 12, 25, 6, 22, 23, 0, time.UTC)
+	got := tmpl.Expand(date)
+	want := "Copyright 2021 My Family"
+	if got != want {
+		t.Errorf("Expand() = %q, want %q", got, want)
+	}
+}
+
+func TestCopyrightTemplate_Expand_allTokens(t *testing.T) {
+	// Not parallel — calls SetLocaleForTesting which modifies package-level locale.
+	SetLocaleForTesting(language.English)
+	tmpl, err := ParseCopyrightTemplate("{year}/{month}/{monthname}/{day}")
+	if err != nil {
+		t.Fatalf("ParseCopyrightTemplate: %v", err)
+	}
+	date := time.Date(2021, 12, 25, 6, 22, 23, 0, time.UTC)
+	got := tmpl.Expand(date)
+	want := "2021/12/Dec/25"
+	if got != want {
+		t.Errorf("Expand() = %q, want %q", got, want)
+	}
+}
+
+func TestCopyrightTemplate_Expand_multipleYearRefs(t *testing.T) {
+	// Not parallel — calls SetLocaleForTesting which modifies package-level locale.
+	SetLocaleForTesting(language.English)
+	tmpl, err := ParseCopyrightTemplate("© {year}-{year} Family")
+	if err != nil {
+		t.Fatalf("ParseCopyrightTemplate: %v", err)
+	}
+	date := time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)
+	got := tmpl.Expand(date)
+	want := "© 2021-2021 Family"
+	if got != want {
+		t.Errorf("Expand() = %q, want %q", got, want)
+	}
+}
+
+func TestCopyrightTemplate_String(t *testing.T) {
+	t.Parallel()
+	raw := "Copyright {year} Family"
+	tmpl, err := ParseCopyrightTemplate(raw)
+	if err != nil {
+		t.Fatalf("ParseCopyrightTemplate: %v", err)
+	}
+	if tmpl.String() != raw {
+		t.Errorf("String() = %q, want %q", tmpl.String(), raw)
+	}
+}

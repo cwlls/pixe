@@ -106,7 +106,7 @@ func createRunningDB(t *testing.T, dirB string) string {
 func resetCleanViper(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		viper.Set("clean_dir", "")
+		viper.Set("clean_dest", "")
 		viper.Set("clean_db_path", "")
 		viper.Set("clean_dry_run", false)
 		viper.Set("clean_temp_only", false)
@@ -124,7 +124,7 @@ func TestCleanCmd_flagValidation(t *testing.T) {
 	dir := t.TempDir()
 	resetCleanViper(t)
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 	viper.Set("clean_temp_only", true)
 	viper.Set("clean_vacuum_only", true)
 
@@ -163,7 +163,7 @@ func TestCleanCmd_tempFileDetection(t *testing.T) {
 	tempFile2 := filepath.Join(anotherMonth, ".file.jpg.pixe-tmp")
 	writeFile(t, tempFile2, "temp data 2")
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 	viper.Set("clean_temp_only", true)
 
 	var buf bytes.Buffer
@@ -222,7 +222,7 @@ func TestCleanCmd_orphanedSidecarDetection(t *testing.T) {
 	nonPixeXMP := filepath.Join(monthDir, "notes.xmp")
 	writeFile(t, nonPixeXMP, "user xmp data")
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 	viper.Set("clean_temp_only", true)
 
 	var buf bytes.Buffer
@@ -271,7 +271,7 @@ func TestCleanCmd_dryRunNoModification(t *testing.T) {
 	orphanedSidecar := filepath.Join(monthDir, "20211225_071500_a3b4c5d6e7f8901234567890abcdef1234567890.arw.xmp")
 	writeFile(t, orphanedSidecar, "orphaned xmp")
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 	viper.Set("clean_temp_only", true)
 	viper.Set("clean_dry_run", true)
 
@@ -308,7 +308,7 @@ func TestCleanCmd_vacuumActiveRunGuard(t *testing.T) {
 
 	createRunningDB(t, dir)
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 	viper.Set("clean_vacuum_only", true)
 
 	var buf bytes.Buffer
@@ -335,7 +335,7 @@ func TestCleanCmd_vacuumSuccess(t *testing.T) {
 
 	createTestDB(t, dir)
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 	viper.Set("clean_vacuum_only", true)
 
 	var buf bytes.Buffer
@@ -368,7 +368,7 @@ func TestCleanCmd_noDatabaseSkipsCompaction(t *testing.T) {
 	tempFile := filepath.Join(dir, ".something.pixe-tmp")
 	writeFile(t, tempFile, "orphan")
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 
 	var buf bytes.Buffer
 	cleanCmd.SetOut(&buf)
@@ -401,7 +401,7 @@ func TestCleanCmd_noOrphansNoDatabase(t *testing.T) {
 	// Create a normal file only.
 	writeFile(t, filepath.Join(dir, "photo.jpg"), "jpeg")
 
-	viper.Set("clean_dir", dir)
+	viper.Set("clean_dest", dir)
 
 	var buf bytes.Buffer
 	cleanCmd.SetOut(&buf)

@@ -122,13 +122,14 @@ func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw, fmtr)
+	destLabel := opts.DestLabel
+	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw, fmtr, destLabel)
 }
 
 // runConcurrentCtx is the context-aware implementation, used by tests.
 func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter, destLabel string) SortResult {
 
 	// Wrap out in a mutex so concurrent workers don't race on writes.
 	sw := &syncWriter{w: out}
@@ -550,8 +551,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							matchDetail = finalRelDest
 						}
 						_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", fr.df.RelPath,
-							fmt.Sprintf("matches %s", matchDetail)))
-						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
+							fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail))))
+						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config, destLabel)
 					}
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
@@ -573,8 +574,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					})
 				} else {
 					if opts.Config.Verbosity >= 0 {
-						_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", fr.df.RelPath, finalRelDest))
-						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config)
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", fr.df.RelPath, displayDest(destLabel, finalRelDest)))
+						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config, destLabel)
 					}
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
@@ -741,9 +742,9 @@ func runWorker(ctx context.Context, id int,
 
 			if opts.Config.DryRun {
 				if opts.Config.Verbosity >= 0 {
-					_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, assign.relDest)
+					_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, displayDest(opts.DestLabel, assign.relDest))
 					dryTags := resolveTags(opts.Config, captureDate)
-					emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config)
+					emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config, opts.DestLabel)
 				}
 				var dryDBErr error
 				if db != nil {

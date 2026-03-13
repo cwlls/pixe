@@ -17,14 +17,12 @@
 //
 // Template support:
 //
-//	The Copyright field supports a single placeholder: {{.Year}}, which
-//	expands to the 4-digit capture year via strings.ReplaceAll.
-//	Example: "Copyright {{.Year}} My Family, all rights reserved"
+//	The Copyright field uses {token} syntax, parsed by pathbuilder.ParseCopyrightTemplate.
+//	Available tokens: {year}, {month}, {monthname}, {day}.
+//	Example: "Copyright {year} My Family, all rights reserved"
 //	→ "Copyright 2021 My Family, all rights reserved"
 //
-//	Unknown placeholders (e.g. {{.Foo}}) are preserved as-is in the output.
-//	This is intentionally simpler and safer than text/template evaluation,
-//	which could execute arbitrary method calls on the data context.
+//	The template is validated at startup; unknown tokens produce a fatal error.
 //
 // Dispatch strategy:
 //
@@ -36,24 +34,20 @@ package tagging
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/pathbuilder"
 	"github.com/cwlls/pixe/internal/xmp"
 )
 
-// RenderCopyright substitutes {{.Year}} in tmplStr with the 4-digit capture
-// year derived from date. All other content is returned unchanged.
-//
-// This replaces the previous text/template implementation to eliminate the
-// risk of template injection from user-supplied copyright strings.
-func RenderCopyright(tmplStr string, date time.Time) string {
-	if tmplStr == "" {
+// RenderCopyright expands a parsed copyright template with values derived from
+// date. Returns an empty string when tmpl is nil (no copyright configured).
+func RenderCopyright(tmpl *pathbuilder.CopyrightTemplate, date time.Time) string {
+	if tmpl == nil {
 		return ""
 	}
-	return strings.ReplaceAll(tmplStr, "{{.Year}}", strconv.Itoa(date.Year()))
+	return tmpl.Expand(date)
 }
 
 // Apply persists metadata tags for the file at destPath. The strategy

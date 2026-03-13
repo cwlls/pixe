@@ -135,7 +135,7 @@ func TestBus_TimestampSet(t *testing.T) {
 func TestPlainWriter_SortOutput(t *testing.T) {
 	bus := NewBus(32)
 	var buf bytes.Buffer
-	pw := NewPlainWriter(&buf)
+	pw := NewPlainWriter(&buf, "...Photos")
 
 	// Emit a sequence of sort events.
 	bus.Emit(Event{Kind: EventFileSkipped, RelPath: "skip.jpg", Reason: "unsupported"})
@@ -155,8 +155,8 @@ func TestPlainWriter_SortOutput(t *testing.T) {
 	out := buf.String()
 	wantLines := []string{
 		"SKIP skip.jpg -> unsupported",
-		"COPY copy.jpg -> 2026/01-Jan/copy.jpg",
-		"DUPE dupe.jpg -> matches 2026/01-Jan/orig.jpg",
+		"COPY copy.jpg -> ...Photos/2026/01-Jan/copy.jpg",
+		"DUPE dupe.jpg -> matches ...Photos/2026/01-Jan/orig.jpg",
 		"ERR  err.jpg -> hash failed",
 		"Done. processed=2 duplicates=1 skipped=1 errors=1",
 	}
@@ -170,7 +170,7 @@ func TestPlainWriter_SortOutput(t *testing.T) {
 func TestPlainWriter_VerifyOutput(t *testing.T) {
 	bus := NewBus(32)
 	var buf bytes.Buffer
-	pw := NewPlainWriter(&buf)
+	pw := NewPlainWriter(&buf, "")
 
 	bus.Emit(Event{Kind: EventVerifyOK, RelPath: "ok.jpg"})
 	bus.Emit(Event{

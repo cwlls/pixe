@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -53,9 +54,9 @@ re-enter the pipeline from the beginning.`,
 
 // runResume is the RunE handler for the resume subcommand.
 func runResume(cmd *cobra.Command, args []string) error {
-	dir := viper.GetString("resume_dir")
+	dir := viper.GetString("resume_dest")
 	if dir == "" {
-		return fmt.Errorf("--dir is required")
+		return fmt.Errorf("--dest is required")
 	}
 	dbPath := viper.GetString("db_path")
 
@@ -172,6 +173,15 @@ func runResume(cmd *cobra.Command, args []string) error {
 		Verbosity:            verbosity,
 	}
 
+	// Parse copyright template if configured.
+	if cfg.Copyright != "" {
+		ct, err := pathbuilder.ParseCopyrightTemplate(cfg.Copyright)
+		if err != nil {
+			return err
+		}
+		cfg.CopyrightTemplate = ct
+	}
+
 	// Generate a fresh RunID for this resume attempt. The pipeline will
 	// insert a new run record; the interrupted run remains in the DB as
 	// historical context.
@@ -193,6 +203,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		DB:           db,
 		RunID:        runID,
 		Context:      ctx,
+		DestLabel:    "..." + filepath.Base(dir),
 	}
 
 	_, _ = fmt.Fprintf(os.Stdout, "Resuming sort: source=%s dest=%s\n", run.Source, dir)
@@ -211,11 +222,9 @@ func runResume(cmd *cobra.Command, args []string) error {
 func init() {
 	rootCmd.AddCommand(resumeCmd)
 
-	resumeCmd.Flags().StringP("dir", "d", "", "destination directory containing the archive database (required)")
+	resumeCmd.Flags().StringP("dest", "d", "", "destination directory containing the archive database (required)")
 	resumeCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
 
-	_ = resumeCmd.MarkFlagRequired("dir")
-
-	_ = viper.BindPFlag("resume_dir", resumeCmd.Flags().Lookup("dir"))
+	_ = viper.BindPFlag("resume_dest", resumeCmd.Flags().Lookup("dest"))
 	_ = viper.BindPFlag("db_path", resumeCmd.Flags().Lookup("db-path"))
 }

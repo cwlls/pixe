@@ -1367,16 +1367,24 @@ func TestRenderCopyright(t *testing.T) {
 		year int
 		want string
 	}{
-		{"Copyright {{.Year}} My Family", 2021, "Copyright 2021 My Family"},
-		{"Copyright {{.Year}} My Family", 2026, "Copyright 2026 My Family"},
-		{"No template here", 2021, "No template here"},
-		{"", 2021, ""},
+		{"Copyright {year} My Family", 2021, "Copyright 2021 My Family"},
+		{"Copyright {year} My Family", 2026, "Copyright 2026 My Family"},
+		{"No tokens here", 2021, "No tokens here"},
 	}
 	for _, tc := range cases {
+		ct, err := pathbuilder.ParseCopyrightTemplate(tc.tmpl)
+		if err != nil {
+			t.Fatalf("ParseCopyrightTemplate(%q): %v", tc.tmpl, err)
+		}
 		date := time.Date(tc.year, 1, 1, 0, 0, 0, 0, time.UTC)
-		got := tagging.RenderCopyright(tc.tmpl, date)
+		got := tagging.RenderCopyright(ct, date)
 		if got != tc.want {
 			t.Errorf("tagging.RenderCopyright(%q, %d) = %q, want %q", tc.tmpl, tc.year, got, tc.want)
 		}
+	}
+
+	// nil template → empty string.
+	if got := tagging.RenderCopyright(nil, time.Now()); got != "" {
+		t.Errorf("RenderCopyright(nil) = %q, want empty string", got)
 	}
 }

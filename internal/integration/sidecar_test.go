@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	testCopyright   = "Copyright {{.Year}} Wells Family, all rights reserved"
+	testCopyright   = "Copyright {year} Wells Family, all rights reserved"
 	testCameraOwner = "Wells Family"
 )
 
@@ -49,13 +49,18 @@ func buildOptsWithTags(t *testing.T, dirA, dirB string, handlers ...domain.FileT
 	for _, handler := range handlers {
 		reg.Register(handler)
 	}
+	ct, err := pathbuilder.ParseCopyrightTemplate(testCopyright)
+	if err != nil {
+		t.Fatalf("ParseCopyrightTemplate: %v", err)
+	}
 	return pipeline.SortOptions{
 		Config: &config.AppConfig{
-			Source:      dirA,
-			Destination: dirB,
-			Algorithm:   "sha1",
-			Copyright:   testCopyright,
-			CameraOwner: testCameraOwner,
+			Source:            dirA,
+			Destination:       dirB,
+			Algorithm:         "sha1",
+			Copyright:         testCopyright,
+			CopyrightTemplate: ct,
+			CameraOwner:       testCameraOwner,
 		},
 		Hasher:       h,
 		Registry:     reg,

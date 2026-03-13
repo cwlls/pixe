@@ -57,22 +57,22 @@ Use --json to receive machine-readable output suitable for scripting.`,
 // openQueryDB is the PersistentPreRunE hook that resolves the database path
 // and opens it read-only. The resulting handle is stored in queryDB.
 func openQueryDB(cmd *cobra.Command, args []string) error {
-	dir := viper.GetString("query_dir")
+	dir := viper.GetString("query_dest")
 	if dir == "" {
-		return fmt.Errorf("--dir is required")
+		return fmt.Errorf("--dest is required")
 	}
 
 	// Resolve to absolute path and validate.
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return fmt.Errorf("resolve --dir: %w", err)
+		return fmt.Errorf("resolve --dest: %w", err)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return fmt.Errorf("--dir %q: %w", abs, err)
+		return fmt.Errorf("--dest %q: %w", abs, err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("--dir %q is not a directory", abs)
+		return fmt.Errorf("--dest %q is not a directory", abs)
 	}
 	queryDir = abs
 
@@ -111,10 +111,10 @@ func closeQueryDB(_ *cobra.Command, _ []string) error {
 func init() {
 	rootCmd.AddCommand(queryCmd)
 
-	queryCmd.PersistentFlags().StringP("dir", "d", "", "archive directory containing the database (required)")
+	queryCmd.PersistentFlags().StringP("dest", "d", "", "archive directory containing the database (required)")
 	queryCmd.PersistentFlags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
 	queryCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit JSON output instead of a table")
 
-	_ = viper.BindPFlag("query_dir", queryCmd.PersistentFlags().Lookup("dir"))
+	_ = viper.BindPFlag("query_dest", queryCmd.PersistentFlags().Lookup("dest"))
 	_ = viper.BindPFlag("query_db_path", queryCmd.PersistentFlags().Lookup("db-path"))
 }

@@ -101,6 +101,16 @@ Every discovered file produces exactly one stdout line:
 | `DUPE` | Content duplicate of an already-archived file |
 | `ERR` | Processing failed at some pipeline stage |
 
+**Destination path display:** The destination side of sort output includes an **ellipsis prefix with the `--dest` directory's basename**, making it immediately clear which archive the file was sorted into without printing the full absolute path. Format: `...<basename>/<template-path>/<filename>`.
+
+Example: if `--dest /Volumes/NAS/Photos`, the output reads:
+
+```
+COPY IMG_0001.jpg -> ...Photos/2021/12-Dec/20211225_062223-1-abc123.jpg
+```
+
+This applies to all output paths in sort (`COPY`, `DUPE`, `DRY-RUN`, `+sidecar`), the `PlainWriter` event consumer, and the `status` command's SORTED section (which displays the destination recorded in the ledger). The ellipsis prefix communicates that the path is relative to a known destination root, not the current working directory.
+
 All outcomes are also streamed to the JSONL ledger and recorded in the database. Colorized output is applied when stdout is a TTY (respects `NO_COLOR`). Suppressed in `--quiet` mode.
 
 ### 4.4 Ignore System
@@ -186,7 +196,24 @@ Filesystem timestamps are explicitly **not used**.
 
 ### 4.8 Metadata Tagging
 
-Tags (`--copyright` with `{{.Year}}` template, `--camera-owner`) are written **after** copy and verify. All formats use XMP sidecars — no handler modifies destination files.
+Tags (`--copyright`, `--camera-owner`) are written **after** copy and verify. All formats use XMP sidecars — no handler modifies destination files.
+
+**Copyright template syntax:** The `--copyright` flag uses the same `{token}` syntax as `--path-template` (see §4.5.1). The template is rendered by the same underlying expansion method used for path templates — not Go `text/template` and not `strings.ReplaceAll`. This ensures consistent syntax, consistent validation, and consistent error messages across all user-facing templates.
+
+**Available tokens for copyright:**
+
+| Token | Description | Example |
+|---|---|---|
+| `{year}` | 4-digit capture year | `2021` |
+| `{month}` | 2-digit zero-padded capture month | `12` |
+| `{monthname}` | Locale-aware 3-letter month abbreviation | `Dec` |
+| `{day}` | 2-digit zero-padded capture day | `25` |
+
+Example: `--copyright "Copyright {year} The Wells Family"` → `"Copyright 2021 The Wells Family"`
+
+The `{hour}`, `{minute}`, `{second}`, and `{ext}` tokens from path templates are **not available** in copyright templates — they have no practical use in a copyright string. Unknown tokens produce a validation error at startup, consistent with path template behavior.
+
+> **Migration note:** The previous `{{.Year}}` Go-template-style syntax is replaced by `{year}`. This is a breaking change to the copyright flag/config value.
 
 | Capability | Strategy | Formats |
 |---|---|---|
@@ -389,7 +416,7 @@ Built with `spf13/cobra`. Configuration layered via `spf13/viper` (flags > sourc
 | Command | Purpose |
 |---|---|
 | `pixe sort` | Primary operation. Discover → process → copy to `dirB`. |
-| `pixe verify` | Walk `dirB`, recompute hashes, report mismatches. Auto-detects algorithm from filename. |
+| `pixe verify` | Walk `dirB` (`--dest`), recompute hashes, report mismatches. Auto-detects algorithm from filename. |
 | `pixe resume` | Resume interrupted sort from archive database. |
 | `pixe query <sub>` | Read-only DB interrogation: `runs`, `run <id>`, `duplicates`, `errors`, `skipped`, `files`, `inventory`. |
 | `pixe status` | Source-oriented, ledger-only report of sorting status. No DB required. |
@@ -397,11 +424,15 @@ Built with `spf13/cobra`. Configuration layered via `spf13/viper` (flags > sourc
 | `pixe clean` | Remove orphaned `.pixe-tmp` files and XMP sidecars; optionally `VACUUM` the database. |
 | `pixe version` | Print version, commit, build date. |
 
+**Consistent `--dest` flag across all commands:** Every command that accepts a destination/archive directory uses `--dest` / `-d`. This includes `sort`, `verify`, `resume`, `clean`, `query`, and `stats`. The previous `--dir` flag on verify, resume, clean, query, and stats is renamed to `--dest` for consistency with sort. The `-d` shorthand is unchanged (it was already `-d` on all commands).
+
 Key flags are defined in each command's source file under `cmd/`. See `cmd/helpers.go` for shared configuration resolution (`resolveConfig()`, `buildRegistry()`).
 
 ### 7.2 Configuration File
 
-`.pixe.yaml` supports: `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list), `path_template` (string, see §4.5.1), `aliases` (map of name→path, see §4.13).
+`.pixe.yaml` supports: `dest`, `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list), `path_template` (string, see §4.5.1), `aliases` (map of name→path, see §4.13).
+
+**Required-flag validation:** Commands that require `--dest` (sort, verify, resume, clean, query, stats) must **not** use Cobra's `MarkFlagRequired`. Cobra's required-flag check runs before Viper config merging, so a `dest` value in `.pixe.yaml` is rejected because the CLI flag was not explicitly provided. Instead, these commands validate the resolved value after `resolveConfig()` (or equivalent Viper reads) and return a clear error if the value is empty. This allows `dest:` in the config file, `PIXE_DEST` env var, or source-local `.pixe.yaml` to satisfy the requirement without a CLI flag.
 
 ### 7.3 Query Command
 

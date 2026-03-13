@@ -18,17 +18,18 @@ import (
 	"testing"
 )
 
-// TestSortCmd_sourceNotRequired verifies that the --source flag is not marked
-// as required by Cobra (it defaults to cwd at runtime), while --dest remains
-// required.
-func TestSortCmd_sourceNotRequired(t *testing.T) {
+// TestSortCmd_flagsNotMarkedRequired verifies that neither --source nor --dest
+// is marked required by Cobra. Both are validated manually in runSort after
+// Viper config merging, so that config-file and env-var values can satisfy
+// the requirement without a CLI flag.
+func TestSortCmd_flagsNotMarkedRequired(t *testing.T) {
+	// Cobra stores the required annotation under this key.
+	const requiredKey = "cobra_annotation_bash_completion_one_required_flag"
+
 	sourceFlag := sortCmd.Flags().Lookup("source")
 	if sourceFlag == nil {
 		t.Fatal("--source flag not registered on sortCmd")
 	}
-	// Cobra stores the required annotation under the key "cobra_annotation_bash_completion_one_required_flag".
-	// A simpler check: the flag's annotations map should not contain the required key.
-	const requiredKey = "cobra_annotation_bash_completion_one_required_flag"
 	if _, required := sourceFlag.Annotations[requiredKey]; required {
 		t.Error("--source should not be marked required; it defaults to cwd")
 	}
@@ -37,7 +38,7 @@ func TestSortCmd_sourceNotRequired(t *testing.T) {
 	if destFlag == nil {
 		t.Fatal("--dest flag not registered on sortCmd")
 	}
-	if _, required := destFlag.Annotations[requiredKey]; !required {
-		t.Error("--dest should still be marked required")
+	if _, required := destFlag.Annotations[requiredKey]; required {
+		t.Error("--dest should not be marked required via Cobra; it is validated manually after config merging")
 	}
 }

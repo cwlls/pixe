@@ -16,7 +16,11 @@
 // populated from CLI flags, config file, and environment variables via Viper.
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/cwlls/pixe/internal/pathbuilder"
+)
 
 // AppConfig holds the fully resolved configuration for a Pixe run.
 // It is constructed in the CLI layer (cmd/) from Viper's merged values
@@ -37,9 +41,14 @@ type AppConfig struct {
 	Algorithm string
 
 	// Copyright is the raw template string for the Copyright metadata tag.
-	// Supports {{.Year}} which expands to the file's 4-digit capture year.
+	// Uses {token} syntax: {year}, {month}, {monthname}, {day}.
 	// Empty string means no Copyright tag is written.
 	Copyright string
+
+	// CopyrightTemplate is the parsed form of Copyright, ready for expansion.
+	// Populated by the CLI layer at startup via pathbuilder.ParseCopyrightTemplate.
+	// Nil when Copyright is empty.
+	CopyrightTemplate *pathbuilder.CopyrightTemplate
 
 	// CameraOwner is the freetext string for the CameraOwner metadata tag.
 	// Empty string means no CameraOwner tag is written.

@@ -34,7 +34,7 @@ import (
 var verifyCmd = &cobra.Command{
 	Use:   "verify",
 	Short: "Verify the integrity of a sorted archive by recomputing checksums",
-	Long: `Verify walks a previously sorted destination directory (--dir), parses the
+	Long: `Verify walks a previously sorted destination directory (--dest), parses the
 checksum embedded in each filename, recomputes the data-only hash of each file,
 and reports any mismatches.
 
@@ -45,11 +45,11 @@ Exit code 1 means one or more mismatches were detected.`,
 
 // runVerify is the RunE handler for the verify subcommand.
 func runVerify(cmd *cobra.Command, args []string) error {
-	dir := viper.GetString("verify_dir")
+	dir := viper.GetString("verify_dest")
 	algorithm := viper.GetString("algorithm")
 
 	if dir == "" {
-		return fmt.Errorf("--dir is required")
+		return fmt.Errorf("--dest is required")
 	}
 
 	// Validate directory exists.
@@ -116,13 +116,12 @@ func runVerify(cmd *cobra.Command, args []string) error {
 func init() {
 	rootCmd.AddCommand(verifyCmd)
 
-	verifyCmd.Flags().StringP("dir", "d", "", "archive directory to verify (required)")
+	verifyCmd.Flags().StringP("dest", "d", "", "destination archive directory to verify (required)")
 	verifyCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
-	_ = verifyCmd.MarkFlagRequired("dir")
 	// Note: --algorithm is inherited from the root command. For new-format files
 	// (YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>), the algorithm is auto-detected from the
 	// embedded ID and this flag is ignored. For legacy files, it is used as a
 	// fallback when the digest length is ambiguous.
-	_ = viper.BindPFlag("verify_dir", verifyCmd.Flags().Lookup("dir"))
+	_ = viper.BindPFlag("verify_dest", verifyCmd.Flags().Lookup("dest"))
 	_ = viper.BindPFlag("verify_progress", verifyCmd.Flags().Lookup("progress"))
 }

@@ -247,9 +247,17 @@ func printStatusTable(w io.Writer, r *statusResult) {
 	}
 
 	// Sections — only printed when non-empty.
+	var destLabel string
+	if r.Ledger != nil && r.Ledger.Header.Destination != "" {
+		destLabel = "..." + filepath.Base(r.Ledger.Header.Destination)
+	}
 	printSection(w, "SORTED", r.Sorted, func(f statusFile) string {
 		if f.Destination != "" {
-			return "→ " + f.Destination
+			dest := f.Destination
+			if destLabel != "" {
+				dest = destLabel + "/" + dest
+			}
+			return "→ " + dest
 		}
 		return ""
 	})

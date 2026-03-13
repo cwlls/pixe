@@ -66,7 +66,10 @@ type cleanResult struct {
 
 // runClean is the RunE handler for the clean subcommand.
 func runClean(cmd *cobra.Command, _ []string) error {
-	dir := viper.GetString("clean_dir")
+	dir := viper.GetString("clean_dest")
+	if dir == "" {
+		return fmt.Errorf("--dest is required")
+	}
 	dbPath := viper.GetString("clean_db_path")
 	dryRun := viper.GetBool("clean_dry_run")
 	tempOnly := viper.GetBool("clean_temp_only")
@@ -367,15 +370,13 @@ func pluralize(word string, n int) string {
 func init() {
 	rootCmd.AddCommand(cleanCmd)
 
-	cleanCmd.Flags().StringP("dir", "d", "", "destination directory (dirB) to clean (required)")
+	cleanCmd.Flags().StringP("dest", "d", "", "destination directory (dirB) to clean (required)")
 	cleanCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database")
 	cleanCmd.Flags().Bool("dry-run", false, "preview what would be cleaned without modifying anything")
 	cleanCmd.Flags().Bool("temp-only", false, "only clean orphaned files, skip database compaction")
 	cleanCmd.Flags().Bool("vacuum-only", false, "only compact the database, skip file scanning")
 
-	_ = cleanCmd.MarkFlagRequired("dir")
-
-	_ = viper.BindPFlag("clean_dir", cleanCmd.Flags().Lookup("dir"))
+	_ = viper.BindPFlag("clean_dest", cleanCmd.Flags().Lookup("dest"))
 	_ = viper.BindPFlag("clean_db_path", cleanCmd.Flags().Lookup("db-path"))
 	_ = viper.BindPFlag("clean_dry_run", cleanCmd.Flags().Lookup("dry-run"))
 	_ = viper.BindPFlag("clean_temp_only", cleanCmd.Flags().Lookup("temp-only"))

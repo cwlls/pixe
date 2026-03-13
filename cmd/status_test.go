@@ -267,7 +267,7 @@ func TestRunStatus_allSorted(t *testing.T) {
 	if strings.Contains(out, "UNSORTED") {
 		t.Errorf("unexpected UNSORTED section in output:\n%s", out)
 	}
-	if !strings.Contains(out, "→ 2021/12-Dec/20211225_062223_abc.jpg") {
+	if !strings.Contains(out, "→ ...archive/2021/12-Dec/20211225_062223_abc.jpg") {
 		t.Errorf("expected destination arrow in output, got:\n%s", out)
 	}
 }

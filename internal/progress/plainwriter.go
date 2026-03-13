@@ -26,22 +26,33 @@ import (
 //
 // Usage:
 //
-//	pw := progress.NewPlainWriter(os.Stdout, 0)
+//	pw := progress.NewPlainWriter(os.Stdout, "...Photos", 0)
 //	go pw.Run(bus.Events())
 type PlainWriter struct {
 	w         io.Writer
 	verbosity int
+	destLabel string
+}
+
+// displayDest returns the destination path formatted for human output.
+// When destLabel is non-empty, it prepends destLabel+"/" to dest.
+func displayDest(destLabel, dest string) string {
+	if destLabel == "" {
+		return dest
+	}
+	return destLabel + "/" + dest
 }
 
 // NewPlainWriter creates a PlainWriter that writes to w.
+// destLabel is the display prefix for destination paths (e.g. "...Photos").
 // verbosity controls output detail: -1 = quiet (summary only),
 // 0 = normal (default), 1 = verbose.
-func NewPlainWriter(w io.Writer, verbosity ...int) *PlainWriter {
+func NewPlainWriter(w io.Writer, destLabel string, verbosity ...int) *PlainWriter {
 	v := 0
 	if len(verbosity) > 0 {
 		v = verbosity[0]
 	}
-	return &PlainWriter{w: w, verbosity: v}
+	return &PlainWriter{w: w, destLabel: destLabel, verbosity: v}
 }
 
 // Run reads events from the channel and writes formatted output until the
@@ -51,15 +62,15 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 		switch e.Kind {
 		case EventFileComplete:
 			if pw.verbosity >= 0 {
-				_, _ = fmt.Fprintf(pw.w, "COPY %s -> %s\n", e.RelPath, e.Destination)
+				_, _ = fmt.Fprintf(pw.w, "COPY %s -> %s\n", e.RelPath, displayDest(pw.destLabel, e.Destination))
 			}
 
 		case EventFileDuplicate:
 			if pw.verbosity >= 0 {
 				if e.MatchesDest != "" {
-					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> matches %s\n", e.RelPath, e.MatchesDest)
+					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> matches %s\n", e.RelPath, displayDest(pw.destLabel, e.MatchesDest))
 				} else {
-					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> %s\n", e.RelPath, e.Destination)
+					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> %s\n", e.RelPath, displayDest(pw.destLabel, e.Destination))
 				}
 			}
 
@@ -79,7 +90,7 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 
 		case EventSidecarCarried:
 			if pw.verbosity >= 0 {
-				_, _ = fmt.Fprintf(pw.w, "     +sidecar %s -> %s\n", e.SidecarRelPath, e.Destination)
+				_, _ = fmt.Fprintf(pw.w, "     +sidecar %s -> %s\n", e.SidecarRelPath, displayDest(pw.destLabel, e.Destination))
 			}
 
 		case EventSidecarFailed:

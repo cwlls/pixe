@@ -78,6 +78,12 @@ type SortOptions struct {
 	// Workers finish their current file before exiting. When nil,
 	// context.Background() is used (no cancellation).
 	Context context.Context
+
+	// DestLabel is the display prefix for destination paths in stdout output
+	// (e.g. "...Photos"). Set by the CLI layer to "..." + filepath.Base(dest).
+	// When empty, relDest is shown without a prefix. This is purely cosmetic —
+	// it does not affect the ledger, database, or filesystem paths.
+	DestLabel string
 }
 
 // emit sends an event to the bus if one is configured. It is a no-op when
@@ -86,6 +92,17 @@ func emit(bus *progress.Bus, e progress.Event) {
 	if bus != nil {
 		bus.Emit(e)
 	}
+}
+
+// displayDest returns relDest formatted for human-readable stdout output.
+// When destLabel is non-empty (e.g. "...Photos"), it is prepended with a "/"
+// separator so the output reads "...Photos/2021/12-Dec/filename.jpg".
+// When destLabel is empty, relDest is returned unchanged.
+func displayDest(destLabel, relDest string) string {
+	if destLabel == "" {
+		return relDest
+	}
+	return destLabel + "/" + relDest
 }
 
 // dateFilterSkip is returned by processFile when a file is skipped due to
@@ -224,11 +241,12 @@ func Run(opts SortOptions) (SortResult, error) {
 	// 5. Process files (sequential or concurrent).
 	// ------------------------------------------------------------------
 	fmtr := NewFormatter(opts.ColorOutput)
+	destLabel := opts.DestLabel
 	var result SortResult
 	if cfg.Workers > 1 {
-		result = runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
+		result = runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr, destLabel)
 	} else {
-		result = runSequential(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
+		result = runSequential(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr, destLabel)
 	}
 
 	// ------------------------------------------------------------------
@@ -265,7 +283,7 @@ func Run(opts SortOptions) (SortResult, error) {
 // interrupt a file that is already in progress.
 func runSequential(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
-	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
+	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter, destLabel string) SortResult {
 
 	var result SortResult
 	db := opts.DB
@@ -369,7 +387,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 		})
 
 		fileStart := time.Now()
-		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen, fmtr)
+		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen, fmtr, destLabel)
 		if err != nil {
 			var dfs *dateFilterSkip
 			if errors.As(err, &dfs) {
@@ -474,6 +492,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 // LedgerEntry on success (nil on dry-run or duplicate without copy).
 // isDuplicate is true when the file was routed to the duplicates directory.
 // memSeen is an in-memory dedup map used when db is nil; it maps checksum → relDest.
+// destLabel is the display prefix for destination paths (e.g. "...Photos"); see displayDest.
 func processFile(
 	df discovery.DiscoveredFile,
 	fileID int64,
@@ -482,6 +501,7 @@ func processFile(
 	out io.Writer,
 	memSeen map[string]string,
 	fmtr *Formatter,
+	destLabel string,
 ) (*domain.LedgerEntry, bool, error) {
 	cfg := opts.Config
 	db := opts.DB
@@ -567,7 +587,7 @@ func processFile(
 		matchDetail := existingDestForLedger
 		if cfg.Verbosity >= 0 {
 			_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", df.RelPath,
-				fmt.Sprintf("matches %s", matchDetail)))
+				fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail))))
 		}
 		le := &domain.LedgerEntry{
 			Path:     df.RelPath,
@@ -586,10 +606,10 @@ func processFile(
 
 	if cfg.DryRun {
 		if cfg.Verbosity >= 0 {
-			_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, relDest)
+			_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, displayDest(destLabel, relDest))
 			// Emit sidecar association lines even in dry-run (no files copied).
 			dryTags := resolveTags(cfg, captureDate)
-			emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg)
+			emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg, destLabel)
 		}
 		if db != nil {
 			if dbErr := db.UpdateFileStatus(fileID, "complete",
@@ -784,11 +804,11 @@ func processFile(
 				matchDetail = relDest
 			}
 			_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", df.RelPath,
-				fmt.Sprintf("matches %s", matchDetail)))
-			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
+				fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail))))
+			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg, destLabel)
 		} else {
-			_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", df.RelPath, relDest))
-			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg)
+			_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", df.RelPath, displayDest(destLabel, relDest)))
+			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg, destLabel)
 		}
 	}
 
@@ -818,7 +838,8 @@ func processFile(
 
 // emitSidecarLines writes +sidecar output lines for each sidecar associated
 // with a discovered file. Called after the parent COPY/DUPE line is emitted.
-func emitSidecarLines(out io.Writer, sidecars []discovery.SidecarFile, parentRelDest string, tags domain.MetadataTags, cfg *config.AppConfig) {
+// destLabel is the display prefix for destination paths (e.g. "...Photos"); see displayDest.
+func emitSidecarLines(out io.Writer, sidecars []discovery.SidecarFile, parentRelDest string, tags domain.MetadataTags, cfg *config.AppConfig, destLabel string) {
 	if !cfg.CarrySidecars || len(sidecars) == 0 {
 		return
 	}
@@ -828,7 +849,7 @@ func emitSidecarLines(out io.Writer, sidecars []discovery.SidecarFile, parentRel
 		if sc.Ext == ".xmp" && !tags.IsEmpty() {
 			suffix = " (merge tags)"
 		}
-		_, _ = fmt.Fprintf(out, "     +sidecar %s -> %s%s\n", sc.RelPath, sidecarRel, suffix)
+		_, _ = fmt.Fprintf(out, "     +sidecar %s -> %s%s\n", sc.RelPath, displayDest(destLabel, sidecarRel), suffix)
 	}
 }
 
@@ -837,8 +858,8 @@ func resolveTags(cfg *config.AppConfig, captureDate time.Time) domain.MetadataTa
 	tags := domain.MetadataTags{
 		CameraOwner: cfg.CameraOwner,
 	}
-	if cfg.Copyright != "" {
-		tags.Copyright = tagging.RenderCopyright(cfg.Copyright, captureDate)
+	if cfg.CopyrightTemplate != nil {
+		tags.Copyright = tagging.RenderCopyright(cfg.CopyrightTemplate, captureDate)
 	}
 	return tags
 }

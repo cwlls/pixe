@@ -108,9 +108,18 @@ func ParseTemplate(raw string) (*Template, error) {
 	return tmpl, nil
 }
 
-// parseSegments splits raw into a slice of literal and token segments.
+// parseSegments splits raw into a slice of literal and token segments,
+// validating token names against knownTokens (the path-template token set).
 // Returns an error if braces are unbalanced or a token name is unknown.
 func parseSegments(raw string) ([]segment, error) {
+	return parseSegmentsAllowed(raw, knownTokens)
+}
+
+// parseSegmentsAllowed is the shared brace-parser used by both path templates
+// and copyright templates. allowed is the set of valid token names for the
+// caller's context; an unknown token produces a fatal error listing the
+// allowed set.
+func parseSegmentsAllowed(raw string, allowed map[string]bool) ([]segment, error) {
 	var segments []segment
 	rest := raw
 
@@ -120,7 +129,7 @@ func parseSegments(raw string) ([]segment, error) {
 
 		// Stray closing brace before any opening brace.
 		if closeIdx >= 0 && (openIdx < 0 || closeIdx < openIdx) {
-			return nil, fmt.Errorf("pathbuilder: path template has unexpected '}' at position %d: %q", len(raw)-len(rest)+closeIdx, raw)
+			return nil, fmt.Errorf("pathbuilder: template has unexpected '}' at position %d: %q", len(raw)-len(rest)+closeIdx, raw)
 		}
 
 		if openIdx < 0 {
@@ -138,22 +147,22 @@ func parseSegments(raw string) ([]segment, error) {
 		rest = rest[openIdx+1:]
 		closeIdx = strings.IndexByte(rest, '}')
 		if closeIdx < 0 {
-			return nil, fmt.Errorf("pathbuilder: path template has unclosed '{': %q", raw)
+			return nil, fmt.Errorf("pathbuilder: template has unclosed '{': %q", raw)
 		}
 
 		// Nested opening brace inside a token.
 		if nested := strings.IndexByte(rest[:closeIdx], '{'); nested >= 0 {
-			return nil, fmt.Errorf("pathbuilder: path template has nested '{' inside a token: %q", raw)
+			return nil, fmt.Errorf("pathbuilder: template has nested '{' inside a token: %q", raw)
 		}
 
 		tokenName := rest[:closeIdx]
 		if tokenName == "" {
-			return nil, fmt.Errorf("pathbuilder: path template has empty token '{}': %q", raw)
+			return nil, fmt.Errorf("pathbuilder: template has empty token '{}': %q", raw)
 		}
 
-		if !knownTokens[tokenName] {
-			valid := sortedTokenNames()
-			return nil, fmt.Errorf("pathbuilder: path template has unknown token {%s} — valid tokens are: %s", tokenName, strings.Join(valid, ", "))
+		if !allowed[tokenName] {
+			valid := sortedAllowedTokenNames(allowed)
+			return nil, fmt.Errorf("pathbuilder: template has unknown token {%s} — valid tokens are: %s", tokenName, strings.Join(valid, ", "))
 		}
 
 		segments = append(segments, segment{token: tokenName})
@@ -163,15 +172,88 @@ func parseSegments(raw string) ([]segment, error) {
 	return segments, nil
 }
 
-// sortedTokenNames returns the known token names in sorted order, formatted
-// as {name}, for use in error messages.
-func sortedTokenNames() []string {
-	names := make([]string, 0, len(knownTokens))
-	for k := range knownTokens {
+// sortedAllowedTokenNames returns the token names from the given allowed set
+// in sorted order, formatted as {name}, for use in error messages.
+func sortedAllowedTokenNames(allowed map[string]bool) []string {
+	names := make([]string, 0, len(allowed))
+	for k := range allowed {
 		names = append(names, "{"+k+"}")
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ---------------------------------------------------------------------------
+// Copyright template
+// ---------------------------------------------------------------------------
+
+// copyrightTokens is the set of valid token names for copyright templates.
+// A subset of knownTokens — excludes {hour}, {minute}, {second}, {ext} which
+// have no practical use in a copyright string.
+var copyrightTokens = map[string]bool{
+	"year":      true,
+	"month":     true,
+	"monthname": true,
+	"day":       true,
+}
+
+// CopyrightTemplate is a parsed, validated copyright template string.
+// Unlike Template, it has no path-specific validation rules (no leading-slash
+// check, no invalid-path-char check, no traversal check).
+// It is immutable after construction via ParseCopyrightTemplate.
+type CopyrightTemplate struct {
+	raw      string    // original template string as provided by the user
+	segments []segment // parsed representation
+}
+
+// ParseCopyrightTemplate parses and validates a copyright template string.
+//
+// Uses the same {token} syntax as path templates but only allows:
+// {year}, {month}, {monthname}, {day}.
+//
+// Validation rules:
+//  1. Template must not be empty.
+//  2. All {token} names must be from the copyright token set.
+//  3. Braces must be balanced — no unclosed { or stray }.
+//
+// No path-specific rules (leading /, invalid chars, traversal) are applied.
+func ParseCopyrightTemplate(raw string) (*CopyrightTemplate, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("pathbuilder: copyright template must not be empty")
+	}
+	segments, err := parseSegmentsAllowed(raw, copyrightTokens)
+	if err != nil {
+		return nil, err
+	}
+	return &CopyrightTemplate{raw: raw, segments: segments}, nil
+}
+
+// Expand substitutes tokens in the copyright template with values derived
+// from date, returning the rendered string.
+func (ct *CopyrightTemplate) Expand(date time.Time) string {
+	var sb strings.Builder
+	for _, seg := range ct.segments {
+		if seg.literal != "" {
+			sb.WriteString(seg.literal)
+			continue
+		}
+		switch seg.token {
+		case "year":
+			fmt.Fprintf(&sb, "%04d", date.Year())
+		case "month":
+			fmt.Fprintf(&sb, "%02d", int(date.Month()))
+		case "monthname":
+			sb.WriteString(localizedMonthAbbr(date.Month()))
+		case "day":
+			fmt.Fprintf(&sb, "%02d", date.Day())
+		}
+	}
+	return sb.String()
+}
+
+// String returns the original template string as provided to ParseCopyrightTemplate.
+func (ct *CopyrightTemplate) String() string {
+	return ct.raw
 }
 
 // Expand applies the template to the given date and file extension, returning

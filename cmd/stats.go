@@ -38,9 +38,9 @@ and last import date. All data is read from the archive database.`,
 }
 
 func runStats(cmd *cobra.Command, _ []string) error {
-	dir := viper.GetString("stats_dir")
+	dir := viper.GetString("stats_dest")
 	if dir == "" {
-		return fmt.Errorf("--dir is required")
+		return fmt.Errorf("--dest is required")
 	}
 
 	dbPath := viper.GetString("stats_db_path")
@@ -187,13 +187,11 @@ func formatCount(n int) string {
 func init() {
 	rootCmd.AddCommand(statsCmd)
 
-	statsCmd.Flags().StringP("dir", "d", "", "destination directory containing the archive (required)")
+	statsCmd.Flags().StringP("dest", "d", "", "destination directory containing the archive (required)")
 	statsCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database")
 	statsCmd.Flags().Bool("json", false, "emit output as JSON")
 
-	_ = statsCmd.MarkFlagRequired("dir")
-
-	_ = viper.BindPFlag("stats_dir", statsCmd.Flags().Lookup("dir"))
+	_ = viper.BindPFlag("stats_dest", statsCmd.Flags().Lookup("dest"))
 	_ = viper.BindPFlag("stats_db_path", statsCmd.Flags().Lookup("db-path"))
 	_ = viper.BindPFlag("stats_json", statsCmd.Flags().Lookup("json"))
 }

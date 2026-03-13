@@ -114,6 +114,17 @@ func runSort(cmd *cobra.Command, args []string) error {
 	}
 
 	// ------------------------------------------------------------------
+	// 1f. Parse and validate the copyright template (if set).
+	// ------------------------------------------------------------------
+	if cfg.Copyright != "" {
+		ct, err := pathbuilder.ParseCopyrightTemplate(cfg.Copyright)
+		if err != nil {
+			return err
+		}
+		cfg.CopyrightTemplate = ct
+	}
+
+	// ------------------------------------------------------------------
 	// 2. Validate inputs.
 	// ------------------------------------------------------------------
 	if cfg.Destination == "" {
@@ -172,6 +183,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
+	destLabel := "..." + filepath.Base(cfg.Destination)
 	opts := pipeline.SortOptions{
 		Config:       cfg,
 		Hasher:       h,
@@ -184,6 +196,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		RunID:        runID,
 		ColorOutput:  isTTY && !noColor && cfg.Verbosity >= 0,
 		Context:      ctx,
+		DestLabel:    destLabel,
 	}
 
 	var result pipeline.SortResult
@@ -233,7 +246,7 @@ func init() {
 	// Sort-specific flags.
 	sortCmd.Flags().StringP("source", "s", "", "source directory containing media files to sort (default: current directory)")
 	sortCmd.Flags().StringP("dest", "d", "", "destination directory for the organized archive (required)")
-	sortCmd.Flags().String("copyright", "", `copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"`)
+	sortCmd.Flags().String("copyright", "", `copyright template injected into destination files, e.g. "Copyright {year} My Family" (tokens: {year}, {month}, {monthname}, {day})`)
 	sortCmd.Flags().String("camera-owner", "", "camera owner string injected into destination files")
 	sortCmd.Flags().Bool("dry-run", false, "preview operations without copying any files")
 	sortCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
@@ -247,8 +260,9 @@ func init() {
 	sortCmd.Flags().String("before", "", `only process files with capture date on or before this date (format: YYYY-MM-DD)`)
 	sortCmd.Flags().String("path-template", "", `token-based template for destination directory structure (default: "{year}/{month}-{monthname}")`)
 
-	// Mark required flags (--source defaults to cwd; --dest has no default).
-	_ = sortCmd.MarkFlagRequired("dest")
+	// Note: --dest is validated manually in runSort after Viper config merging,
+	// so that dest: in .pixe.yaml or PIXE_DEST env var can satisfy the requirement
+	// without a CLI flag. MarkFlagRequired is intentionally not used here.
 
 	// Bind sort-specific flags to Viper.
 	_ = viper.BindPFlag("source", sortCmd.Flags().Lookup("source"))

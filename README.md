@@ -113,29 +113,29 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 
 <!-- pixe:begin:sort-flags -->
 
-| Flag                     | Default | Description                                                                                         |
-| ------------------------ | ------- | --------------------------------------------------------------------------------------------------- |
-| --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                             |
-| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                           |
-| -a, --algorithm          | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash                                         |
-| -q, --quiet              | false   | suppress per-file output; show only the final summary                                               |
-| -v, --verbose            | false   | show per-stage timing and debug information                                                         |
-| --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                                       |
-| -s, --source             |         | source directory containing media files to sort (default: current directory)                        |
-| -d, --dest               |         | destination directory for the organized archive (required)                                          |
-| --copyright              |         | copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"            |
-| --camera-owner           |         | camera owner string injected into destination files                                                 |
-| --dry-run                | false   | preview operations without copying any files                                                        |
-| --db-path                |         | explicit path to the SQLite archive database (overrides auto-resolution)                            |
-| -r, --recursive          | false   | recursively process subdirectories of --source                                                      |
-| --skip-duplicates        | false   | skip copying duplicate files instead of copying to duplicates/ directory                            |
-| --ignore                 |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")           |
-| --no-carry-sidecars      | false   | disable carrying pre-existing .aae and .xmp sidecar files from source to destination                |
-| --overwrite-sidecar-tags | false   | when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them |
-| --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                           |
-| --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                     |
-| --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                    |
-| --path-template          |         | token-based template for destination directory structure (default: "{year}/{month}-{monthname}")    |
+| Flag                     | Default | Description                                                                                                                         |
+| ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                                                             |
+| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                                                           |
+| -a, --algorithm          | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash                                                                         |
+| -q, --quiet              | false   | suppress per-file output; show only the final summary                                                                               |
+| -v, --verbose            | false   | show per-stage timing and debug information                                                                                         |
+| --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                                                                       |
+| -s, --source             |         | source directory containing media files to sort (default: current directory)                                                        |
+| -d, --dest               |         | destination directory for the organized archive (required)                                                                          |
+| --copyright              |         | copyright template injected into destination files, e.g. "Copyright {year} My Family" (tokens: {year}, {month}, {monthname}, {day}) |
+| --camera-owner           |         | camera owner string injected into destination files                                                                                 |
+| --dry-run                | false   | preview operations without copying any files                                                                                        |
+| --db-path                |         | explicit path to the SQLite archive database (overrides auto-resolution)                                                            |
+| -r, --recursive          | false   | recursively process subdirectories of --source                                                                                      |
+| --skip-duplicates        | false   | skip copying duplicate files instead of copying to duplicates/ directory                                                            |
+| --ignore                 |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")                                           |
+| --no-carry-sidecars      | false   | disable carrying pre-existing .aae and .xmp sidecar files from source to destination                                                |
+| --overwrite-sidecar-tags | false   | when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them                                 |
+| --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                                                           |
+| --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                                                     |
+| --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                                                    |
+| --path-template          |         | token-based template for destination directory structure (default: "{year}/{month}-{monthname}")                                    |
 
 <!-- pixe:end:sort-flags -->
 
@@ -194,7 +194,7 @@ pixe verify --dir /path/to/archive [options]
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                     |
 | -v, --verbose   | false   | show per-stage timing and debug information                               |
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml             |
-| -d, --dir       |         | archive directory to verify (required)                                    |
+| -d, --dest      |         | destination archive directory to verify (required)                        |
 | --progress      | false   | show a live progress bar instead of per-file text output (requires a TTY) |
 
 <!-- pixe:end:verify-flags -->
@@ -219,7 +219,7 @@ pixe resume --dir /path/to/archive
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                    |
 | -v, --verbose   | false   | show per-stage timing and debug information                              |
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml            |
-| -d, --dir       |         | destination directory containing the archive database (required)         |
+| -d, --dest      |         | destination directory containing the archive database (required)         |
 | --db-path       |         | explicit path to the SQLite archive database (overrides auto-resolution) |
 
 <!-- pixe:end:resume-flags -->
@@ -254,11 +254,11 @@ All subcommands accept `--json` for machine-readable output.
 
 <!-- pixe:begin:query-flags -->
 
-| Flag      | Default | Description                                                              |
-| --------- | ------- | ------------------------------------------------------------------------ |
-| -d, --dir |         | archive directory containing the database (required)                     |
-| --db-path |         | explicit path to the SQLite archive database (overrides auto-resolution) |
-| --json    | false   | emit JSON output instead of a table                                      |
+| Flag       | Default | Description                                                              |
+| ---------- | ------- | ------------------------------------------------------------------------ |
+| -d, --dest |         | archive directory containing the database (required)                     |
+| --db-path  |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+| --json     | false   | emit JSON output instead of a table                                      |
 
 <!-- pixe:end:query-flags -->
 
@@ -343,7 +343,7 @@ pixe clean --dir /path/to/archive [options]
 
 | Flag          | Default | Description                                              |
 | ------------- | ------- | -------------------------------------------------------- |
-| -d, --dir     |         | destination directory (dirB) to clean (required)         |
+| -d, --dest    |         | destination directory (dirB) to clean (required)         |
 | --db-path     |         | explicit path to the SQLite archive database             |
 | --dry-run     | false   | preview what would be cleaned without modifying anything |
 | --temp-only   | false   | only clean orphaned files, skip database compaction      |

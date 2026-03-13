@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased] -- Output Formatting, Copyright Syntax, Config File Dest, Flag Consistency
+
+### Changed
+
+- **Unified destination flag naming** — All commands (`verify`, `resume`, `clean`, `query`, `stats`) now use `--dest` / `-d` for destination directories, matching the `sort` command. Improves consistency across the CLI.
+
+- **Removed `MarkFlagRequired` for destination** — The `--dest` flag is no longer marked as required by Cobra, allowing `dest:` in `.pixe.yaml` or `PIXE_DEST` environment variable to satisfy the requirement without a CLI flag. Manual validation still ensures the destination is provided.
+
+- **Copyright token syntax** — Changed copyright template syntax from `{{.Year}}` to `{year}` to match path template tokens. Supports `{year}`, `{month}`, `{monthname}`, `{day}`. Copyright templates are now parsed and validated at startup, catching syntax errors early.
+
+- **Destination path prefixes in output** — Sort and status output now prefix destination paths with `...<basename>/` for clarity (e.g., `...Photos/2026/01-Jan/photo.jpg` instead of bare `2026/01-Jan/photo.jpg`). This cosmetic change improves readability when working with multiple archives.
+
+### Documentation
+
+- **Updated command documentation** — `docs/commands.md` and `README.md` regenerated to reflect new flag names, copyright syntax, and output format.
+
+---
+
 ## [Unreleased] -- Documentation Fixes
 
 ### Added
