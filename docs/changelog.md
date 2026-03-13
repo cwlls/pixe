@@ -9,6 +9,14 @@ nav_order: 10
 
 <!-- pixe:begin:changelog -->
 
+## [Unreleased] -- Lint Fixes
+
+### Chore
+
+- **Fixed ineffassign lint errors in progress reader tests** — Resolved three `ineffassign` violations in `internal/progress/reader_test.go` where `err` return values were assigned but never checked before being overwritten. Changed unused assignments to blank identifiers (`_`) in `TestProgressReader_NilBus`, `TestProgressReader_EOFFinalEvent`, and `TestProgressReader_UnknownSize`. All tests pass; `make lint` clean.
+
+---
+
 ## [Unreleased] -- UX Improvements: Ledger Prompt, Sidecar Annotations, Run Duration, Truncation Ellipsis
 
 ### Added
