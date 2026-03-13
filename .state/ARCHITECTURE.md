@@ -224,7 +224,7 @@ The `FileTypeHandler` interface (defined in `internal/domain/handler.go`) is the
 - `Extensions() []string` — Claimed extensions for fast-path detection.
 - `MagicBytes() []MagicSignature` — File header signatures.
 
-### 6.2 Supported Formats (14 handlers)
+### 6.2 Supported Formats (15 handlers)
 
 | Handler | Extensions | Container | Metadata | Notes |
 |---|---|---|---|---|
@@ -242,18 +242,64 @@ The `FileTypeHandler` interface (defined in `internal/domain/handler.go`) is the
 | ARW | `.arw` | TIFF | Sidecar | Sony |
 | ORF | `.orf` | TIFF | Sidecar | Olympus |
 | RW2 | `.rw2` | TIFF | Sidecar | Panasonic |
+| RAF | `.raf` | RAF (custom) | Sidecar | Fujifilm |
 
 ### 6.3 RAW Handler Architecture
 
 **Shared base + thin wrapper pattern.** Eight TIFF-based formats embed `tiffraw.Base` (`internal/handler/tiffraw/`), which provides `ExtractDate()`, `HashableReader()`, `MetadataSupport()`, and `WriteMetadataTags()`. Each wrapper supplies only `Extensions()`, `MagicBytes()`, and `Detect()`.
 
-CR3 is the exception — it uses an ISOBMFF container and has a standalone handler.
+CR3 and RAF are exceptions — they use non-TIFF containers and have standalone handlers.
 
 **Hashable region:** Raw sensor data (not embedded JPEG preview) for TIFF-based formats. Full-file hash for ISOBMFF formats (HEIC, AVIF, PNG). Sensor data is identified by IFD analysis: compression type, image dimensions, and `NewSubfileType` tag.
 
 **Registration:** All handlers registered via `buildRegistry()` in `cmd/helpers.go` — single source of truth. TIFF handler registered last to avoid claiming RAW files with standard TIFF magic bytes.
 
-### 6.4 Shared Test Suite
+### 6.4 RAF Handler (Fujifilm)
+
+RAF is Fujifilm's proprietary RAW container. Unlike every other RAW format in Pixe, it is neither TIFF-based nor ISOBMFF-based — it uses a custom binary layout with a fixed header, an offset directory, and three data regions.
+
+**Container layout (Big Endian):**
+
+```
+Offset  Size  Content
+0x00    16    Magic: "FUJIFILMCCD-RAW " (ASCII, space-padded)
+0x10    4     Format version (e.g., "0201")
+0x14    8     Camera serial/ID
+0x1C    32    Camera model name (null-terminated)
+0x3C    4     RAF version string
+        --- Offset directory (starting at byte 84) ---
+0x54    4     JPEG preview offset
+0x58    4     JPEG preview length
+0x5C    4     Meta container offset
+0x60    4     Meta container length
+0x64    4     CFA (raw sensor data) offset
+0x68    4     CFA (raw sensor data) length
+```
+
+All multi-byte integers are big-endian. The offset directory version field (at byte 0x54 minus some preamble) has known values `0100` and `0159`, but the three offset/length pairs are at the same positions regardless of version.
+
+**Date extraction strategy:**
+1. Read the 4-byte JPEG offset at position 0x54 (big-endian).
+2. Seek to that offset — the embedded JPEG is a standard JFIF/EXIF image containing the full EXIF metadata block.
+3. Parse the JPEG's APP1 segment with `rwcarlsen/goexif` to extract `DateTimeOriginal` → `DateTime` → Ansel Adams fallback.
+
+This is a single offset lookup followed by standard EXIF parsing — simpler than CR3's nested ISOBMFF/UUID traversal.
+
+**Hashable region:** The CFA offset and CFA length fields (at 0x64 and 0x68) point directly to the raw sensor data. The handler returns a `sectionReadCloser` bounded to this region, excluding the header, embedded JPEG, and metadata container. This ensures metadata edits (tagging, XMP sidecars) do not invalidate the content hash.
+
+**Magic bytes:** `"FUJIFILMCCD-RAW "` (16 bytes at offset 0) — fully distinctive, no collision risk with any other format. Fits exactly within the registry's 16-byte `magicReadSize`.
+
+**Detection:** Extension check (`.raf`) AND 16-byte magic verification. No secondary brand check needed (unlike ISOBMFF formats).
+
+**Metadata:** `MetadataSidecar`. Tags written via XMP sidecar (`.raf.xmp`).
+
+**Scope:** Single handler covers all Fujifilm cameras from S2 Pro (2002) through current X-series and GFX models. The header structure and offset directory layout are consistent across all generations — differences in sensor layout (Bayer vs. X-Trans) and compression algorithms are irrelevant to Pixe's sorting pipeline.
+
+**Embedded XMP:** Some cameras write an XMP packet inside the embedded JPEG preview (used for in-camera ratings). The RAF handler ignores this — it is not relevant to sorting.
+
+**Implementation:** `internal/handler/raf/` — standalone handler (no embedded base). Three files: `raf.go`, `raf_test.go`, `fuzz_test.go`.
+
+### 6.5 Shared Test Suite
 
 `handlertest.RunSuite()` provides an 18-test harness (10 standard + 8 edge-case) covering detection, date extraction, hashing, metadata capability, and crash resistance on pathological inputs (empty files, truncated files, corrupt EXIF, mismatched extensions).
 
@@ -456,7 +502,7 @@ All testing initiatives are fully implemented.
 
 ### 14.1 Fuzz Testing
 
-Go's `testing.F` fuzzer targets `Detect()`, `ExtractDate()`, and `HashableReader()` for 7 handler packages: JPEG, HEIC, AVIF, MP4, CR3, PNG, and tiffraw. TIFF-based wrappers (DNG, NEF, etc.) are covered via the tiffraw fuzz test.
+Go's `testing.F` fuzzer targets `Detect()`, `ExtractDate()`, and `HashableReader()` for 8 handler packages: JPEG, HEIC, AVIF, MP4, CR3, PNG, RAF, and tiffraw. TIFF-based wrappers (DNG, NEF, etc.) are covered via the tiffraw fuzz test.
 
 - Fuzz files: `internal/handler/<format>/fuzz_test.go`
 - Only failure condition is a panic — errors and fallbacks are valid.
