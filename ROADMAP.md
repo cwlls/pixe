@@ -9,13 +9,6 @@ This document tracks planned features and improvements for Pixe. Items are group
 
 ---
 
-## A. New File Format Support
-
-### A5 — RAF Handler (Fujifilm RAW) 🟡
-Support for Fujifilm's proprietary RAF format. Unlike other RAW formats, RAF is not TIFF-based — it uses a custom container with an embedded JPEG preview and raw sensor data. Requires a new parser. Niche but Fujifilm has a devoted user base.
-
----
-
 ## B. Pipeline & Core Engine
 
 ### B4 — Configurable Destination Path Templates 🟡

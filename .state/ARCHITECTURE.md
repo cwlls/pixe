@@ -122,10 +122,55 @@ YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>
 ```
 
 - **Algorithm ID:** Single-digit numeric identifier (0=MD5, 1=SHA-1 [default], 2=SHA-256, 3=BLAKE3, 4=xxHash-64). IDs are permanent.
-- **Directory structure:** `<dirB>/<YYYY>/<MM>-<Mon>/` — month abbreviation is locale-aware.
+- **Directory structure:** `<dirB>/<YYYY>/<MM>-<Mon>/` — month abbreviation is locale-aware. Configurable via path template (see §4.5.1).
 - **Legacy format:** `YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>` (pre-I2, no algorithm ID). Detected by `_` vs `-` at position 15. Legacy files coexist indefinitely — no mass-rename.
 
 Implementation: `internal/pathbuilder/` — `Build()` function.
+
+#### 4.5.1 Configurable Path Templates
+
+The **directory structure** leading to the filename is user-configurable via `--path-template` flag or `path_template` config key. The **filename itself is not configurable** — it always follows the `YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>` format. This preserves the determinism guarantee and ensures `pixe verify` can always extract the checksum and algorithm from the filename without consulting the database.
+
+**Syntax:** Simple token-based substitution using `{token}` placeholders. No logic, no conditionals, no pipes — just direct variable replacement. This is intentionally simpler than Go `text/template` to prevent users from introducing non-deterministic or fragile path expressions.
+
+**Default template:** `{year}/{month}-{monthname}` — produces the same output as the pre-template hardcoded structure.
+
+**Available tokens:**
+
+| Token | Description | Example |
+|---|---|---|
+| `{year}` | 4-digit capture year | `2021` |
+| `{month}` | 2-digit zero-padded capture month | `12` |
+| `{monthname}` | Locale-aware 3-letter month abbreviation | `Dec` |
+| `{day}` | 2-digit zero-padded capture day | `25` |
+| `{hour}` | 2-digit zero-padded capture hour (24h) | `06` |
+| `{minute}` | 2-digit zero-padded capture minute | `22` |
+| `{second}` | 2-digit zero-padded capture second | `23` |
+| `{ext}` | Lowercase extension without dot | `jpg` |
+
+**Examples:**
+
+| Template | Result for 2021-12-25 06:22:23 |
+|---|---|
+| `{year}/{month}-{monthname}` | `2021/12-Dec/` (default) |
+| `{year}/{month}/{day}` | `2021/12/25/` |
+| `{year}` | `2021/` |
+| `{year}/{month}-{monthname}/{day}` | `2021/12-Dec/25/` |
+| `{year}/{ext}` | `2021/jpg/` |
+
+**Validation rules (enforced at startup, before any files are processed):**
+
+1. Template must not be empty.
+2. All `{...}` tokens must be from the known set above. Unknown tokens are a fatal error.
+3. Template must not contain path-traversal components (`.` or `..`).
+4. Template must not start with `/` (it is always relative to `dirB`).
+5. Template must not contain characters invalid in directory names (`:`, `*`, `?`, `"`, `<`, `>`, `|`, null byte).
+
+**Duplicate routing is not affected.** Duplicates always use `duplicates/<run_timestamp>/<template-expanded-path>/` — the `duplicates/` prefix and run timestamp are hardcoded and prepended to whatever the template produces.
+
+**Interaction with `pixe verify`:** Since the filename format is fixed, `parseChecksum()` continues to work unchanged regardless of the directory template. No verify changes needed.
+
+**Config layering:** `path_template` follows the standard priority chain (CLI flag > source-local `.pixe.yaml` > profile > global config > default). This allows a source-local config to override the template for a specific import source.
 
 ### 4.6 Duplicate Handling
 
@@ -181,6 +226,33 @@ Implementation: `internal/discovery/sidecar.go` — `associateSidecars()`.
 - **Config profiles:** `--profile <name>` loads from `~/.pixe/profiles/<name>.yaml`.
 - **Verbosity:** `--quiet` (suppresses per-file output), `--verbose` (adds timing info). Mutually exclusive.
 - **`pixe stats`:** Archive dashboard showing totals, format breakdown, date range. Supports `--json`.
+- **Destination aliases:** See §4.13.
+
+### 4.13 Destination Aliases
+
+`pixe sort --dest @nas` resolves the `@`-prefixed alias to a filesystem path configured in `.pixe.yaml` under the `aliases` map. This saves typing long or environment-specific paths on every invocation.
+
+**Configuration:**
+
+```yaml
+# ~/.pixe.yaml (global) or <source>/.pixe.yaml (source-local)
+aliases:
+  nas: /Volumes/NAS/Photos
+  backup: /Volumes/Backup/Archive
+  local: ~/Pictures/Sorted
+```
+
+**Resolution rules:**
+
+1. If the `--dest` value (from CLI flag, config file, or env var) starts with `@`, the remainder is looked up in the `aliases` map.
+2. If the alias is not found, Pixe exits with a fatal error listing the available aliases.
+3. If the `--dest` value does not start with `@`, it is used as a literal path (existing behavior, unchanged).
+4. Alias resolution happens after config merging but before destination validation — the resolved path goes through the same existence/creation checks as any literal path.
+5. Aliases can be used anywhere `dest` is accepted: `--dest` CLI flag, `dest:` key in `.pixe.yaml`, or `PIXE_DEST` env var.
+
+**Config layering:** Aliases follow the standard merge priority. A source-local `.pixe.yaml` can define aliases that augment (not replace) global aliases. On collision, source-local wins. This allows a camera-specific source directory to define `@default` pointing to its preferred archive.
+
+**Scope:** Alias resolution is implemented in the `cmd/` layer only — no packages below `cmd/` are aware of aliases. By the time `config.AppConfig.Destination` is populated, it contains the resolved filesystem path.
 
 ---
 
@@ -330,7 +402,7 @@ Key flags are defined in each command's source file under `cmd/`. See `cmd/helpe
 
 ### 7.2 Configuration File
 
-`.pixe.yaml` supports: `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list).
+`.pixe.yaml` supports: `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list), `path_template` (string, see §4.5.1), `aliases` (map of name→path, see §4.13).
 
 ### 7.3 Query Command
 
