@@ -4,13 +4,15 @@
 
 ---
 
-## [Unreleased] -- Graceful Shutdown & Documentation Fixes
+## [Unreleased] -- Documentation Fixes
 
 ### Added
 
 - **Changelog sync via docgen** — `docs/changelog.md` is now a generated file. `extractChangelog()` in `internal/docgen/extract.go` reads the root `CHANGELOG.md`, strips the title and preamble, and injects the full version history into `docs/changelog.md` via the existing marker-based injection system. Running `make docs` keeps both files in sync; `make docs-check` (CI gate) detects drift. Three new tests added to `internal/docgen/docgen_test.go`.
 
 ### Bug Fixes
+
+- **Full documentation reconciliation pass** — Resolved all 19 discrepancies identified in the deep scan. Updated source code comments in `internal/domain/handler.go` to accurately reflect full-file hashing behavior. Fixed documentation across 8 files (`docs/how-it-works.md`, `docs/technical.md`, `docs/adding-formats.md`, `docs/commands.md`, `docs/index.md`, `README.md`, `AGENTS.md`, `.state/ARCHITECTURE.md`) to align with current implementation: hashing strategy (full-file, not payload-only), output naming convention (added ALGO_ID), tagging approach (XMP sidecars for all formats), pipeline stages (8 stages including sidecar carry), handler registration (single `buildRegistry()` in `cmd/helpers.go`), Go version requirement (1.25+), and project layout (added 6 missing packages). Added `pixe stats` command documentation. All changes verified with `make docs-check` and `make check`.
 
 - **Fixed docgen blank-line injection for GitHub Pages kramdown** — `injectContent()` in `internal/docgen/inject.go` was not emitting blank lines between begin/end markers and injected content. GitHub Pages (kramdown) requires a blank line before Markdown tables for correct rendering. Updated `injectContent()` to append blank lines before and after trimmed content, and updated test assertions in `docgen_test.go` to match. All 27 docgen tests pass; documentation regenerated via `go run ./internal/docgen`.
 

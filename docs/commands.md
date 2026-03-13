@@ -225,6 +225,50 @@ $ pixe clean --dir /path/to/archive [options]
 
 ---
 
+## pixe stats
+
+Show archive statistics and summary dashboard.
+
+Displays totals, format breakdown, date range, error rate, and last import date for a destination archive. All data is read from the archive database — no files are modified.
+
+```bash
+$ pixe stats --dir /path/to/archive [options]
+```
+
+<!-- pixe:begin:stats-flags -->
+
+| Flag      | Default | Description                                             |
+| --------- | ------- | ------------------------------------------------------- |
+| -d, --dir |         | destination directory containing the archive (required) |
+| --db-path |         | explicit path to the SQLite archive database            |
+| --json    | false   | emit output as JSON                                     |
+
+<!-- pixe:end:stats-flags -->
+
+### Example output
+
+```
+Archive: /Users/wells/Archive
+
+Files:       12,847 (48.3 GB)
+Duplicates:  234
+Errors:      0
+Skipped:     18
+
+Date Range:  2015-06-01 to 2026-03-13
+Last Import: 2026-03-13 10:30:00 UTC
+Total Runs:  42
+
+Format Breakdown:
+  .jpg     8,421 (65.5%)
+  .heic    2,103 (16.4%)
+  .nef     1,204 (9.4%)
+  .mp4     891  (6.9%)
+  .dng     228  (1.8%)
+```
+
+---
+
 ## pixe version
 
 Print version, commit, and build date.

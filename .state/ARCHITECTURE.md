@@ -27,7 +27,6 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **Image EXIF (read)** | `rwcarlsen/goexif` | No external binary dependency; read-only — no EXIF writing libraries |
 | **HEIC/AVIF Parsing** | `dsoprea/go-heic-exif-extractor` | ISOBMFF container-level EXIF extraction |
 | **MP4 Parsing** | `abema/go-mp4` | Atom-level access for metadata and keyframe extraction |
-| **TIFF/RAW Parsing** | `golang.org/x/image/tiff` | IFD traversal for EXIF extraction in TIFF-based RAW formats |
 | **Hashing** | `crypto/md5`, `crypto/sha1` (default), `crypto/sha256`, `github.com/zeebo/blake3`, `github.com/cespare/xxhash/v2` | Configurable algorithm with numeric ID embedded in filename |
 | **Persistence** | SQLite (`modernc.org/sqlite`, CGo-free) | Cumulative registry, concurrent-safe, queryable |
 | **Glob Matching** | `bmatcuk/doublestar/v4` | `**` recursive globs, `{alt}` alternatives; superset of `filepath.Match` |

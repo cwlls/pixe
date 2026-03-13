@@ -7,7 +7,7 @@ title: How It Works
 Every file passes through a linear pipeline. If any stage fails, the file is flagged and the pipeline continues with the next file — nothing is silently skipped.
 
 ```
-discover → extract → hash → copy → verify → tag → complete
+discover → extract → hash → copy → verify → carry sidecars → tag → complete
 ```
 
 ## Pipeline stages
@@ -18,13 +18,15 @@ Each file moves through these stages in order, with its state tracked in the arc
 
 **Extract** — The handler reads the file's metadata to extract the capture date. The fallback chain is: EXIF `DateTimeOriginal` → EXIF `CreateDate` → February 20, 1902 (Ansel Adams' birthday, used as a sentinel for undated files).
 
-**Hash** — A checksum is computed over the media payload only — the pixel data or sensor data, not the metadata wrapper. This is what makes deduplication reliable across software tools that may regenerate embedded previews or metadata.
+**Hash** — A checksum is computed over the complete file contents. Destination files are byte-identical copies of their source, and metadata is expressed exclusively via XMP sidecars — the full-file hash remains stable regardless of tagging operations.
 
 **Copy** — The file is written to a temporary file (`.<filename>.pixe-tmp-<random>`) in the destination directory. The temp file lives in the same directory as the final destination to guarantee that the rename in the next step is atomic.
 
 **Verify** — The temp file is independently re-read and re-hashed. If the checksum matches the source hash, the file is good. If it doesn't match, the temp file is deleted and the file is flagged as a mismatch — the source is untouched and can be reprocessed.
 
-**Tag** — If `--copyright` or `--camera-owner` is configured, metadata is injected. JPEG files receive embedded EXIF tags. All other formats (HEIC, RAW, video) receive an XMP sidecar file alongside the destination copy. When a `.xmp` sidecar was carried from the source, tags are merged into it instead of generating a new one — existing values in the source `.xmp` are preserved by default (`--overwrite-sidecar-tags` inverts this). If no tags are configured, this stage is skipped.
+**Carry sidecars** — Pre-existing `.aae` and `.xmp` sidecar files associated with the media file are copied to the destination alongside it. Sidecars are matched by stem (case-insensitive). Sidecar carry failure is non-fatal — the media file is still marked complete.
+
+**Tag** — If `--copyright` or `--camera-owner` is configured, metadata is injected. All formats receive an XMP sidecar file alongside the destination copy. When a `.xmp` sidecar was carried from the source, tags are merged into it instead of generating a new one — existing values in the source `.xmp` are preserved by default (`--overwrite-sidecar-tags` inverts this). If no tags are configured, this stage is skipped.
 
 **Complete** — The temp file is atomically renamed to its canonical destination path. A file at its canonical path in the archive is always complete and verified.
 
@@ -37,9 +39,9 @@ Each file moves through these stages in order, with its state tracked in the arc
 Every file discovered in the source produces exactly one line of output:
 
 ```
-COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223_abc123ef.jpg
+COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223-1-7d97e98f.jpg
 SKIP IMG_0002.jpg -> previously imported
-DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223_abc123ef.jpg
+DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223-1-7d97e98f.jpg
 ERR  corrupt.jpg  -> extract date: no EXIF data
 
 Done. processed=4 duplicates=1 skipped=1 errors=1
@@ -62,7 +64,7 @@ When sorting media files, Pixe automatically detects and carries pre-existing `.
 
 - **Automatic detection** — Sidecars are matched to their parent media file by stem (filename without extension). `IMG_1234.xmp` associates with `IMG_1234.HEIC`; the full-extension Adobe convention `IMG_1234.HEIC.xmp` is also supported and takes priority.
 - **Case-insensitive matching** — `img_1234.xmp` matches `IMG_1234.HEIC`.
-- **Destination naming** — The sidecar is renamed to match the destination media file. For example, if `IMG_1234.HEIC` becomes `20211225_062223_7d97e98f.heic`, then `IMG_1234.aae` becomes `20211225_062223_7d97e98f.heic.aae`.
+- **Destination naming** — The sidecar is renamed to match the destination media file. For example, if `IMG_1234.HEIC` becomes `20211225_062223-1-7d97e98f.heic`, then `IMG_1234.aae` becomes `20211225_062223-1-7d97e98f.heic.aae`.
 - **Enabled by default** — Use `--no-carry-sidecars` to disable sidecar carry entirely.
 - **Orphan sidecars** — Sidecars with no matching media file are reported as `SKIP` with reason `orphan sidecar: no matching media file`.
 - **Dry-run preview** — In dry-run mode, `+sidecar` lines appear in the output showing what would be carried, without copying any files.
@@ -71,9 +73,9 @@ When sorting media files, Pixe automatically detects and carries pre-existing `.
 **Output format:**
 
 ```
-COPY IMG_1234.HEIC -> 2021/12-Dec/20211225_062223_7d97e98f.heic
-     +sidecar IMG_1234.aae -> 2021/12-Dec/20211225_062223_7d97e98f.heic.aae
-     +sidecar IMG_1234.xmp -> 2021/12-Dec/20211225_062223_7d97e98f.heic.xmp (merge tags)
+COPY IMG_1234.HEIC -> 2021/12-Dec/20211225_062223-1-7d97e98f.heic
+     +sidecar IMG_1234.aae -> 2021/12-Dec/20211225_062223-1-7d97e98f.heic.aae
+     +sidecar IMG_1234.xmp -> 2021/12-Dec/20211225_062223-1-7d97e98f.heic.xmp (merge tags)
 ```
 
 **XMP tag merge:**
@@ -84,11 +86,13 @@ When a `.xmp` sidecar is carried AND `--copyright` or `--camera-owner` is config
 
 ## Output naming
 
-Files are named using a deterministic scheme that encodes the capture date and content checksum:
+Files are named using a deterministic scheme that encodes the capture date, hash algorithm, and content checksum:
 
 ```
-YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>
 ```
+
+The algorithm ID is a single digit: `0`=MD5, `1`=SHA-1 (default), `2`=SHA-256, `3`=BLAKE3, `4`=xxHash. This allows `pixe verify` to auto-detect the correct algorithm from the filename without consulting the database.
 
 Organized into a date-based directory structure:
 
@@ -96,7 +100,7 @@ Organized into a date-based directory structure:
 <dest>/<YYYY>/<MM-Mon>/<filename>
 ```
 
-**Example:** `Archive/2021/12-Dec/20211225_062223_7d97e98fbc14....jpg`
+**Example:** `Archive/2021/12-Dec/20211225_062223-1-7d97e98fbc14....jpg`
 
 The month directory uses a locale-aware three-letter abbreviation (`01-Jan`, `02-Feb`, ..., `12-Dec`). On a French locale, this would produce `03-Mars` instead of `03-Mar`. The numeric prefix is always zero-padded.
 
@@ -174,4 +178,4 @@ The progress bar is powered by a pipeline event bus (`internal/progress/`) — a
 
 <!-- pixe:end:format-table -->
 
-All formats support the full pipeline: date extraction, content hashing, copy-then-verify, and metadata tagging (via embedded EXIF for JPEG, or XMP sidecar for all others).
+All formats support the full pipeline: date extraction, content hashing, copy-then-verify, and metadata tagging via XMP sidecar.

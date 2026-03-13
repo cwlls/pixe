@@ -74,10 +74,10 @@ const (
 //
 // Hashable region:
 //
-//	Each handler defines what constitutes the "media payload" for its
-//	format — the bytes that are hashed and embedded in the output filename.
-//	This region excludes metadata so that metadata edits (e.g. tagging)
-//	do not invalidate the checksum.
+//	All handlers hash the complete file contents. Destination files are
+//	byte-identical copies of their source, and metadata is expressed
+//	exclusively via XMP sidecars, so the full-file hash remains stable
+//	regardless of tagging operations.
 type FileTypeHandler interface {
 	// Detect returns true if this handler can process the given file.
 	// Implementations should verify magic bytes at the file header after
@@ -90,11 +90,11 @@ type FileTypeHandler interface {
 	// (Ansel Adams' birthday), making undated files immediately identifiable.
 	ExtractDate(filePath string) (time.Time, error)
 
-	// HashableReader returns an io.Reader scoped to the media payload only,
-	// excluding all metadata. The core engine pipes this reader through the
-	// configured hash algorithm. Callers are responsible for closing any
-	// underlying file handles; implementations should return a reader that
-	// holds an open file and document that the caller must close it.
+	// HashableReader returns an io.ReadCloser over the complete file contents.
+	// The core engine pipes this reader through the configured hash algorithm.
+	// All current handlers return a reader over the full file — destination
+	// files are byte-identical copies of their source. Callers are responsible
+	// for closing the returned reader.
 	HashableReader(filePath string) (io.ReadCloser, error)
 
 	// MetadataSupport declares this handler's metadata tagging capability.

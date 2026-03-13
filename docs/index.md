@@ -64,7 +64,7 @@ discover → extract → hash → copy → verify → tag → complete
 
 - **Discover** — walk source, classify by type
 - **Extract** — read capture date from metadata
-- **Hash** — checksum the media payload
+- **Hash** — checksum the complete file contents
 - **Copy** — write to temp file in destination
 - **Verify** — re-hash destination, confirm match
 - **Tag** — optionally inject copyright metadata
@@ -76,7 +76,7 @@ discover → extract → hash → copy → verify → tag → complete
 
 ## Quick start
 
-Install (requires Go 1.21+):
+Install (requires Go 1.25+):
 
 ```bash
 go install github.com/cwlls/pixe@latest
@@ -92,9 +92,9 @@ $ pixe sort --source ~/Photos --dest ~/Archive --recursive
 Example output:
 
 ```
-COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223_abc123ef.jpg
+COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223-1-7d97e98f.jpg
 SKIP IMG_0002.jpg -> previously imported
-DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223_abc123ef.jpg
+DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223-1-7d97e98f.jpg
 ERR  corrupt.jpg  -> extract date: no EXIF data
 
 Done. processed=4 duplicates=1 skipped=1 errors=1

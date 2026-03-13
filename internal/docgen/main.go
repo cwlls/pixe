@@ -150,6 +150,7 @@ func buildTargets() []Target {
 				"verify-flags": extractFlags(filepath.Join("cmd", "verify.go"), "markdown", true),
 				"resume-flags": extractFlags(filepath.Join("cmd", "resume.go"), "markdown", true),
 				"status-flags": extractFlags(filepath.Join("cmd", "status.go"), "markdown", true),
+				"stats-flags":  extractFlags(filepath.Join("cmd", "stats.go"), "markdown", false),
 				"clean-flags":  extractFlags(filepath.Join("cmd", "clean.go"), "markdown", false),
 				"query-flags":  extractFlags(filepath.Join("cmd", "query.go"), "markdown", false),
 				"query-subs":   extractQuerySubcommands("markdown"),

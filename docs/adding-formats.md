@@ -43,10 +43,10 @@ const (
 //
 // Hashable region:
 //
-//	Each handler defines what constitutes the "media payload" for its
-//	format — the bytes that are hashed and embedded in the output filename.
-//	This region excludes metadata so that metadata edits (e.g. tagging)
-//	do not invalidate the checksum.
+//	All handlers hash the complete file contents. Destination files are
+//	byte-identical copies of their source, and metadata is expressed
+//	exclusively via XMP sidecars, so the full-file hash remains stable
+//	regardless of tagging operations.
 type FileTypeHandler interface {
 	// Detect returns true if this handler can process the given file.
 	// Implementations should verify magic bytes at the file header after
@@ -59,11 +59,11 @@ type FileTypeHandler interface {
 	// (Ansel Adams' birthday), making undated files immediately identifiable.
 	ExtractDate(filePath string) (time.Time, error)
 
-	// HashableReader returns an io.Reader scoped to the media payload only,
-	// excluding all metadata. The core engine pipes this reader through the
-	// configured hash algorithm. Callers are responsible for closing any
-	// underlying file handles; implementations should return a reader that
-	// holds an open file and document that the caller must close it.
+	// HashableReader returns an io.ReadCloser over the complete file contents.
+	// The core engine pipes this reader through the configured hash algorithm.
+	// All current handlers return a reader over the full file — destination
+	// files are byte-identical copies of their source. Callers are responsible
+	// for closing the returned reader.
 	HashableReader(filePath string) (io.ReadCloser, error)
 
 	// MetadataSupport declares this handler's metadata tagging capability.
@@ -95,7 +95,7 @@ type FileTypeHandler interface {
 - **`MagicBytes()`** — Return the byte signatures at known offsets that uniquely identify your format. Used to confirm the file is actually what the extension claims.
 - **`Detect()`** — Check the extension, then verify magic bytes. Return `true` if this handler should process the file.
 - **`ExtractDate()`** — Parse the file's metadata to find the capture date. Apply the fallback chain: `DateTimeOriginal` → `CreateDate` → February 20, 1902.
-- **`HashableReader()`** — Return a reader over the media payload only — the pixel data, sensor data, or video frames — not the metadata wrapper. This is what gets checksummed for deduplication and integrity verification.
+- **`HashableReader()`** — Return a reader over the complete file contents. All current handlers hash the full file — destination files are byte-identical copies of their source. This is what gets checksummed for deduplication and integrity verification.
 - **`MetadataSupport()`** — Declare your capability. Use `MetadataEmbed` only if you can safely write tags directly into the file format. Use `MetadataSidecar` for most formats — the pipeline will write an XMP sidecar alongside the destination copy. Use `MetadataNone` if metadata association is meaningless for this format.
 - **`WriteMetadataTags()`** — Implement in-file tag writing for `MetadataEmbed` handlers. For `MetadataSidecar` and `MetadataNone` handlers, implement as a no-op that returns `nil` (required for interface compliance, but never called by the pipeline).
 
@@ -190,12 +190,10 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 
 **6. Implement `HashableReader()`**
 
-Return a reader over the VP8/VP8L/VP8X image data payload, excluding the RIFF/WEBP header and EXIF chunk:
+Return a reader over the complete file contents. All handlers hash the full file — destination files are byte-identical copies of their source:
 
 ```go
-func (h *Handler) HashableReader(filePath string) (io.Reader, error) {
-    // ... locate and return reader over image data payload ...
-    // If payload cannot be isolated, fall back to full file
+func (h *Handler) HashableReader(filePath string) (io.ReadCloser, error) {
     return os.Open(filePath)
 }
 ```
@@ -217,12 +215,16 @@ func (h *Handler) WriteMetadataTags(_ string, _ domain.MetadataTags) error {
 
 **8. Register in CLI commands**
 
-Add `reg.Register(webphandler.New())` to the handler registry in all four command files:
+Add your handler to the `buildRegistry()` function in `cmd/helpers.go`:
 
-- `cmd/sort.go`
-- `cmd/verify.go`
-- `cmd/resume.go`
-- `cmd/status.go`
+```go
+import webphandler "github.com/cwlls/pixe/internal/handler/webp"
+
+// In buildRegistry():
+reg.Register(webphandler.New())
+```
+
+Register before `tiffhandler.New()` — TIFF is always last to avoid claiming TIFF-based RAW files by their shared magic bytes.
 
 ---
 

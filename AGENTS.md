@@ -151,18 +151,24 @@ if errors.Is(err, sql.ErrNoRows) {
 cmd/                    CLI commands (Cobra). No business logic here.
 internal/
   archivedb/            SQLite database (schema, CRUD, queries)
+  benchmark/            Centralized benchmark suite (hash, copy, db, discovery, pathbuilder)
+  cli/                  Bubble Tea progress bar model and Lip Gloss styles
   config/               AppConfig struct (populated by cmd/, read by pipeline/)
   copy/                 File copy + verify
   dblocator/            Database path resolution (local vs network mount)
   discovery/            File walking + handler registry
+  docgen/               Development-time doc generation tool (marker-based injection)
   domain/               Shared types (FileStatus, Ledger, Manifest, FileTypeHandler)
+  fileutil/             Shared file-path utilities (extension normalization)
   handler/              FileTypeHandler implementations (jpeg/, heic/, mp4/, tiffraw/, dng/, ...)
-  hash/                 Configurable hasher (SHA-1, SHA-256)
+  hash/                 Configurable hasher (MD5, SHA-1, SHA-256, BLAKE3, xxHash)
+  ignore/               Glob-based file ignore matching with .pixeignore support
   integration/          End-to-end tests (excluded from `make test`)
   manifest/             JSON ledger/manifest persistence
   migrate/              Legacy JSON manifest → SQLite migration
   pathbuilder/          Destination path construction (date-based, locale-aware)
   pipeline/             Sort orchestrator (sequential + concurrent)
+  progress/             Pipeline event bus (typed events, non-blocking channel, plain text writer)
   tagging/              Metadata tag injection (dispatch via handler capability)
   verify/               Post-sort verification
   xmp/                  XMP sidecar file generation (Adobe-compatible)
