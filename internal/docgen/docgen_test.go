@@ -569,6 +569,86 @@ func TestExtractQuerySubcommands_allSubcommands(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Changelog extractor tests
+// ---------------------------------------------------------------------------
+
+func TestExtractChangelog_containsVersionEntries(t *testing.T) {
+	root := repoRoot(t)
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	result, err := extractChangelog()
+	if err != nil {
+		t.Fatalf("extractChangelog: %v", err)
+	}
+
+	versions := []string{"## [v2.6", "## [v1.0.0]", "## [v0.9.0]"}
+	for _, v := range versions {
+		if !strings.Contains(result, v) {
+			t.Errorf("changelog missing version entry %q", v)
+		}
+	}
+}
+
+func TestExtractChangelog_stripsTitle(t *testing.T) {
+	root := repoRoot(t)
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	result, err := extractChangelog()
+	if err != nil {
+		t.Fatalf("extractChangelog: %v", err)
+	}
+
+	if strings.Contains(result, "# Changelog: Pixe") {
+		t.Errorf("result should not contain the root CHANGELOG.md title line")
+	}
+	if strings.HasPrefix(strings.TrimSpace(result), "#") {
+		// The first non-blank line should be a version heading (## [...]), not the title.
+		first := strings.TrimSpace(result)
+		if strings.HasPrefix(first, "# ") && !strings.HasPrefix(first, "## ") {
+			t.Errorf("result starts with h1 title, expected h2 version heading: %q", first[:min(len(first), 60)])
+		}
+	}
+}
+
+func TestExtractChangelog_deterministic(t *testing.T) {
+	root := repoRoot(t)
+	orig, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	first, err := extractChangelog()
+	if err != nil {
+		t.Fatalf("first extractChangelog: %v", err)
+	}
+	second, err := extractChangelog()
+	if err != nil {
+		t.Fatalf("second extractChangelog: %v", err)
+	}
+
+	if first != second {
+		t.Errorf("extractChangelog is not deterministic")
+	}
+}
+
+// min returns the smaller of a and b.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// ---------------------------------------------------------------------------
 // Format function tests
 // ---------------------------------------------------------------------------
 

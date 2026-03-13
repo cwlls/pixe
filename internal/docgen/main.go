@@ -180,5 +180,11 @@ func buildTargets() []Target {
 				"package-list": extractPackageReference,
 			},
 		},
+		{
+			File: filepath.Join("docs", "changelog.md"),
+			Sections: map[string]func() (string, error){
+				"changelog": extractChangelog,
+			},
+		},
 	}
 }

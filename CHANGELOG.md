@@ -10,6 +10,8 @@
 
 - **Graceful signal handling for SIGINT/SIGTERM** — The sort and resume pipelines now respond gracefully to interrupt signals. Workers drain cleanly, finishing their current file before exiting. A second signal restores default behavior for hard exit. Implemented via `signal.NotifyContext` wired to pipeline context.
 
+- **Changelog sync via docgen** — `docs/changelog.md` is now a generated file. `extractChangelog()` in `internal/docgen/extract.go` reads the root `CHANGELOG.md`, strips the title and preamble, and injects the full version history into `docs/changelog.md` via the existing marker-based injection system. Running `make docs` keeps both files in sync; `make docs-check` (CI gate) detects drift. Three new tests added to `internal/docgen/docgen_test.go`.
+
 ### Bug Fixes
 
 - **Fixed docgen blank-line injection for GitHub Pages kramdown** — `injectContent()` in `internal/docgen/inject.go` was not emitting blank lines between begin/end markers and injected content. GitHub Pages (kramdown) requires a blank line before Markdown tables for correct rendering. Updated `injectContent()` to append blank lines before and after trimmed content, and updated test assertions in `docgen_test.go` to match. All 27 docgen tests pass; documentation regenerated via `go run ./internal/docgen`.

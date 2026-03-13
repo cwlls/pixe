@@ -758,6 +758,44 @@ func extractPackageDoc(dir string, goFiles []string) (PackageInfo, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Changelog extractor
+// ---------------------------------------------------------------------------
+
+// extractChangelog reads the root CHANGELOG.md and returns its content with
+// the title line and preamble stripped, suitable for injection into
+// docs/changelog.md. The returned string is already valid markdown — no
+// reformatting is applied.
+//
+// Stripping strategy: skip all lines before the first `## ` version/section
+// heading. This removes the h1 title, the preamble italics line, blank lines,
+// and the horizontal rule separator — without touching any `##` headings.
+func extractChangelog() (string, error) {
+	src, err := os.ReadFile("CHANGELOG.md")
+	if err != nil {
+		return "", fmt.Errorf("extract changelog: read CHANGELOG.md: %w", err)
+	}
+
+	lines := strings.Split(string(src), "\n")
+	var keep []string
+	started := false
+
+	for _, line := range lines {
+		if !started {
+			// Begin capturing at the first h2 heading (## ...).
+			if strings.HasPrefix(line, "## ") {
+				started = true
+			} else {
+				continue
+			}
+		}
+		keep = append(keep, line)
+	}
+
+	result := strings.TrimRight(strings.Join(keep, "\n"), "\n")
+	return result, nil
+}
+
+// ---------------------------------------------------------------------------
 // Task 8: Query subcommand extractor
 // ---------------------------------------------------------------------------
 
