@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Changelog
-section_label: History
-permalink: /changelog/
 ---
+
+# Changelog
 
 *Newest changes at the top. Version numbers are derived directly from git tags.*
 

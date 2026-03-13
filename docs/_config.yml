@@ -1,20 +1,11 @@
+theme: jekyll-theme-slate
 title: Pixe
 description: Safe, deterministic photo and video sorting
 url: "https://cwlls.github.io"
 baseurl: "/pixe-go"
 # <!-- pixe:begin:version -->
-version: "v2.3.1"
+version: "v2.4.0"
 # <!-- pixe:end:version -->
-tagline: "Your originals are never touched. Every copy is verified before it counts. Interrupted runs resume exactly where they left off."
-markdown: kramdown
-kramdown:
-  input: GFM
-  syntax_highlighter: rouge
-  syntax_highlighter_opts:
-    default_lang: bash
-sass:
-  sass_dir: _sass
-  style: compressed
 exclude:
   - README.md
   - Gemfile

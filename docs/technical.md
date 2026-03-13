@@ -1,15 +1,14 @@
 ---
-layout: page
-title: Why Pixe is built this way
-section_label: Design
-permalink: /technical/
+title: Technical Design
 ---
+
+# Technical Design
 
 Pixe makes specific engineering choices that distinguish it from other photo sorting tools. This page explains those choices and why they matter for a tool whose job is to handle irreplaceable media.
 
 ---
 
-### Source files are never touched
+## Source files are never touched
 
 Pixe treats the source directory as strictly read-only. It never modifies, renames, moves, or deletes files in your source folder. The only thing it writes there is a `.pixe_ledger.json` receipt — a record of what it saw and what it did.
 
@@ -17,7 +16,7 @@ This constraint is non-negotiable. Family photos, RAW files from a shoot, archiv
 
 ---
 
-### Copy-then-verify
+## Copy-then-verify
 
 Every file Pixe copies goes through a two-phase integrity check. First, the file is written to a temporary location in the destination. Then it is independently re-read and re-hashed. Only when the checksum of the destination matches the checksum of the source does Pixe consider the copy complete — and only then does it rename the temp file to its canonical path.
 
@@ -25,7 +24,7 @@ This matters because storage hardware is not perfectly reliable. USB drives drop
 
 ---
 
-### Deterministic output
+## Deterministic output
 
 Given the same input files and the same configuration, Pixe always produces the same archive structure. The same photo always maps to the same filename and the same directory path. Re-running Pixe on the same source produces the same archive.
 
@@ -33,7 +32,7 @@ This property enables confidence in several workflows: you can re-run Pixe on a 
 
 ---
 
-### No external dependencies
+## No external dependencies
 
 Pixe is a single binary. There is no exiftool to install, no ffmpeg, no ImageMagick, no Python runtime. All EXIF parsing, RAW container decoding, video metadata extraction, and file hashing is implemented in pure Go and compiled into the binary.
 
@@ -41,7 +40,7 @@ This matters for long-term archival. A tool that depends on a chain of external 
 
 ---
 
-### Crash-safe by design
+## Crash-safe by design
 
 Pixe is designed to survive interruption at any point without data loss or corruption.
 
@@ -51,7 +50,7 @@ Sorting 50,000 photos takes hours. Power failures happen. Laptops sleep. `pixe r
 
 ---
 
-### Content-based deduplication
+## Content-based deduplication
 
 Pixe identifies duplicates by checksum of the media payload — the actual pixel data or sensor data — not by filename, path, or metadata. This means:
 

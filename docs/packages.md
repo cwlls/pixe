@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Package Reference
-section_label: Developer Guide
-permalink: /packages/
 ---
+
+# Package Reference
 
 This page is generated from the Go package doc comments in the source tree. Each entry reflects the `// Package` comment at the top of the package's primary `.go` file. Run `make docs` to regenerate after adding or updating packages.
 

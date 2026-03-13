@@ -146,19 +146,19 @@ func buildTargets() []Target {
 		{
 			File: filepath.Join("docs", "commands.md"),
 			Sections: map[string]func() (string, error){
-				"sort-flags":   extractFlags(filepath.Join("cmd", "sort.go"), "html", true),
-				"verify-flags": extractFlags(filepath.Join("cmd", "verify.go"), "html", true),
-				"resume-flags": extractFlags(filepath.Join("cmd", "resume.go"), "html", true),
-				"status-flags": extractFlags(filepath.Join("cmd", "status.go"), "html", true),
-				"clean-flags":  extractFlags(filepath.Join("cmd", "clean.go"), "html", false),
-				"query-flags":  extractFlags(filepath.Join("cmd", "query.go"), "html", false),
-				"query-subs":   extractQuerySubcommands("html"),
+				"sort-flags":   extractFlags(filepath.Join("cmd", "sort.go"), "markdown", true),
+				"verify-flags": extractFlags(filepath.Join("cmd", "verify.go"), "markdown", true),
+				"resume-flags": extractFlags(filepath.Join("cmd", "resume.go"), "markdown", true),
+				"status-flags": extractFlags(filepath.Join("cmd", "status.go"), "markdown", true),
+				"clean-flags":  extractFlags(filepath.Join("cmd", "clean.go"), "markdown", false),
+				"query-flags":  extractFlags(filepath.Join("cmd", "query.go"), "markdown", false),
+				"query-subs":   extractQuerySubcommands("markdown"),
 			},
 		},
 		{
 			File: filepath.Join("docs", "how-it-works.md"),
 			Sections: map[string]func() (string, error){
-				"format-table": extractFormats("html"),
+				"format-table": extractFormats("markdown"),
 			},
 		},
 		{

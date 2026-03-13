@@ -1,15 +1,14 @@
 ---
-layout: page
-title: Adding a new file format
-section_label: Developer Guide
-permalink: /adding-formats/
+title: Adding a New File Format
 ---
+
+# Adding a New File Format
 
 Pixe's format support is modular. Each format is an isolated package under `internal/handler/`. The core pipeline is format-agnostic — it processes files through the `FileTypeHandler` interface without knowing anything about JPEG, HEIC, or RAW internals. Adding a new format means implementing that interface and registering the handler in the CLI commands. The pipeline itself requires no changes.
 
 ---
 
-### The `FileTypeHandler` interface
+## The `FileTypeHandler` interface
 
 <!-- pixe:begin:interface -->
 ```go
@@ -100,7 +99,7 @@ type FileTypeHandler interface {
 
 ---
 
-### Step-by-step walkthrough
+## Step-by-step walkthrough
 
 Using WEBP as a hypothetical example.
 
@@ -225,7 +224,7 @@ Add `reg.Register(webphandler.New())` to the handler registry in all four comman
 
 ---
 
-### TIFF-based RAW shortcut
+## TIFF-based RAW shortcut
 
 If your format is TIFF-based (DNG, NEF, CR2, PEF, ARW all are), embed `tiffraw.Base` instead of implementing `ExtractDate`, `HashableReader`, and `WriteMetadataTags` from scratch. The base provides the shared TIFF IFD traversal logic. You only need to supply `Extensions()`, `MagicBytes()`, and `Detect()`:
 
@@ -255,7 +254,7 @@ Reference the existing DNG, NEF, CR2, PEF, or ARW handlers in `internal/handler/
 
 ---
 
-### Testing conventions
+## Testing conventions
 
 - **No testify.** Use stdlib `testing` only. `t.Fatal`, `t.Errorf`, `t.Helper`.
 - **`t.TempDir()`** for all filesystem tests — auto-cleaned after the test.

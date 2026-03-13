@@ -1,540 +1,232 @@
 ---
-layout: page
 title: Commands
-section_label: Reference
-permalink: /commands/
 ---
 
-Click any command to expand its flags and details.
+# Commands
 
-<!-- pixe sort -->
-<div class="cmd-block open">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe sort</span>
-    <span class="cmd-desc">Organize media into a date-based archive</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-bottom:0.75rem;">Primary operation. Discovers files in the source directory, processes them through the pipeline, and writes organized output to the destination. When <code>--source</code> is omitted, the current working directory is used.</p>
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest /path/to/archive [options]</span></pre>
-    <div class="flag-table-wrap">
+## pixe sort
+
+Organize media into a date-based archive.
+
+Primary operation. Discovers files in the source directory, processes them through the pipeline, and writes organized output to the destination. When `--source` is omitted, the current working directory is used.
+
+```bash
+$ pixe sort --dest /path/to/archive [options]
+```
+
 <!-- pixe:begin:sort-flags -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Flag</th>
-      <th>Default</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>--config</td>
-      <td></td>
-      <td>config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)</td>
-    </tr>
-    <tr>
-      <td>-w, --workers</td>
-      <td>0</td>
-      <td>number of concurrent workers (0 = auto: runtime.NumCPU())</td>
-    </tr>
-    <tr>
-      <td>-a, --algorithm</td>
-      <td>sha1</td>
-      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
-    </tr>
-    <tr>
-      <td>-q, --quiet</td>
-      <td>false</td>
-      <td>suppress per-file output; show only the final summary</td>
-    </tr>
-    <tr>
-      <td>-v, --verbose</td>
-      <td>false</td>
-      <td>show per-stage timing and debug information</td>
-    </tr>
-    <tr>
-      <td>--profile</td>
-      <td></td>
-      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
-    </tr>
-    <tr>
-      <td>-s, --source</td>
-      <td></td>
-      <td>source directory containing media files to sort (default: current directory)</td>
-    </tr>
-    <tr>
-      <td>-d, --dest</td>
-      <td></td>
-      <td>destination directory for the organized archive (required)</td>
-    </tr>
-    <tr>
-      <td>--copyright</td>
-      <td></td>
-      <td>copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"</td>
-    </tr>
-    <tr>
-      <td>--camera-owner</td>
-      <td></td>
-      <td>camera owner string injected into destination files</td>
-    </tr>
-    <tr>
-      <td>--dry-run</td>
-      <td>false</td>
-      <td>preview operations without copying any files</td>
-    </tr>
-    <tr>
-      <td>--db-path</td>
-      <td></td>
-      <td>explicit path to the SQLite archive database (overrides auto-resolution)</td>
-    </tr>
-    <tr>
-      <td>-r, --recursive</td>
-      <td>false</td>
-      <td>recursively process subdirectories of --source</td>
-    </tr>
-    <tr>
-      <td>--skip-duplicates</td>
-      <td>false</td>
-      <td>skip copying duplicate files instead of copying to duplicates/ directory</td>
-    </tr>
-    <tr>
-      <td>--ignore</td>
-      <td></td>
-      <td>glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")</td>
-    </tr>
-    <tr>
-      <td>--no-carry-sidecars</td>
-      <td>false</td>
-      <td>disable carrying pre-existing .aae and .xmp sidecar files from source to destination</td>
-    </tr>
-    <tr>
-      <td>--overwrite-sidecar-tags</td>
-      <td>false</td>
-      <td>when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them</td>
-    </tr>
-    <tr>
-      <td>--progress</td>
-      <td>false</td>
-      <td>show a live progress bar instead of per-file text output (requires a TTY)</td>
-    </tr>
-    <tr>
-      <td>--since</td>
-      <td></td>
-      <td>only process files with capture date on or after this date (format: YYYY-MM-DD)</td>
-    </tr>
-    <tr>
-      <td>--before</td>
-      <td></td>
-      <td>only process files with capture date on or before this date (format: YYYY-MM-DD)</td>
-    </tr>
-  </tbody>
-</table>
+| Flag                     | Default | Description                                                                                         |
+| ------------------------ | ------- | --------------------------------------------------------------------------------------------------- |
+| --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                             |
+| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                           |
+| -a, --algorithm          | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash                                         |
+| -q, --quiet              | false   | suppress per-file output; show only the final summary                                               |
+| -v, --verbose            | false   | show per-stage timing and debug information                                                         |
+| --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                                       |
+| -s, --source             |         | source directory containing media files to sort (default: current directory)                        |
+| -d, --dest               |         | destination directory for the organized archive (required)                                          |
+| --copyright              |         | copyright template injected into destination files, e.g. "Copyright {{.Year}} My Family"            |
+| --camera-owner           |         | camera owner string injected into destination files                                                 |
+| --dry-run                | false   | preview operations without copying any files                                                        |
+| --db-path                |         | explicit path to the SQLite archive database (overrides auto-resolution)                            |
+| -r, --recursive          | false   | recursively process subdirectories of --source                                                      |
+| --skip-duplicates        | false   | skip copying duplicate files instead of copying to duplicates/ directory                            |
+| --ignore                 |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt" --ignore ".DS_Store")           |
+| --no-carry-sidecars      | false   | disable carrying pre-existing .aae and .xmp sidecar files from source to destination                |
+| --overwrite-sidecar-tags | false   | when merging tags into a carried .xmp sidecar, overwrite existing values instead of preserving them |
+| --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                           |
+| --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                     |
+| --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                    |
 <!-- pixe:end:sort-flags -->
-    </div>
-    <h3>Examples</h3>
-    <pre><span class="term-comment"># Sort from current directory</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive</span>
 
-<span class="term-comment"># Recursive sort with explicit source</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --source ~/Photos --dest ~/Archive --recursive</span>
+### Examples
 
-<span class="term-comment"># Dry run to preview without copying</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --dry-run</span>
+```bash
+# Sort from current directory
+$ pixe sort --dest ~/Archive
 
-<span class="term-comment"># With copyright tagging and duplicate skipping</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --copyright "Copyright {{.Year}} My Family" --skip-duplicates</span>
+# Recursive sort with explicit source
+$ pixe sort --source ~/Photos --dest ~/Archive --recursive
 
-<span class="term-comment"># Ignore OS junk files</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --ignore ".DS_Store" --ignore "Thumbs.db"</span>
+# Dry run to preview without copying
+$ pixe sort --dest ~/Archive --dry-run
 
-<span class="term-comment"># Sort without carrying sidecar files</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive --no-carry-sidecars</span></pre>
-  </div>
-</div>
+# With copyright tagging and duplicate skipping
+$ pixe sort --dest ~/Archive --copyright "Copyright {{.Year}} My Family" --skip-duplicates
 
-<!-- pixe status -->
-<div class="cmd-block">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe status</span>
-    <span class="cmd-desc">Report sort status of a source directory</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-bottom:0.75rem;">Read-only. Compares files on disk against the <code>.pixe_ledger.json</code> written by prior sort runs. No archive database or destination directory required — works entirely from the source directory. When <code>--source</code> is omitted, the current working directory is inspected.</p>
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe status [options]</span></pre>
-    <div class="flag-table-wrap">
-<!-- pixe:begin:status-flags -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Flag</th>
-      <th>Default</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>--config</td>
-      <td></td>
-      <td>config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)</td>
-    </tr>
-    <tr>
-      <td>-w, --workers</td>
-      <td>0</td>
-      <td>number of concurrent workers (0 = auto: runtime.NumCPU())</td>
-    </tr>
-    <tr>
-      <td>-a, --algorithm</td>
-      <td>sha1</td>
-      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
-    </tr>
-    <tr>
-      <td>-q, --quiet</td>
-      <td>false</td>
-      <td>suppress per-file output; show only the final summary</td>
-    </tr>
-    <tr>
-      <td>-v, --verbose</td>
-      <td>false</td>
-      <td>show per-stage timing and debug information</td>
-    </tr>
-    <tr>
-      <td>--profile</td>
-      <td></td>
-      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
-    </tr>
-    <tr>
-      <td>-s, --source</td>
-      <td></td>
-      <td>source directory to inspect (default: current directory)</td>
-    </tr>
-    <tr>
-      <td>-r, --recursive</td>
-      <td>false</td>
-      <td>recursively inspect subdirectories of --source</td>
-    </tr>
-    <tr>
-      <td>--ignore</td>
-      <td></td>
-      <td>glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt")</td>
-    </tr>
-    <tr>
-      <td>--json</td>
-      <td>false</td>
-      <td>emit JSON output instead of a human-readable listing</td>
-    </tr>
-  </tbody>
-</table>
-<!-- pixe:end:status-flags -->
-    </div>
-    <p style="font-size:0.8rem;color:var(--text-faint);margin-top:0.75rem;">Categories: <code>SORTED</code> · <code>DUPLICATE</code> · <code>ERRORED</code> · <code>UNSORTED</code> · <code>UNRECOGNIZED</code></p>
-  </div>
-</div>
+# Ignore OS junk files
+$ pixe sort --dest ~/Archive --ignore ".DS_Store" --ignore "Thumbs.db"
 
-<!-- pixe verify -->
-<div class="cmd-block">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe verify</span>
-    <span class="cmd-desc">Re-hash every file in the archive to confirm integrity</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-bottom:0.75rem;">Walks a previously sorted archive, parses checksums from filenames, recomputes data-only hashes, and reports mismatches. Use this to confirm your archive is intact after a disk migration or NAS transfer.</p>
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe verify --dir /path/to/archive [options]</span></pre>
-    <div class="flag-table-wrap">
-<!-- pixe:begin:verify-flags -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Flag</th>
-      <th>Default</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>--config</td>
-      <td></td>
-      <td>config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)</td>
-    </tr>
-    <tr>
-      <td>-w, --workers</td>
-      <td>0</td>
-      <td>number of concurrent workers (0 = auto: runtime.NumCPU())</td>
-    </tr>
-    <tr>
-      <td>-a, --algorithm</td>
-      <td>sha1</td>
-      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
-    </tr>
-    <tr>
-      <td>-q, --quiet</td>
-      <td>false</td>
-      <td>suppress per-file output; show only the final summary</td>
-    </tr>
-    <tr>
-      <td>-v, --verbose</td>
-      <td>false</td>
-      <td>show per-stage timing and debug information</td>
-    </tr>
-    <tr>
-      <td>--profile</td>
-      <td></td>
-      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
-    </tr>
-    <tr>
-      <td>-d, --dir</td>
-      <td></td>
-      <td>archive directory to verify (required)</td>
-    </tr>
-    <tr>
-      <td>--progress</td>
-      <td>false</td>
-      <td>show a live progress bar instead of per-file text output (requires a TTY)</td>
-    </tr>
-  </tbody>
-</table>
-<!-- pixe:end:verify-flags -->
-    </div>
-    <p style="font-size:0.8rem;color:var(--text-faint);margin-top:0.75rem;">Exit code <code>0</code> = all verified. Exit code <code>1</code> = one or more mismatches.</p>
-  </div>
-</div>
-
-<!-- pixe resume -->
-<div class="cmd-block">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe resume</span>
-    <span class="cmd-desc">Resume an interrupted sort operation</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe resume --dir /path/to/archive</span></pre>
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-top:0.5rem;">Finds the most recent interrupted run in the archive database and re-sorts from the original source directory. Files already marked complete are skipped automatically.</p>
-    <div class="flag-table-wrap mt1">
-<!-- pixe:begin:resume-flags -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Flag</th>
-      <th>Default</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>--config</td>
-      <td></td>
-      <td>config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)</td>
-    </tr>
-    <tr>
-      <td>-w, --workers</td>
-      <td>0</td>
-      <td>number of concurrent workers (0 = auto: runtime.NumCPU())</td>
-    </tr>
-    <tr>
-      <td>-a, --algorithm</td>
-      <td>sha1</td>
-      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
-    </tr>
-    <tr>
-      <td>-q, --quiet</td>
-      <td>false</td>
-      <td>suppress per-file output; show only the final summary</td>
-    </tr>
-    <tr>
-      <td>-v, --verbose</td>
-      <td>false</td>
-      <td>show per-stage timing and debug information</td>
-    </tr>
-    <tr>
-      <td>--profile</td>
-      <td></td>
-      <td>load a named config profile from ~/.pixe/profiles/<name>.yaml</td>
-    </tr>
-    <tr>
-      <td>-d, --dir</td>
-      <td></td>
-      <td>destination directory containing the archive database (required)</td>
-    </tr>
-    <tr>
-      <td>--db-path</td>
-      <td></td>
-      <td>explicit path to the SQLite archive database (overrides auto-resolution)</td>
-    </tr>
-  </tbody>
-</table>
-<!-- pixe:end:resume-flags -->
-    </div>
-  </div>
-</div>
-
-<!-- pixe query -->
-<div class="cmd-block">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe query</span>
-    <span class="cmd-desc">Read-only queries against the archive database</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-bottom:0.75rem;">Read-only interrogation of the archive SQLite database. No files are modified. All subcommands accept <code>--json</code> for machine-readable output.</p>
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe query &lt;subcommand&gt; --dir /path/to/archive [--json]</span></pre>
-    <div class="flag-table-wrap">
-<!-- pixe:begin:query-flags -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Flag</th>
-      <th>Default</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>-d, --dir</td>
-      <td></td>
-      <td>archive directory containing the database (required)</td>
-    </tr>
-    <tr>
-      <td>--db-path</td>
-      <td></td>
-      <td>explicit path to the SQLite archive database (overrides auto-resolution)</td>
-    </tr>
-    <tr>
-      <td>--json</td>
-      <td>false</td>
-      <td>emit JSON output instead of a table</td>
-    </tr>
-  </tbody>
-</table>
-<!-- pixe:end:query-flags -->
-    </div>
-    <h3>Subcommands</h3>
-    <div class="flag-table-wrap">
-<!-- pixe:begin:query-subs -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Subcommand</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>runs</td>
-      <td>List all sort runs recorded in the archive database</td>
-    </tr>
-    <tr>
-      <td>run</td>
-      <td>Show details for a specific sort run</td>
-    </tr>
-    <tr>
-      <td>duplicates</td>
-      <td>List all duplicate files in the archive</td>
-    </tr>
-    <tr>
-      <td>errors</td>
-      <td>List all files that encountered errors during sorting</td>
-    </tr>
-    <tr>
-      <td>skipped</td>
-      <td>List all files that were skipped during sorting</td>
-    </tr>
-    <tr>
-      <td>files</td>
-      <td>Search for files in the archive by date or source</td>
-    </tr>
-    <tr>
-      <td>inventory</td>
-      <td>List all canonical files in the archive</td>
-    </tr>
-  </tbody>
-</table>
-<!-- pixe:end:query-subs -->
-    </div>
-    <h3>Examples</h3>
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe query runs --dir ~/Archive</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe query run a1b2c3d4 --dir ~/Archive</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe query duplicates --dir ~/Archive --pairs</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe query files --dir ~/Archive --from 2024-01-01 --to 2024-12-31</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe query inventory --dir ~/Archive --json | jq '.results | length'</span></pre>
-  </div>
-</div>
-
-<!-- pixe clean -->
-<div class="cmd-block">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe clean</span>
-    <span class="cmd-desc">Remove orphaned temp files and compact the archive database</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-bottom:0.75rem;">Maintenance command for a destination archive. Removes <code>.pixe-tmp</code> files left by interrupted runs, removes orphaned XMP sidecars, and optionally runs <code>VACUUM</code> on the SQLite database to reclaim space.</p>
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe clean --dir /path/to/archive [options]</span></pre>
-    <div class="flag-table-wrap">
-<!-- pixe:begin:clean-flags -->
-<table class="flag-table">
-  <thead>
-    <tr>
-      <th>Flag</th>
-      <th>Default</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>-d, --dir</td>
-      <td></td>
-      <td>destination directory (dirB) to clean (required)</td>
-    </tr>
-    <tr>
-      <td>--db-path</td>
-      <td></td>
-      <td>explicit path to the SQLite archive database</td>
-    </tr>
-    <tr>
-      <td>--dry-run</td>
-      <td>false</td>
-      <td>preview what would be cleaned without modifying anything</td>
-    </tr>
-    <tr>
-      <td>--temp-only</td>
-      <td>false</td>
-      <td>only clean orphaned files, skip database compaction</td>
-    </tr>
-    <tr>
-      <td>--vacuum-only</td>
-      <td>false</td>
-      <td>only compact the database, skip file scanning</td>
-    </tr>
-  </tbody>
-</table>
-<!-- pixe:end:clean-flags -->
-    </div>
-  </div>
-</div>
-
-<!-- pixe version -->
-<div class="cmd-block">
-  <div class="cmd-header" onclick="toggle(this)">
-    <span class="cmd-name">pixe version</span>
-    <span class="cmd-desc">Print version, commit, and build date</span>
-    <span class="cmd-toggle">▼</span>
-  </div>
-  <div class="cmd-body">
-    <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe version</span>
-pixe v2.0.0 (commit: abc1234, built: 2026-03-11T10:30:00Z)</pre>
-    <p style="font-size:0.875rem;color:var(--text-dim);margin-top:0.5rem;">No flags. Prints the version string and exits.</p>
-  </div>
-</div>
+# Sort without carrying sidecar files
+$ pixe sort --dest ~/Archive --no-carry-sidecars
+```
 
 ---
 
-### Configuration file
+## pixe status
+
+Report sort status of a source directory.
+
+Read-only. Compares files on disk against the `.pixe_ledger.json` written by prior sort runs. No archive database or destination directory required — works entirely from the source directory. When `--source` is omitted, the current working directory is inspected.
+
+```bash
+$ pixe status [options]
+```
+
+<!-- pixe:begin:status-flags -->
+| Flag            | Default | Description                                                          |
+| --------------- | ------- | -------------------------------------------------------------------- |
+| --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)              |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())            |
+| -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash          |
+| -q, --quiet     | false   | suppress per-file output; show only the final summary                |
+| -v, --verbose   | false   | show per-stage timing and debug information                          |
+| --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml        |
+| -s, --source    |         | source directory to inspect (default: current directory)             |
+| -r, --recursive | false   | recursively inspect subdirectories of --source                       |
+| --ignore        |         | glob pattern for files to ignore (repeatable, e.g. --ignore "*.txt") |
+| --json          | false   | emit JSON output instead of a human-readable listing                 |
+<!-- pixe:end:status-flags -->
+
+Categories: `SORTED` · `DUPLICATE` · `ERRORED` · `UNSORTED` · `UNRECOGNIZED`
+
+---
+
+## pixe verify
+
+Re-hash every file in the archive to confirm integrity.
+
+Walks a previously sorted archive, parses checksums from filenames, recomputes data-only hashes, and reports mismatches. Use this to confirm your archive is intact after a disk migration or NAS transfer.
+
+```bash
+$ pixe verify --dir /path/to/archive [options]
+```
+
+<!-- pixe:begin:verify-flags -->
+| Flag            | Default | Description                                                               |
+| --------------- | ------- | ------------------------------------------------------------------------- |
+| --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                   |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                 |
+| -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash               |
+| -q, --quiet     | false   | suppress per-file output; show only the final summary                     |
+| -v, --verbose   | false   | show per-stage timing and debug information                               |
+| --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml             |
+| -d, --dir       |         | archive directory to verify (required)                                    |
+| --progress      | false   | show a live progress bar instead of per-file text output (requires a TTY) |
+<!-- pixe:end:verify-flags -->
+
+Exit code `0` = all verified. Exit code `1` = one or more mismatches.
+
+---
+
+## pixe resume
+
+Resume an interrupted sort operation.
+
+Finds the most recent interrupted run in the archive database and re-sorts from the original source directory. Files already marked complete are skipped automatically.
+
+```bash
+$ pixe resume --dir /path/to/archive
+```
+
+<!-- pixe:begin:resume-flags -->
+| Flag            | Default | Description                                                              |
+| --------------- | ------- | ------------------------------------------------------------------------ |
+| --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                  |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                |
+| -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash              |
+| -q, --quiet     | false   | suppress per-file output; show only the final summary                    |
+| -v, --verbose   | false   | show per-stage timing and debug information                              |
+| --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml            |
+| -d, --dir       |         | destination directory containing the archive database (required)         |
+| --db-path       |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+<!-- pixe:end:resume-flags -->
+
+---
+
+## pixe query
+
+Read-only queries against the archive database.
+
+Read-only interrogation of the archive SQLite database. No files are modified. All subcommands accept `--json` for machine-readable output.
+
+```bash
+$ pixe query <subcommand> --dir /path/to/archive [--json]
+```
+
+<!-- pixe:begin:query-flags -->
+| Flag      | Default | Description                                                              |
+| --------- | ------- | ------------------------------------------------------------------------ |
+| -d, --dir |         | archive directory containing the database (required)                     |
+| --db-path |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+| --json    | false   | emit JSON output instead of a table                                      |
+<!-- pixe:end:query-flags -->
+
+### Subcommands
+
+<!-- pixe:begin:query-subs -->
+| Subcommand | Description                                           |
+| ---------- | ----------------------------------------------------- |
+| runs       | List all sort runs recorded in the archive database   |
+| run        | Show details for a specific sort run                  |
+| duplicates | List all duplicate files in the archive               |
+| errors     | List all files that encountered errors during sorting |
+| skipped    | List all files that were skipped during sorting       |
+| files      | Search for files in the archive by date or source     |
+| inventory  | List all canonical files in the archive               |
+<!-- pixe:end:query-subs -->
+
+### Examples
+
+```bash
+$ pixe query runs --dir ~/Archive
+$ pixe query run a1b2c3d4 --dir ~/Archive
+$ pixe query duplicates --dir ~/Archive --pairs
+$ pixe query files --dir ~/Archive --from 2024-01-01 --to 2024-12-31
+$ pixe query inventory --dir ~/Archive --json | jq '.results | length'
+```
+
+---
+
+## pixe clean
+
+Remove orphaned temp files and compact the archive database.
+
+Maintenance command for a destination archive. Removes `.pixe-tmp` files left by interrupted runs, removes orphaned XMP sidecars, and optionally runs `VACUUM` on the SQLite database to reclaim space.
+
+```bash
+$ pixe clean --dir /path/to/archive [options]
+```
+
+<!-- pixe:begin:clean-flags -->
+| Flag          | Default | Description                                              |
+| ------------- | ------- | -------------------------------------------------------- |
+| -d, --dir     |         | destination directory (dirB) to clean (required)         |
+| --db-path     |         | explicit path to the SQLite archive database             |
+| --dry-run     | false   | preview what would be cleaned without modifying anything |
+| --temp-only   | false   | only clean orphaned files, skip database compaction      |
+| --vacuum-only | false   | only compact the database, skip file scanning            |
+<!-- pixe:end:clean-flags -->
+
+---
+
+## pixe version
+
+Print version, commit, and build date.
+
+```bash
+$ pixe version
+pixe v2.0.0 (commit: abc1234, built: 2026-03-11T10:30:00Z)
+```
+
+No flags. Prints the version string and exits.
+
+---
+
+## Configuration file
 
 Pixe reads `.pixe.yaml` from the current directory, home directory, or `$XDG_CONFIG_HOME/pixe`. CLI flags take precedence over config file values. Environment variables prefixed `PIXE_` also override config values (e.g., `PIXE_ALGORITHM=sha256`).
 
-<div class="pre-label">.pixe.yaml</div>
 ```yaml
 algorithm: sha1
 workers: 8
