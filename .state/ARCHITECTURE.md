@@ -30,7 +30,7 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 | **TIFF/RAW Parsing** | Native Go TIFF parser (e.g., `golang.org/x/image/tiff` or equivalent) | IFD traversal for EXIF extraction and embedded JPEG preview location in TIFF-based RAW formats (DNG, NEF, CR2, PEF, ARW) |
 | **CR3 Parsing** | ISOBMFF parser (reuses HEIC/MP4 approach) | Canon RAW X container; box-based EXIF and JPEG preview extraction |
 | **AVIF Parsing** | ISOBMFF parser (reuses HEIC approach) + `go-heic-exif-extractor` or minimal custom `meta` box parser | AV1 Image File Format; same ISOBMFF container as HEIC with AVIF-specific `ftyp` brands |
-| **Hashing** | `crypto/sha1` (default), `crypto/sha256`, others via `crypto` stdlib | Configurable algorithm, SHA-1 default for filename brevity |
+| **Hashing** | `crypto/md5`, `crypto/sha1` (default), `crypto/sha256`, `github.com/zeebo/blake3`, `github.com/cespare/xxhash/v2` | Configurable algorithm with numeric ID embedded in filename; see Section 4.5.1 |
 | **Persistence** | SQLite database (CGo-free: `modernc.org/sqlite`) | Cumulative registry, concurrent-safe, queryable; see Section 8 |
 | **Glob Matching** | `bmatcuk/doublestar/v4` | `**` recursive globs, `{alt}` alternatives; superset of `filepath.Match`; see Section 4.11 |
 | **TUI Framework** | `charmbracelet/bubbletea` | Elm-architecture TUI framework; powers CLI progress bars (Section 12) and interactive TUI (Section 13) |
@@ -296,22 +296,22 @@ To release a new version:
 
 ```
 dirA (read-only source)          dirB (organized destination)
-┌──────────────────┐             ┌──────────────────────────────────────┐
-│ IMG_0001.jpg     │  ────────>  │ 2021/12-Dec/                         │
-│ IMG_0002.jpg     │   discover  │   20211225_062223_7d97e98f...jpg      │
-│ IMG_1234.jpg     │   filter    │ 2022/02-Feb/                         │
-│ IMG_1234.aae     │   extract   │   20220202_123101_447d3060...jpg      │
-│ DSC_5678.nef     │   hash      │   20220202_123101_447d3060...jpg.xmp  │
-│ DSC_5678.xmp     │   copy      │ 2022/03-Mar/                         │
-│ VID_0010.mp4     │   verify    │   20220316_232122_321c7d6f...nef      │
-│ notes.txt        │   carry     │   20220316_232122_321c7d6f...nef.xmp  │
-│ subfolder/       │   tag       │ duplicates/                          │
-│   IMG_5678.jpg   │             │   20260306_103000/                    │
-│                  │             │     2022/02-Feb/                     │
-│ .pixe_ledger.json│  (ignored)  │       20220202_123101_447d...jpg      │
-└──────────────────┘             │ .pixe/                               │
-                                 │   pixe.db  (or dbpath marker)        │
-  stdout:                        └──────────────────────────────────────┘
+┌──────────────────┐             ┌───────────────────────────────────────────┐
+│ IMG_0001.jpg     │  ────────>  │ 2021/12-Dec/                              │
+│ IMG_0002.jpg     │   discover  │   20211225_062223-1-7d97e98f...jpg        │
+│ IMG_1234.jpg     │   filter    │ 2022/02-Feb/                              │
+│ IMG_1234.aae     │   extract   │   20220202_123101-1-447d3060...jpg        │
+│ DSC_5678.nef     │   hash      │   20220202_123101-1-447d3060...jpg.xmp    │
+│ DSC_5678.xmp     │   copy      │ 2022/03-Mar/                              │
+│ VID_0010.mp4     │   verify    │   20220316_232122-1-321c7d6f...nef        │
+│ notes.txt        │   carry     │   20220316_232122-1-321c7d6f...nef.xmp    │
+│ subfolder/       │   tag       │ duplicates/                               │
+│   IMG_5678.jpg   │             │   20260306_103000/                         │
+│                  │             │     2022/02-Feb/                           │
+│ .pixe_ledger.json│  (ignored)  │       20220202_123101-1-447d...jpg         │
+└──────────────────┘             │ .pixe/                                    │
+                                 │   pixe.db  (or dbpath marker)             │
+  stdout:                        └───────────────────────────────────────────┘
   COPY IMG_0001.jpg -> 2021/...
   COPY IMG_1234.jpg -> 2022/...
        +sidecar IMG_1234.aae -> 2022/...aae
@@ -430,12 +430,32 @@ Patterns from the CLI flag and config file are **merged** (additive). The hardco
 ### 4.5 Output Naming Convention
 
 ```
-YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>
 ```
 
 - **Date/Time**: Extracted from file metadata (see Section 4.7).
-- **Checksum**: Hex-encoded hash of the media payload. Default SHA-1 (40 hex characters).
+- **Algorithm ID**: Single-digit numeric identifier for the hash algorithm (see Section 4.5.1).
+- **Checksum**: Hex-encoded hash of the media payload. Length varies by algorithm (see Section 4.5.1).
 - **Extension**: Lowercase, preserved from original.
+- **Delimiter convention**: Underscores (`_`) belong to the datetime portion. Hyphens (`-`) delimit the integrity segment (algorithm ID and checksum). This visual grammar makes the two halves of the filename immediately distinguishable.
+
+**Examples:**
+
+```
+20211225_062223-0-d41d8cd98f00b204e9800998ecf8427e.jpg              (MD5, 32 chars)
+20211225_062223-1-7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg      (SHA-1, 40 chars — default)
+20211225_062223-2-e3b0c44298fc1c149afbf4c8996fb924...7852b855.jpg   (SHA-256, 64 chars)
+20211225_062223-3-af1349b9f5f9a1a6c5b4d3e2f1...3dbe6f5b.jpg        (BLAKE3, 64 chars)
+20211225_062223-4-a1b2c3d4e5f6a7b8.jpg                              (xxHash-64, 16 chars)
+```
+
+**Legacy filename format (pre-I2):**
+
+```
+YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+```
+
+Files produced before the I2 format change use an underscore before the checksum and have no algorithm ID prefix. These are recognized by the presence of `_` (rather than `-`) at position 15 of the filename. See Section 4.5.2 for backward compatibility rules.
 
 **Directory structure:**
 
@@ -446,7 +466,64 @@ YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
 - Year: 4-digit.
 - Month: Zero-padded two-digit number, a hyphen, and the locale-aware three-letter title-cased month abbreviation (e.g., `01-Jan`, `02-Feb`, `03-Mar`, …, `12-Dec`). The abbreviation is derived from the user's system locale, so a French locale would produce `03-Mar` → `03-Mars` (or the locale's equivalent short form). The number is always zero-padded to two digits.
 
-> **Note:** This format applies only to the month **directory name**. The filename retains its existing `YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>` format with a zero-padded numeric month.
+> **Note:** This format applies only to the month **directory name**. The filename uses a zero-padded numeric month in the `YYYYMMDD` portion.
+
+#### 4.5.1 Algorithm Registry
+
+Each supported hash algorithm is assigned a stable, single-digit numeric ID. These IDs are embedded in filenames and are permanent — once assigned, an ID is never reassigned to a different algorithm.
+
+| ID | Algorithm | Hex Digest Length | CLI Name | Default? | New Dependency? |
+|:--:|-----------|:-----------------:|----------|:--------:|:---------------:|
+| `0` | MD5 | 32 | `md5` | No | No (`crypto/md5` stdlib) |
+| `1` | SHA-1 | 40 | `sha1` | **Yes** | No (`crypto/sha1` stdlib) |
+| `2` | SHA-256 | 64 | `sha256` | No | No (`crypto/sha256` stdlib) |
+| `3` | BLAKE3 | 64 | `blake3` | No | Yes (`github.com/zeebo/blake3`) |
+| `4` | xxHash-64 | 16 | `xxhash` | No | Yes (`github.com/cespare/xxhash/v2`) |
+
+**Design rationale:**
+
+- **SHA-1 remains the default.** The purpose of the checksum is short collision detection for content deduplication, not cryptographic security. SHA-1's 40-character digest provides an excellent balance of collision resistance and filename brevity.
+- **MD5** is included for users migrating from tools that use MD5 checksums, or for maximum filename brevity (32 chars). It is not recommended for new archives.
+- **BLAKE3** offers ~3× the throughput of SHA-256 on modern CPUs with equivalent collision resistance. Recommended for users who want SHA-256-class strength with better performance.
+- **xxHash-64** is an extremely fast non-cryptographic hash. Suitable for users who prioritize throughput over collision resistance (e.g., large video archives where dedup is the primary concern and cryptographic strength is unnecessary). At 16 hex characters, it produces the shortest filenames.
+- **IDs 5–9 are reserved** for future algorithms. The single-digit scheme supports up to 10 algorithms, which is sufficient for the foreseeable future.
+
+**`--algorithm` flag values:** The CLI accepts the `CLI Name` column values (e.g., `--algorithm blake3`). The numeric ID is an internal/filename concern — users never type the ID directly.
+
+#### 4.5.2 Backward Compatibility (Legacy Filenames)
+
+Archives produced before the I2 format change contain filenames in the legacy format:
+
+```
+YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>     (legacy — no algorithm ID)
+YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>.<ext> (new — algorithm ID embedded)
+```
+
+**Detection rule:** The character at position 15 (0-indexed) of the filename stem distinguishes the two formats:
+- `_` → legacy format (no algorithm ID)
+- `-` → new format (algorithm ID follows)
+
+**Legacy algorithm inference:** When encountering a legacy filename (no algorithm ID), the system infers the algorithm from the hex digest length:
+
+| Hex Length | Inferred Algorithm |
+|:----------:|:-------------------|
+| 40 | SHA-1 |
+| 64 | SHA-256 |
+| Other | Unknown — fall back to `--algorithm` flag; error if not specified |
+
+This length-based inference is unambiguous for legacy files because only SHA-1 and SHA-256 were supported before I2.
+
+**Affected subsystems:**
+
+- **`pixe verify`** — Auto-detects algorithm from filename. For new-format files, parses the ID. For legacy files, uses length inference. Falls back to `--algorithm` flag if inference fails. See Section 7.1.
+- **`pixe resume`** — Reads the algorithm from the `runs` table (unchanged — resume always uses the original run's algorithm).
+- **Dedup check** — Compares checksums by value. Mixed-algorithm archives (some files hashed with SHA-1, others with BLAKE3) are supported because each file's `algorithm` column in the `files` table records which algorithm produced its checksum. Cross-algorithm dedup (detecting that a SHA-1 checksum and a BLAKE3 checksum refer to the same content) is **not** supported — files hashed with different algorithms are treated as distinct.
+- **`pathbuilder.Build()`** — Updated to accept an algorithm ID parameter and produce the new `YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>.<ext>` format.
+- **`verify.parseChecksum()`** — Updated to handle both formats: detects the delimiter at position 15, extracts the algorithm ID (new format) or infers from length (legacy), and returns both the checksum string and the resolved algorithm.
+
+**No mass-rename of existing files.** Archives accumulate over years. Renaming thousands of files would break external references (Lightroom catalogs, backup tools, symlinks, NAS indexers). Legacy filenames are grandfathered indefinitely. New and legacy files coexist within the same archive directory.
+
+> **Note on examples:** Many filename examples throughout this document (Sections 4.3, 4.8, 4.10, 4.12, 7.3, 7.5, etc.) still show the legacy `YYYYMMDD_HHMMSS_<CHECKSUM>` format. These remain valid — legacy files exist in real archives. The canonical format for **new** files is `YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>` as specified in Section 4.5. The defining sections (4.1 data flow diagram, 4.5 naming convention, 8.8 ledger format) have been updated to the new format.
 
 ### 4.6 Duplicate Handling
 
@@ -1582,7 +1659,7 @@ Primary operation. Discovers files in `dirA`, processes them through the pipelin
 | `--source` | `-s` | cwd | Source directory (read-only). Defaults to the current working directory; flag overrides. |
 | `--dest` | `-d` | (required) | Destination directory |
 | `--workers` | | auto | Number of concurrent workers |
-| `--algorithm` | | `sha1` | Hash algorithm (`sha1`, `sha256`, etc.) |
+| `--algorithm` | `-a` | `sha1` | Hash algorithm: `md5`, `sha1`, `sha256`, `blake3`, `xxhash`. See Section 4.5.1. |
 | `--copyright` | | (none) | Copyright string template. `{{.Year}}` supported. |
 | `--camera-owner` | | (none) | CameraOwner freetext string |
 | `--dry-run` | | `false` | Preview operations without copying |
@@ -1593,12 +1670,12 @@ Primary operation. Discovers files in `dirA`, processes them through the pipelin
 | `--overwrite-sidecar-tags` | | `false` | When merging Pixe tags into a carried `.xmp` sidecar, overwrite existing values. Default preserves source values (source is authoritative). See Section 4.12.6. |
 
 #### `pixe verify`
-Walks a previously sorted `dirB`, parses checksums from filenames, recomputes data-only hashes, and reports mismatches.
+Walks a previously sorted `dirB`, parses checksums from filenames, recomputes data-only hashes, and reports mismatches. The algorithm is auto-detected from the filename: new-format files (`YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>`) encode the algorithm ID directly; legacy files (`YYYYMMDD_HHMMSS_<CHECKSUM>`) are inferred by digest length (40 = SHA-1, 64 = SHA-256). The `--algorithm` flag is only needed as a fallback when auto-detection fails.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--dir` | (required) | Directory to verify |
-| `--algorithm` | `sha1` | Hash algorithm (must match what was used during sort) |
+| `--algorithm` | (auto-detect) | Override hash algorithm. Only needed for legacy files with ambiguous digest length. See Section 4.5.2. |
 | `--workers` | auto | Number of concurrent workers |
 
 #### `pixe resume`
@@ -1661,7 +1738,7 @@ See **Section 7.3** for full subcommand details.
 Viper supports a `.pixe.yaml` (or `.pixe.toml`, `.pixe.json`) configuration file for persistent defaults:
 
 ```yaml
-algorithm: sha1
+algorithm: sha1           # md5, sha1, sha256, blake3, xxhash (see Section 4.5.1)
 workers: 8
 copyright: "Copyright {{.Year}} My Family, all rights reserved"
 camera_owner: "Wells Family"
@@ -2475,6 +2552,7 @@ CREATE TABLE files (
     dest_path     TEXT,               -- absolute path to file in dirB (NULL until copied)
     dest_rel      TEXT,               -- relative path within dirB (NULL until copied)
     checksum      TEXT,               -- hex-encoded hash (NULL until hashed)
+    algorithm     TEXT,               -- hash algorithm name, e.g. "sha1", "blake3" (NULL until hashed)
     status        TEXT NOT NULL       -- pipeline stage or terminal outcome
         CHECK (status IN (
             'pending', 'extracted', 'hashed', 'copied',
@@ -2519,7 +2597,7 @@ CREATE TABLE schema_version (
 
 Future Pixe versions can check this table and apply incremental migrations.
 
-> **Note:** The addition of `recursive` to `runs`, and `skipped` status + `skip_reason` to `files`, constitutes a schema version bump (v1 → v2). Existing databases are migrated by adding the new columns with defaults (`recursive = 0`, `skip_reason = NULL`) and inserting a new `schema_version` row. The `skipped` status value is additive to the CHECK constraint and does not affect existing rows.
+> **Note:** The addition of `recursive` to `runs`, and `skipped` status + `skip_reason` to `files`, constitutes a schema version bump (v1 → v2). The addition of `algorithm` to `files` constitutes another bump (v2 → v3). Existing databases are migrated by adding the new columns with defaults (`recursive = 0`, `skip_reason = NULL`, `algorithm = NULL`) and inserting a new `schema_version` row. For v2 → v3 migration, existing rows with a NULL `algorithm` are backfilled from their parent run's `algorithm` column: `UPDATE files SET algorithm = (SELECT algorithm FROM runs WHERE runs.id = files.run_id) WHERE files.algorithm IS NULL`. This ensures all historical file rows become self-describing.
 
 ### 8.4 Query Patterns
 
@@ -2612,14 +2690,14 @@ The ledger uses the [JSONL format](https://jsonlines.org/): every line is an ind
 
 **Line 1** is a **header object** containing run-level metadata. All subsequent lines are **file entry objects**, one per discovered file, appended in processing order.
 
-#### Ledger Format (v4)
+#### Ledger Format (v5)
 
 ```jsonl
-{"version":4,"run_id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","pixe_version":"0.10.0","pixe_run":"2026-03-06T10:30:00Z","algorithm":"sha1","destination":"/path/to/dirB","recursive":true}
-{"path":"IMG_0001.jpg","status":"copy","checksum":"7d97e98f8af710c7e7fe703abc8f639e0ee507c4","destination":"2021/12-Dec/20211225_062223_7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg","verified_at":"2026-03-06T10:30:03Z"}
+{"version":5,"run_id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","pixe_version":"0.11.0","pixe_run":"2026-03-06T10:30:00Z","algorithm":"sha1","destination":"/path/to/dirB","recursive":true}
+{"path":"IMG_0001.jpg","status":"copy","checksum":"7d97e98f8af710c7e7fe703abc8f639e0ee507c4","destination":"2021/12-Dec/20211225_062223-1-7d97e98f8af710c7e7fe703abc8f639e0ee507c4.jpg","verified_at":"2026-03-06T10:30:03Z"}
 {"path":"IMG_0002.jpg","status":"skip","reason":"previously imported"}
-{"path":"vacation/IMG_0042.jpg","status":"duplicate","checksum":"447d3060abc123...","destination":"duplicates/20260306_103000/2022/02-Feb/20220202_123101_447d3060...jpg","matches":"2022/02-Feb/20220202_123101_447d3060...jpg"}
-{"path":"vacation/IMG_0099.jpg","status":"duplicate","checksum":"9f8e7d6c5b4a...","matches":"2024/07-Jul/20240715_143022_9f8e7d6c...jpg"}
+{"path":"vacation/IMG_0042.jpg","status":"duplicate","checksum":"447d3060abc123...","destination":"duplicates/20260306_103000/2022/02-Feb/20220202_123101-1-447d3060...jpg","matches":"2022/02-Feb/20220202_123101-1-447d3060...jpg"}
+{"path":"vacation/IMG_0099.jpg","status":"duplicate","checksum":"9f8e7d6c5b4a...","matches":"2024/07-Jul/20240715_143022-1-9f8e7d6c...jpg"}
 {"path":"notes.txt","status":"skip","reason":"unsupported format: .txt"}
 {"path":"corrupt.jpg","status":"error","reason":"EXIF parse failed: truncated IFD at offset 0x1A"}
 ```
@@ -2632,11 +2710,11 @@ The header is written once at the start of the run, before any files are process
 
 | Field | Type | Description |
 |---|---|---|
-| `version` | `int` | Ledger schema version. Currently `4`. |
+| `version` | `int` | Ledger schema version. Currently `5` (bumped from `4` by I2 filename format change). |
 | `run_id` | `string` | UUID linking this ledger to the archive database `runs` table. |
 | `pixe_version` | `string` | Pixe binary version that produced this ledger. |
 | `pixe_run` | `string` | ISO 8601 UTC timestamp of when the sort run started. |
-| `algorithm` | `string` | Hash algorithm used (`sha1`, `sha256`). |
+| `algorithm` | `string` | Hash algorithm used (`md5`, `sha1`, `sha256`, `blake3`, `xxhash`). |
 | `destination` | `string` | Absolute path to `dirB`. |
 | `recursive` | `bool` | Whether `--recursive` was active for this run. |
 

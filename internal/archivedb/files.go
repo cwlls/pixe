@@ -30,6 +30,7 @@ type FileRecord struct {
 	DestPath        *string // nil until copied
 	DestRel         *string // nil until copied
 	Checksum        *string // nil until hashed
+	Algorithm       *string // nil until hashed; hash algorithm name e.g. "sha1", "blake3"
 	Status          string
 	IsDuplicate     bool
 	CaptureDate     *time.Time
@@ -47,6 +48,7 @@ type FileRecord struct {
 // updateParams holds the optional fields that can be set during a status update.
 type updateParams struct {
 	checksum        *string
+	algorithm       *string
 	destPath        *string
 	destRel         *string
 	captureDate     *time.Time
@@ -63,6 +65,12 @@ type UpdateOption func(*updateParams)
 // WithChecksum sets the checksum field on a file status update.
 func WithChecksum(checksum string) UpdateOption {
 	return func(p *updateParams) { p.checksum = &checksum }
+}
+
+// WithAlgorithm sets the algorithm field on a file status update.
+// Should be passed alongside WithChecksum when the hash is first recorded.
+func WithAlgorithm(algorithm string) UpdateOption {
+	return func(p *updateParams) { p.algorithm = &algorithm }
 }
 
 // WithDestination sets the dest_path and dest_rel fields on a file status update.
@@ -213,6 +221,10 @@ func (db *DB) UpdateFileStatus(fileID int64, status string, opts ...UpdateOption
 	if p.checksum != nil {
 		setClauses = append(setClauses, "checksum = ?")
 		args = append(args, *p.checksum)
+	}
+	if p.algorithm != nil {
+		setClauses = append(setClauses, "algorithm = ?")
+		args = append(args, *p.algorithm)
 	}
 	if p.destPath != nil {
 		setClauses = append(setClauses, "dest_path = ?")
@@ -365,7 +377,7 @@ func (db *DB) CheckDuplicate(checksum string) (string, error) {
 // GetFilesByRun returns all file records for a given run ID.
 func (db *DB) GetFilesByRun(runID string) ([]*FileRecord, error) {
 	const q = `
-		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
 		       skip_reason, carried_sidecars
@@ -386,7 +398,7 @@ func (db *DB) GetFilesByRun(runID string) ([]*FileRecord, error) {
 // Used by resume to find files that need reprocessing.
 func (db *DB) GetIncompleteFiles(runID string) ([]*FileRecord, error) {
 	const q = `
-		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
 		       skip_reason, carried_sidecars
@@ -423,7 +435,7 @@ func scanFileRows(rows *sql.Rows) ([]*FileRecord, error) {
 // scanFileRow scans a single FileRecord from a row scanner.
 func scanFileRow(s scanner) (*FileRecord, error) {
 	var f FileRecord
-	var destPath, destRel, checksum, captureDate sql.NullString
+	var destPath, destRel, checksum, algorithm, captureDate sql.NullString
 	var fileSize sql.NullInt64
 	var extractedAt, hashedAt, copiedAt, verifiedAt, taggedAt sql.NullString
 	var errMsg, skipReason, carriedSidecars sql.NullString
@@ -436,6 +448,7 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 		&destPath,
 		&destRel,
 		&checksum,
+		&algorithm,
 		&f.Status,
 		&isDupInt,
 		&captureDate,
@@ -463,6 +476,9 @@ func scanFileRow(s scanner) (*FileRecord, error) {
 	}
 	if checksum.Valid {
 		f.Checksum = &checksum.String
+	}
+	if algorithm.Valid {
+		f.Algorithm = &algorithm.String
 	}
 	if fileSize.Valid {
 		f.FileSize = &fileSize.Int64

@@ -33,7 +33,7 @@ type AppConfig struct {
 	Workers int
 
 	// Algorithm is the name of the hash algorithm to use.
-	// Supported values: "sha1" (default), "sha256".
+	// Supported values: "md5", "sha1" (default), "sha256", "blake3", "xxhash".
 	Algorithm string
 
 	// Copyright is the raw template string for the Copyright metadata tag.

@@ -22,7 +22,7 @@ import (
 
 func TestNewHasher_supported(t *testing.T) {
 	t.Parallel()
-	for _, alg := range []string{"sha1", "sha256"} {
+	for _, alg := range []string{"md5", "sha1", "sha256", "blake3", "xxhash"} {
 		h, err := NewHasher(alg)
 		if err != nil {
 			t.Errorf("NewHasher(%q) unexpected error: %v", alg, err)
@@ -38,7 +38,7 @@ func TestNewHasher_supported(t *testing.T) {
 
 func TestNewHasher_unsupported(t *testing.T) {
 	t.Parallel()
-	for _, alg := range []string{"md5", "sha512", "", "SHA1", "SHA-1"} {
+	for _, alg := range []string{"sha512", "", "SHA1", "SHA-1", "BLAKE3"} {
 		h, err := NewHasher(alg)
 		if err == nil {
 			t.Errorf("NewHasher(%q) expected error, got nil", alg)
@@ -123,14 +123,71 @@ func TestHasher_Sum_streaming(t *testing.T) {
 	}
 }
 
+func TestHasher_Sum_md5(t *testing.T) {
+	t.Parallel()
+	h, err := NewHasher("md5")
+	if err != nil {
+		t.Fatalf("NewHasher: %v", err)
+	}
+
+	// Known MD5 of the empty string.
+	got, err := h.Sum(bytes.NewReader([]byte{}))
+	if err != nil {
+		t.Fatalf("Sum(empty): %v", err)
+	}
+	const wantEmpty = "d41d8cd98f00b204e9800998ecf8427e"
+	if got != wantEmpty {
+		t.Errorf("MD5('') = %q, want %q", got, wantEmpty)
+	}
+}
+
+func TestHasher_Sum_blake3(t *testing.T) {
+	t.Parallel()
+	h, err := NewHasher("blake3")
+	if err != nil {
+		t.Fatalf("NewHasher: %v", err)
+	}
+
+	// Known BLAKE3 of the empty string (first 32 bytes of the all-zero key output).
+	got, err := h.Sum(bytes.NewReader([]byte{}))
+	if err != nil {
+		t.Fatalf("Sum(empty): %v", err)
+	}
+	const wantEmpty = "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+	if got != wantEmpty {
+		t.Errorf("BLAKE3('') = %q, want %q", got, wantEmpty)
+	}
+}
+
+func TestHasher_Sum_xxhash(t *testing.T) {
+	t.Parallel()
+	h, err := NewHasher("xxhash")
+	if err != nil {
+		t.Fatalf("NewHasher: %v", err)
+	}
+
+	// Known xxHash-64 of the empty string.
+	got, err := h.Sum(bytes.NewReader([]byte{}))
+	if err != nil {
+		t.Fatalf("Sum(empty): %v", err)
+	}
+	const wantEmpty = "ef46db3751d8e999"
+	if got != wantEmpty {
+		t.Errorf("xxHash-64('') = %q, want %q", got, wantEmpty)
+	}
+}
+
 func TestHasher_Sum_outputFormat(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		alg     string
 		wantLen int
 	}{
+		{"md5", 32},
 		{"sha1", 40},
 		{"sha256", 64},
+		{"blake3", 64},
+		{"xxhash", 16},
 	}
 	for _, tc := range cases {
 		h, _ := NewHasher(tc.alg)
@@ -143,6 +200,51 @@ func TestHasher_Sum_outputFormat(t *testing.T) {
 		}
 		if got != strings.ToLower(got) {
 			t.Errorf("%s digest %q is not lowercase", tc.alg, got)
+		}
+	}
+}
+
+func TestHasher_AlgorithmID(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		alg    string
+		wantID int
+	}{
+		{"md5", 0},
+		{"sha1", 1},
+		{"sha256", 2},
+		{"blake3", 3},
+		{"xxhash", 4},
+	}
+	for _, tc := range cases {
+		h, err := NewHasher(tc.alg)
+		if err != nil {
+			t.Fatalf("NewHasher(%q): %v", tc.alg, err)
+		}
+		if got := h.AlgorithmID(); got != tc.wantID {
+			t.Errorf("AlgorithmID(%q) = %d, want %d", tc.alg, got, tc.wantID)
+		}
+	}
+}
+
+func TestAlgorithmNameByID(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		id   int
+		want string
+	}{
+		{0, "md5"},
+		{1, "sha1"},
+		{2, "sha256"},
+		{3, "blake3"},
+		{4, "xxhash"},
+		{99, ""},
+		{-1, ""},
+	}
+	for _, tc := range cases {
+		got := AlgorithmNameByID(tc.id)
+		if got != tc.want {
+			t.Errorf("AlgorithmNameByID(%d) = %q, want %q", tc.id, got, tc.want)
 		}
 	}
 }

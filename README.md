@@ -114,7 +114,7 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | ------------------------ | ------- | --------------------------------------------------------------------------------------------------- |
 | --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                             |
 | -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                           |
-| -a, --algorithm          | sha1    | hash algorithm to use: sha1, sha256                                                                 |
+| -a, --algorithm          | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash                                         |
 | -q, --quiet              | false   | suppress per-file output; show only the final summary                                               |
 | -v, --verbose            | false   | show per-stage timing and debug information                                                         |
 | --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                                       |
@@ -184,7 +184,7 @@ pixe verify --dir /path/to/archive [options]
 | --------------- | ------- | ------------------------------------------------------------------------- |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                   |
 | -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                 |
-| -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                       |
+| -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash               |
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                     |
 | -v, --verbose   | false   | show per-stage timing and debug information                               |
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml             |
@@ -207,7 +207,7 @@ pixe resume --dir /path/to/archive
 | --------------- | ------- | ------------------------------------------------------------------------ |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                  |
 | -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                |
-| -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                      |
+| -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash              |
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                    |
 | -v, --verbose   | false   | show per-stage timing and debug information                              |
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml            |
@@ -266,7 +266,7 @@ pixe status --source /path/to/photos [options]
 | --------------- | ------- | -------------------------------------------------------------------- |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)              |
 | -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())            |
-| -a, --algorithm | sha1    | hash algorithm to use: sha1, sha256                                  |
+| -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash          |
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                |
 | -v, --verbose   | false   | show per-stage timing and debug information                          |
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml        |
@@ -353,7 +353,7 @@ pixe gui [options]
 | ------------------------ | ------- | ---------------------------------------------------------------------------------------- |
 | --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                  |
 | -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                |
-| -a, --algorithm          | sha1    | hash algorithm to use: sha1, sha256                                                      |
+| -a, --algorithm          | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash                              |
 | -q, --quiet              | false   | suppress per-file output; show only the final summary                                    |
 | -v, --verbose            | false   | show per-stage timing and debug information                                              |
 | --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                            |

@@ -15,9 +15,14 @@
 // Package verify implements the archive integrity verification logic for
 // the `pixe verify` command.
 //
-// It walks a sorted dirB, parses the checksum embedded in each filename
-// (format: YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>), recomputes the data-only hash
-// via the registered FileTypeHandler, and reports mismatches.
+// It walks a sorted dirB, parses the checksum and algorithm embedded in each
+// filename, recomputes the data-only hash via the registered FileTypeHandler,
+// and reports mismatches.
+//
+// Two filename formats are supported:
+//
+//	New (I2+): YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>.<ext>  — algorithm auto-detected from ID
+//	Legacy:    YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>        — algorithm inferred from digest length
 package verify
 
 import (
@@ -99,6 +104,12 @@ func Run(opts Options) (Result, error) {
 		Total: total,
 	})
 
+	// hasherCache avoids re-allocating hashers for each file in mixed-algorithm archives.
+	// Seeded with the configured default hasher.
+	hasherCache := map[string]*hash.Hasher{
+		opts.Hasher.Algorithm(): opts.Hasher,
+	}
+
 	completed := 0
 	err := filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -121,8 +132,8 @@ func Run(opts Options) (Result, error) {
 		// Compute relative path for event reporting.
 		relPath, _ := filepath.Rel(opts.Dir, path)
 
-		// Parse the expected checksum from the filename.
-		expected, ok := parseChecksum(name)
+		// Parse the expected checksum and algorithm from the filename.
+		expected, algo, ok := parseChecksum(name)
 		if !ok {
 			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
 			result.Unrecognised++
@@ -135,6 +146,23 @@ func Run(opts Options) (Result, error) {
 				Total:     total,
 			})
 			return nil
+		}
+
+		// Resolve the hasher for this file. New-format files carry the algorithm
+		// ID in the filename; legacy files use length inference. Fall back to the
+		// configured opts.Hasher when the algorithm cannot be determined.
+		fileHasher := opts.Hasher
+		if algo != "" && algo != opts.Hasher.Algorithm() {
+			if cached, exists := hasherCache[algo]; exists {
+				fileHasher = cached
+			} else {
+				newH, newErr := hash.NewHasher(algo)
+				if newErr == nil {
+					hasherCache[algo] = newH
+					fileHasher = newH
+				}
+				// If NewHasher fails (unknown algo), fall back to opts.Hasher.
+			}
 		}
 
 		// Detect the file type.
@@ -171,7 +199,7 @@ func Run(opts Options) (Result, error) {
 			})
 			return nil
 		}
-		actual, err := opts.Hasher.Sum(rc)
+		actual, err := fileHasher.Sum(rc)
 		_ = rc.Close()
 		if err != nil {
 			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
@@ -235,22 +263,75 @@ func Run(opts Options) (Result, error) {
 	return result, err
 }
 
-// parseChecksum extracts the checksum from a Pixe filename.
-// Expected format: YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
-// The checksum is the segment between the second underscore and the dot.
-func parseChecksum(filename string) (string, bool) {
-	// Strip extension.
+// parseChecksum extracts the checksum and algorithm from a Pixe filename.
+//
+// Two formats are supported:
+//
+//	New (I2+): YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>.<ext>
+//	  Detected by '-' at position 15 of the stem. The algorithm name is
+//	  resolved from the numeric ID via hash.AlgorithmNameByID().
+//
+//	Legacy:    YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+//	  Detected by '_' at position 15 of the stem. The algorithm is inferred
+//	  from the digest length: 40="sha1", 64="sha256". Returns algorithm=""
+//	  when the length is ambiguous — the caller should fall back to opts.Hasher.
+//
+// Returns (checksum, algorithm, true) on success, or ("", "", false) when the
+// filename does not match either Pixe format.
+func parseChecksum(filename string) (checksum string, algorithm string, ok bool) {
 	ext := filepath.Ext(filename)
 	base := strings.TrimSuffix(filename, ext)
 
-	// Split on "_" — expect at least 3 parts: date, time, checksum.
-	parts := strings.SplitN(base, "_", 3)
-	if len(parts) != 3 {
-		return "", false
+	// Minimum stem length: "YYYYMMDD_HHMMSS" = 15 chars, plus delimiter + at least 1 char.
+	if len(base) < 17 {
+		return "", "", false
 	}
-	checksum := parts[2]
-	if len(checksum) < 8 { // sanity: SHA-1 is 40, SHA-256 is 64
-		return "", false
+
+	switch base[15] {
+	case '-':
+		// New format: YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>
+		rest := base[16:] // everything after the first '-'
+		dashIdx := strings.IndexByte(rest, '-')
+		if dashIdx < 1 {
+			return "", "", false
+		}
+		idStr := rest[:dashIdx]
+		checksum = rest[dashIdx+1:]
+		if len(checksum) < 8 {
+			return "", "", false
+		}
+		// Parse the numeric algorithm ID (must be all digits).
+		id := 0
+		for _, c := range idStr {
+			if c < '0' || c > '9' {
+				return "", "", false
+			}
+			id = id*10 + int(c-'0')
+		}
+		algo := hash.AlgorithmNameByID(id)
+		if algo == "" {
+			return "", "", false // unknown ID
+		}
+		return checksum, algo, true
+
+	case '_':
+		// Legacy format: YYYYMMDD_HHMMSS_<CHECKSUM>
+		checksum = base[16:]
+		if len(checksum) < 8 {
+			return "", "", false
+		}
+		switch len(checksum) {
+		case 40:
+			return checksum, "sha1", true
+		case 64:
+			return checksum, "sha256", true
+		default:
+			// Ambiguous length — return the checksum but leave algorithm empty.
+			// The caller will fall back to opts.Hasher.
+			return checksum, "", true
+		}
+
+	default:
+		return "", "", false
 	}
-	return checksum, true
 }

@@ -86,8 +86,10 @@ Use `testing/quick` or `pgregory.net/rapid` to verify that `pathbuilder` always 
 
 ## I. Data Safety & Integrity
 
-### I2 — xxHash / BLAKE3 Hash Algorithm Option 🟡
-Add BLAKE3 (and optionally xxHash) as selectable hash algorithms for users who prioritize throughput over cryptographic strength. BLAKE3 is approximately 3× faster than SHA-256 on modern CPUs. Requires a new dependency and a hash-algorithm option in config.
+### I2 — Extended Hash Algorithm Support + Algorithm-Tagged Filenames 🟡
+**Status: Architected** (see `.state/ARCHITECTURE.md` Section 4.5.1, 4.5.2)
+
+Add MD5, BLAKE3, and xxHash-64 alongside existing SHA-1 (default) and SHA-256. Each algorithm is assigned a stable numeric ID embedded in the destination filename: `YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>.<ext>`. This makes the hash algorithm identifiable from the filename alone, enables `pixe verify` to auto-detect the algorithm, and supports mixed-algorithm archives. Legacy filenames (pre-I2, no algorithm ID) are recognized and handled via digest-length inference. Requires two new dependencies (`github.com/zeebo/blake3`, `github.com/cespare/xxhash/v2`), a schema migration (new `algorithm` column on `files` table), and a ledger version bump (v4 → v5).
 
 ### I3 — Checksum Manifest Export 🟢
 `pixe verify --export checksums.sha256` writes a standard `sha256sum`-compatible checksum file. Allows users to verify archive integrity with standard Unix tools, independent of Pixe and its database.

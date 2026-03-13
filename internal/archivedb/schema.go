@@ -21,7 +21,7 @@ import (
 )
 
 // schemaVersion is the current schema version.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // schemaDDL contains all CREATE TABLE and CREATE INDEX statements.
 // Every statement uses IF NOT EXISTS so the function is idempotent.
@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS files (
     dest_path     TEXT,
     dest_rel      TEXT,
     checksum      TEXT,
+    algorithm     TEXT,               -- hash algorithm name, e.g. "sha1", "blake3" (NULL until hashed)
     skip_reason   TEXT,
     status        TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN (
@@ -178,6 +179,30 @@ func (db *DB) migrateSchema() error {
 		_, _ = db.conn.Exec(
 			`INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)`,
 			3, time.Now().UTC().Format(time.RFC3339),
+		)
+	}
+
+	// v3 → v4: add algorithm to files, backfill from parent run.
+	if currentVersion < 4 {
+		migrations := []string{
+			`ALTER TABLE files ADD COLUMN algorithm TEXT`,
+		}
+		for _, m := range migrations {
+			if _, err := db.conn.Exec(m); err != nil {
+				if !strings.Contains(err.Error(), "duplicate column") {
+					return fmt.Errorf("archivedb: migrate v3→v4: %w", err)
+				}
+			}
+		}
+		// Backfill: set algorithm from the parent run for all existing rows.
+		if _, err := db.conn.Exec(
+			`UPDATE files SET algorithm = (SELECT algorithm FROM runs WHERE runs.id = files.run_id) WHERE files.algorithm IS NULL`,
+		); err != nil {
+			return fmt.Errorf("archivedb: migrate v3→v4 backfill: %w", err)
+		}
+		_, _ = db.conn.Exec(
+			`INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)`,
+			4, time.Now().UTC().Format(time.RFC3339),
 		)
 	}
 

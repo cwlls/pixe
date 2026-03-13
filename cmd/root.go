@@ -58,7 +58,7 @@ func init() {
 	rootCmd.PersistentFlags().IntP("workers", "w", 0,
 		"number of concurrent workers (0 = auto: runtime.NumCPU())")
 	rootCmd.PersistentFlags().StringP("algorithm", "a", "sha1",
-		"hash algorithm to use: sha1, sha256")
+		"hash algorithm: md5, sha1 (default), sha256, blake3, xxhash")
 
 	rootCmd.PersistentFlags().BoolP("quiet", "q", false,
 		"suppress per-file output; show only the final summary")

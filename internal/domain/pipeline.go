@@ -110,7 +110,7 @@ type Manifest struct {
 	PixeVersion string           `json:"pixe_version"` // PixeVersion is the Pixe binary version that produced this manifest.
 	Source      string           `json:"source"`       // Source is the absolute path to dirA.
 	Destination string           `json:"destination"`  // Destination is the absolute path to dirB.
-	Algorithm   string           `json:"algorithm"`    // Algorithm is the hash algorithm used (e.g., "sha1", "sha256").
+	Algorithm   string           `json:"algorithm"`    // Algorithm is the hash algorithm used (e.g., "sha1", "sha256", "blake3", "xxhash").
 	StartedAt   time.Time        `json:"started_at"`   // StartedAt is the ISO 8601 UTC timestamp of when the sort run started.
 	Workers     int              `json:"workers"`      // Workers is the number of concurrent workers used for this run.
 	Files       []*ManifestEntry `json:"files"`        // Files is the list of all files processed in this run.
@@ -146,15 +146,15 @@ type LedgerEntry struct {
 	Reason      string     `json:"reason,omitempty"`      // explanation (skip, error)
 }
 
-// LedgerHeader is the first line of the JSONL ledger file (v4+).
+// LedgerHeader is the first line of the JSONL ledger file (v5+).
 // It contains run-level metadata; all subsequent lines are LedgerEntry objects.
 // The header is written once at the start of the run, before any files are processed.
 type LedgerHeader struct {
-	Version     int    `json:"version"`      // always 4
+	Version     int    `json:"version"`      // always 5
 	RunID       string `json:"run_id"`       // UUID linking to archive DB runs table
 	PixeVersion string `json:"pixe_version"` // Pixe binary version that produced this ledger
 	PixeRun     string `json:"pixe_run"`     // ISO 8601 UTC timestamp of run start
-	Algorithm   string `json:"algorithm"`    // hash algorithm used ("sha1", "sha256")
+	Algorithm   string `json:"algorithm"`    // hash algorithm used ("md5", "sha1", "sha256", "blake3", "xxhash")
 	Destination string `json:"destination"`  // absolute path to dirB
 	Recursive   bool   `json:"recursive"`    // whether --recursive was active
 }

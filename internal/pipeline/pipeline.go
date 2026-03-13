@@ -186,7 +186,7 @@ func Run(opts SortOptions) (SortResult, error) {
 	var slw *manifest.SafeLedgerWriter
 	if !cfg.DryRun {
 		header := domain.LedgerHeader{
-			Version:     4,
+			Version:     5,
 			RunID:       opts.RunID,
 			PixeVersion: opts.PixeVersion,
 			PixeRun:     startedAt.UTC().Format(time.RFC3339),
@@ -494,7 +494,9 @@ func processFile(
 		return nil, false, fmt.Errorf("hash payload: %w", err)
 	}
 	if db != nil {
-		_ = db.UpdateFileStatus(fileID, "hashed", archivedb.WithChecksum(checksum))
+		_ = db.UpdateFileStatus(fileID, "hashed",
+			archivedb.WithChecksum(checksum),
+			archivedb.WithAlgorithm(opts.Hasher.Algorithm()))
 	}
 	emit(opts.EventBus, progress.Event{
 		Kind:     progress.EventFileHashed,
@@ -523,6 +525,7 @@ func processFile(
 		if db != nil {
 			_ = db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithChecksum(checksum),
+				archivedb.WithAlgorithm(opts.Hasher.Algorithm()),
 				archivedb.WithIsDuplicate(true))
 		}
 		matchDetail := existingDestForLedger
@@ -542,7 +545,7 @@ func processFile(
 
 	// --- Build destination path ---
 	ext := filepath.Ext(df.Path)
-	relDest := pathbuilder.Build(captureDate, checksum, ext, isDuplicate, opts.RunTimestamp)
+	relDest := pathbuilder.Build(captureDate, opts.Hasher.AlgorithmID(), checksum, ext, isDuplicate, opts.RunTimestamp)
 	absDest := filepath.Join(dirB, relDest)
 
 	if cfg.DryRun {
@@ -695,7 +698,7 @@ func processFile(
 			if existingDest != "" {
 				// Race detected: another process completed this checksum first.
 				// Relocate our copy to the duplicates directory.
-				dupRelDest := pathbuilder.Build(captureDate, checksum, ext, true, opts.RunTimestamp)
+				dupRelDest := pathbuilder.Build(captureDate, opts.Hasher.AlgorithmID(), checksum, ext, true, opts.RunTimestamp)
 				dupAbsDest := filepath.Join(dirB, dupRelDest)
 				if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
 					// Rename failed — file is still at absDest; mark as failed.

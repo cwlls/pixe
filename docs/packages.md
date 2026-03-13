@@ -18,7 +18,7 @@ This page is generated from the Go package doc comments in the source tree. Each
 
 **`internal/verify`** — Package verify implements the archive integrity verification logic for the `pixe verify` command.
 
-**`internal/hash`** — Package hash provides a configurable, streaming file hashing engine. It wraps Go's stdlib crypto primitives behind a uniform interface so the rest of the pipeline never imports crypto packages directly.
+**`internal/hash`** — Package hash provides a configurable, streaming file hashing engine. It wraps Go's stdlib crypto primitives and third-party hash libraries behind a uniform interface so the rest of the pipeline never imports crypto packages directly.
 
 **`internal/pathbuilder`** — Package pathbuilder constructs deterministic output paths for sorted media files using the Pixe naming convention:
 

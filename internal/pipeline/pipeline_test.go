@@ -135,8 +135,8 @@ func TestRun_outputDirectoryStructure(t *testing.T) {
 		t.Errorf("expected 1 file in month dir, got %d", len(entries))
 	}
 	name := entries[0].Name()
-	if !strings.HasPrefix(name, "20211225_062223_") {
-		t.Errorf("filename %q does not start with expected date prefix 20211225_062223_", name)
+	if !strings.HasPrefix(name, "20211225_062223-") {
+		t.Errorf("filename %q does not start with expected date prefix 20211225_062223-", name)
 	}
 	if !strings.HasSuffix(name, ".jpg") {
 		t.Errorf("filename %q does not end with .jpg", name)
@@ -168,8 +168,8 @@ func TestRun_noExifFallbackDate(t *testing.T) {
 	if len(entries) != 1 {
 		t.Errorf("expected 1 file in 1902/02-Feb/, got %d", len(entries))
 	}
-	if !strings.HasPrefix(entries[0].Name(), "19020220_000000_") {
-		t.Errorf("filename %q should start with Ansel Adams prefix 19020220_000000_", entries[0].Name())
+	if !strings.HasPrefix(entries[0].Name(), "19020220_000000-") {
+		t.Errorf("filename %q should start with Ansel Adams prefix 19020220_000000-", entries[0].Name())
 	}
 }
 
@@ -265,7 +265,7 @@ func TestRun_ledgerWritten(t *testing.T) {
 	}
 }
 
-func TestRun_ledgerVersion4WithRunID(t *testing.T) {
+func TestRun_ledgerVersion5WithRunID(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
@@ -289,8 +289,8 @@ func TestRun_ledgerVersion4WithRunID(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if l.Header.Version != 4 {
-		t.Errorf("ledger.Header.Version = %d, want 4", l.Header.Version)
+	if l.Header.Version != 5 {
+		t.Errorf("ledger.Header.Version = %d, want 5", l.Header.Version)
 	}
 	if l.Header.RunID != wantRunID {
 		t.Errorf("ledger.Header.RunID = %q, want %q", l.Header.RunID, wantRunID)

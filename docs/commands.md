@@ -41,7 +41,7 @@ Click any command to expand its flags and details.
     <tr>
       <td>-a, --algorithm</td>
       <td>sha1</td>
-      <td>hash algorithm to use: sha1, sha256</td>
+      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
     </tr>
     <tr>
       <td>-q, --quiet</td>
@@ -187,7 +187,7 @@ Click any command to expand its flags and details.
     <tr>
       <td>-a, --algorithm</td>
       <td>sha1</td>
-      <td>hash algorithm to use: sha1, sha256</td>
+      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
     </tr>
     <tr>
       <td>-q, --quiet</td>
@@ -266,7 +266,7 @@ Click any command to expand its flags and details.
     <tr>
       <td>-a, --algorithm</td>
       <td>sha1</td>
-      <td>hash algorithm to use: sha1, sha256</td>
+      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
     </tr>
     <tr>
       <td>-q, --quiet</td>
@@ -335,7 +335,7 @@ Click any command to expand its flags and details.
     <tr>
       <td>-a, --algorithm</td>
       <td>sha1</td>
-      <td>hash algorithm to use: sha1, sha256</td>
+      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
     </tr>
     <tr>
       <td>-q, --quiet</td>
@@ -548,7 +548,7 @@ Click any command to expand its flags and details.
     <tr>
       <td>-a, --algorithm</td>
       <td>sha1</td>
-      <td>hash algorithm to use: sha1, sha256</td>
+      <td>hash algorithm: md5, sha1 (default), sha256, blake3, xxhash</td>
     </tr>
     <tr>
       <td>-q, --quiet</td>

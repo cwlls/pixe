@@ -1601,7 +1601,7 @@ func TestMigrateSchema_v1ToV2_filesColumn(t *testing.T) {
 }
 
 // TestMigrateSchema_v1ToV2_schemaVersionRow verifies that after migration
-// the schema_version table has a row with the current schema version (3).
+// the schema_version table has a row with the current schema version (4).
 func TestMigrateSchema_v1ToV2_schemaVersionRow(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "v1ver.db")
@@ -1619,8 +1619,8 @@ func TestMigrateSchema_v1ToV2_schemaVersionRow(t *testing.T) {
 	if err := db.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if maxVersion != 3 {
-		t.Errorf("MAX(version) = %d, want 3", maxVersion)
+	if maxVersion != 4 {
+		t.Errorf("MAX(version) = %d, want 4", maxVersion)
 	}
 }
 
@@ -1684,7 +1684,7 @@ func TestMigrateSchema_v1ToV2_idempotent(t *testing.T) {
 	}
 	_ = db1.Close()
 
-	// Second open — already at v3, should be a no-op.
+	// Second open — already at v4, should be a no-op.
 	db2, err := Open(path)
 	if err != nil {
 		t.Fatalf("second Open (idempotent): %v", err)
@@ -1695,8 +1695,8 @@ func TestMigrateSchema_v1ToV2_idempotent(t *testing.T) {
 	if err := db2.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if maxVersion != 3 {
-		t.Errorf("MAX(version) = %d, want 3 after idempotent open", maxVersion)
+	if maxVersion != 4 {
+		t.Errorf("MAX(version) = %d, want 4 after idempotent open", maxVersion)
 	}
 }
 
@@ -2708,5 +2708,239 @@ func TestDB_concurrentInsertFiles(t *testing.T) {
 
 	for err := range errCh {
 		t.Errorf("concurrent batch insert error: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Schema v3 → v4 migration tests (Task 25 / I2)
+// ---------------------------------------------------------------------------
+
+// v3DDL is the schema DDL from before v4 (no algorithm column on files).
+// It is the v1 DDL plus the v1→v2 and v2→v3 columns already applied.
+const v3DDL = `
+CREATE TABLE IF NOT EXISTS schema_version (
+    version    INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id            TEXT PRIMARY KEY,
+    pixe_version  TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    destination   TEXT NOT NULL,
+    algorithm     TEXT NOT NULL,
+    workers       INTEGER NOT NULL,
+    recursive     INTEGER NOT NULL DEFAULT 0,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    status        TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'completed', 'interrupted'))
+);
+
+CREATE TABLE IF NOT EXISTS files (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT NOT NULL REFERENCES runs(id),
+    source_path   TEXT NOT NULL,
+    dest_path     TEXT,
+    dest_rel      TEXT,
+    checksum      TEXT,
+    skip_reason   TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN (
+            'pending', 'extracted', 'hashed', 'copied',
+            'verified', 'tagged', 'complete',
+            'failed', 'mismatch', 'tag_failed', 'duplicate',
+            'skipped'
+        )),
+    is_duplicate      INTEGER NOT NULL DEFAULT 0,
+    capture_date      TEXT,
+    file_size         INTEGER,
+    extracted_at      TEXT,
+    hashed_at         TEXT,
+    copied_at         TEXT,
+    verified_at       TEXT,
+    tagged_at         TEXT,
+    error             TEXT,
+    carried_sidecars  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_checksum ON files(checksum) WHERE status = 'complete';
+CREATE INDEX IF NOT EXISTS idx_files_run_id ON files(run_id);
+CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
+CREATE INDEX IF NOT EXISTS idx_files_source ON files(source_path);
+CREATE INDEX IF NOT EXISTS idx_files_capture_date ON files(capture_date);
+`
+
+// openV3DB creates a v3 database at path using the v3 DDL and inserts a
+// schema_version row with version=3. Returns the raw *sql.DB for setup.
+func openV3DB(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open v3: %v", err)
+	}
+	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if _, err := conn.Exec(v3DDL); err != nil {
+		t.Fatalf("apply v3 DDL: %v", err)
+	}
+	_, err = conn.Exec(
+		`INSERT INTO schema_version (version, applied_at) VALUES (3, ?)`,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		t.Fatalf("insert schema_version v3: %v", err)
+	}
+	return conn
+}
+
+// TestMigrateSchema_v3ToV4_algorithmColumn verifies that opening a v3 database
+// adds the algorithm column to the files table.
+func TestMigrateSchema_v3ToV4_algorithmColumn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v3algo.db")
+
+	v3conn := openV3DB(t, path)
+	_ = v3conn.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v3 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if !hasColumn(t, db.conn, "files", "algorithm") {
+		t.Error("files table missing 'algorithm' column after v3→v4 migration")
+	}
+}
+
+// TestMigrateSchema_v3ToV4_schemaVersionRow verifies that after migration
+// the schema_version table has a row with version=4.
+func TestMigrateSchema_v3ToV4_schemaVersionRow(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v3ver.db")
+
+	v3conn := openV3DB(t, path)
+	_ = v3conn.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v3 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var maxVersion int
+	if err := db.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
+		t.Fatalf("query schema_version: %v", err)
+	}
+	if maxVersion != 4 {
+		t.Errorf("MAX(version) = %d, want 4", maxVersion)
+	}
+}
+
+// TestMigrateSchema_v3ToV4_backfill verifies that existing files have their
+// algorithm column backfilled from the parent run's algorithm.
+func TestMigrateSchema_v3ToV4_backfill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v3backfill.db")
+
+	v3conn := openV3DB(t, path)
+
+	// Insert a run with algorithm="sha1" and a file belonging to it.
+	_, err := v3conn.Exec(
+		`INSERT INTO runs (id, pixe_version, source, destination, algorithm, workers, started_at, status)
+		 VALUES ('run-v3-001', '2.3.0', '/src', '/dst', 'sha1', 2, '2026-01-01T00:00:00Z', 'completed')`,
+	)
+	if err != nil {
+		t.Fatalf("insert v3 run: %v", err)
+	}
+	_, err = v3conn.Exec(
+		`INSERT INTO files (run_id, source_path, status) VALUES ('run-v3-001', '/src/photo.jpg', 'complete')`,
+	)
+	if err != nil {
+		t.Fatalf("insert v3 file: %v", err)
+	}
+	_ = v3conn.Close()
+
+	// Open with new code — should migrate to v4 and backfill algorithm.
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open v3 DB with new code: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Verify the file's algorithm was backfilled from the run.
+	var algo sql.NullString
+	if err := db.conn.QueryRow(`SELECT algorithm FROM files WHERE source_path = '/src/photo.jpg'`).Scan(&algo); err != nil {
+		t.Fatalf("query file algorithm: %v", err)
+	}
+	if !algo.Valid || algo.String != "sha1" {
+		t.Errorf("file algorithm = %v, want 'sha1'", algo)
+	}
+}
+
+// TestMigrateSchema_v3ToV4_idempotent verifies that opening a migrated v4
+// database a second time does not error and stays at version 4.
+func TestMigrateSchema_v3ToV4_idempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v3idem.db")
+
+	v3conn := openV3DB(t, path)
+	_ = v3conn.Close()
+
+	// First open — migrates to v4.
+	db1, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	_ = db1.Close()
+
+	// Second open — already at v4, should be a no-op.
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open (idempotent): %v", err)
+	}
+	defer func() { _ = db2.Close() }()
+
+	var maxVersion int
+	if err := db2.conn.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&maxVersion); err != nil {
+		t.Fatalf("query schema_version: %v", err)
+	}
+	if maxVersion != 4 {
+		t.Errorf("MAX(version) = %d, want 4 after idempotent open", maxVersion)
+	}
+}
+
+// TestUpdateFileStatus_withAlgorithm verifies that WithAlgorithm sets the
+// algorithm column on a file status update.
+func TestUpdateFileStatus_withAlgorithm(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-algo")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "run-algo", SourcePath: "/src/algo.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+
+	const checksum = "abc123def456"
+	const algorithm = "blake3"
+	if err := db.UpdateFileStatus(id, "hashed",
+		WithChecksum(checksum),
+		WithAlgorithm(algorithm),
+	); err != nil {
+		t.Fatalf("UpdateFileStatus: %v", err)
+	}
+
+	files, err := db.GetFilesByRun("run-algo")
+	if err != nil {
+		t.Fatalf("GetFilesByRun: %v", err)
+	}
+	got := files[0]
+	if got.Algorithm == nil || *got.Algorithm != algorithm {
+		t.Errorf("Algorithm = %v, want %q", got.Algorithm, algorithm)
+	}
+	if got.Checksum == nil || *got.Checksum != checksum {
+		t.Errorf("Checksum = %v, want %q", got.Checksum, checksum)
 	}
 }

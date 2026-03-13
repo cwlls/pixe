@@ -119,6 +119,10 @@ func init() {
 	verifyCmd.Flags().StringP("dir", "d", "", "archive directory to verify (required)")
 	verifyCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
 	_ = verifyCmd.MarkFlagRequired("dir")
+	// Note: --algorithm is inherited from the root command. For new-format files
+	// (YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>), the algorithm is auto-detected from the
+	// embedded ID and this flag is ignored. For legacy files, it is used as a
+	// fallback when the digest length is ambiguous.
 	_ = viper.BindPFlag("verify_dir", verifyCmd.Flags().Lookup("dir"))
 	_ = viper.BindPFlag("verify_progress", verifyCmd.Flags().Lookup("progress"))
 }

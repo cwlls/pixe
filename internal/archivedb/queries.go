@@ -108,7 +108,7 @@ func (db *DB) ListRuns() ([]*RunSummary, error) {
 // The sourceDir is matched against the run's source field.
 func (db *DB) FilesBySource(sourceDir string) ([]*FileRecord, error) {
 	const q = `
-		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum,
+		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum, f.algorithm,
 		       f.status, f.is_duplicate, f.capture_date, f.file_size,
 		       f.extracted_at, f.hashed_at, f.copied_at, f.verified_at, f.tagged_at, f.error,
 		       f.skip_reason, f.carried_sidecars
@@ -130,7 +130,7 @@ func (db *DB) FilesBySource(sourceDir string) ([]*FileRecord, error) {
 // Only files with status "complete" and a non-NULL capture_date are returned.
 func (db *DB) FilesByCaptureDateRange(start, end time.Time) ([]*FileRecord, error) {
 	const q = `
-		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
 		       skip_reason, carried_sidecars
@@ -157,7 +157,7 @@ func (db *DB) FilesByCaptureDateRange(start, end time.Time) ([]*FileRecord, erro
 // "Import date" is defined as verified_at — the timestamp when the copy was confirmed.
 func (db *DB) FilesByImportDateRange(start, end time.Time) ([]*FileRecord, error) {
 	const q = `
-		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
 		       skip_reason, carried_sidecars
@@ -184,7 +184,7 @@ func (db *DB) FilesByImportDateRange(start, end time.Time) ([]*FileRecord, error
 // Error states: "failed", "mismatch", "tag_failed".
 func (db *DB) FilesWithErrors() ([]*FileWithSource, error) {
 	const q = `
-		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum,
+		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum, f.algorithm,
 		       f.status, f.is_duplicate, f.capture_date, f.file_size,
 		       f.extracted_at, f.hashed_at, f.copied_at, f.verified_at, f.tagged_at, f.error,
 		       f.skip_reason, f.carried_sidecars,
@@ -217,7 +217,7 @@ func (db *DB) FilesWithErrors() ([]*FileWithSource, error) {
 // AllDuplicates returns all files marked as duplicates (is_duplicate = 1).
 func (db *DB) AllDuplicates() ([]*FileRecord, error) {
 	const q = `
-		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
 		       skip_reason, carried_sidecars
@@ -306,7 +306,7 @@ func (db *DB) ArchiveInventory() ([]*InventoryEntry, error) {
 // Results are ordered by insertion order (id ASC).
 func (db *DB) AllSkipped() ([]*FileRecord, error) {
 	const q = `
-		SELECT id, run_id, source_path, dest_path, dest_rel, checksum,
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
 		       status, is_duplicate, capture_date, file_size,
 		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
 		       skip_reason, carried_sidecars
@@ -534,7 +534,7 @@ func scanRunSummary(rows *sql.Rows) (*RunSummary, error) {
 }
 
 // extraScanner wraps *sql.Rows and appends extra destination pointers to every
-// Scan call. This lets scanFileRow (which scans the 18 standard file columns)
+// Scan call. This lets scanFileRow (which scans the 19 standard file columns)
 // be reused when the query returns additional columns after the standard ones.
 type extraScanner struct {
 	rows  *sql.Rows
@@ -546,7 +546,7 @@ func (es *extraScanner) Scan(dest ...any) error {
 }
 
 // scanFileWithSource scans a FileRecord plus the run_source column.
-// It delegates the 18 standard file columns to scanFileRow via extraScanner,
+// It delegates the 19 standard file columns to scanFileRow via extraScanner,
 // eliminating the ~90 lines of duplicated scan logic.
 func scanFileWithSource(rows *sql.Rows) (*FileWithSource, error) {
 	var fws FileWithSource

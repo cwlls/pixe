@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/sha1" //nolint:gosec // SHA-1 used for filename checksums, not security
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -56,9 +57,14 @@ func sha1Hex(data []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// pixeFilename builds a Pixe-format filename: YYYYMMDD_HHMMSS_<checksum>.<ext>.
+// pixeFilename builds a legacy Pixe-format filename: YYYYMMDD_HHMMSS_<checksum>.<ext>.
 func pixeFilename(checksum, ext string) string {
 	return "20211225_062223_" + checksum + ext
+}
+
+// pixeFilenameNew builds a new Pixe-format filename: YYYYMMDD_HHMMSS-<algoID>-<checksum>.<ext>.
+func pixeFilenameNew(algoID int, checksum, ext string) string {
+	return fmt.Sprintf("20211225_062223-%d-%s%s", algoID, checksum, ext)
 }
 
 // buildJPEGContent creates a minimal JPEG file with the given data appended.
@@ -367,45 +373,91 @@ func TestRun_subdirectoryWalked(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestParseChecksum_validFormats verifies that well-formed Pixe filenames
-// yield the correct checksum string.
+// yield the correct checksum and algorithm.
 func TestParseChecksum_validFormats(t *testing.T) {
 	t.Parallel()
+	sha1Checksum := "7d97e98f8af710c7e7fe703abc8f639e0ee507c4"
+	sha256Checksum := strings.Repeat("a", 64)
+	blake3Checksum := strings.Repeat("b", 64)
+	xxhashChecksum := "a1b2c3d4e5f6a7b8"
+	md5Checksum := "d41d8cd98f00b204e9800998ecf8427e"
+
 	cases := []struct {
-		name     string
-		filename string
-		want     string
+		name          string
+		filename      string
+		wantChecksum  string
+		wantAlgorithm string
 	}{
+		// --- New format (YYYYMMDD_HHMMSS-<ID>-<CHECKSUM>.<ext>) ---
 		{
-			name:     "SHA-1 40-char checksum",
-			filename: "20211225_062223_7d97e98f1234567890abcdef12345678abcdef12.jpg",
-			want:     "7d97e98f1234567890abcdef12345678abcdef12",
+			name:          "new format SHA-1 (ID=1)",
+			filename:      "20211225_062223-1-" + sha1Checksum + ".jpg",
+			wantChecksum:  sha1Checksum,
+			wantAlgorithm: "sha1",
 		},
 		{
-			name:     "16-char checksum above minimum",
-			filename: "20220202_123101_abcdef0123456789.heic",
-			want:     "abcdef0123456789",
+			name:          "new format MD5 (ID=0)",
+			filename:      "20211225_062223-0-" + md5Checksum + ".jpg",
+			wantChecksum:  md5Checksum,
+			wantAlgorithm: "md5",
 		},
 		{
-			name:     "exactly 8 chars (minimum)",
-			filename: "19020220_000000_12345678.dng",
-			want:     "12345678",
+			name:          "new format SHA-256 (ID=2)",
+			filename:      "20211225_062223-2-" + sha256Checksum + ".jpg",
+			wantChecksum:  sha256Checksum,
+			wantAlgorithm: "sha256",
 		},
 		{
-			name:     "SHA-256 64-char checksum",
-			filename: "20260312_120000_" + strings.Repeat("a", 64) + ".arw",
-			want:     strings.Repeat("a", 64),
+			name:          "new format BLAKE3 (ID=3)",
+			filename:      "20211225_062223-3-" + blake3Checksum + ".jpg",
+			wantChecksum:  blake3Checksum,
+			wantAlgorithm: "blake3",
+		},
+		{
+			name:          "new format xxHash (ID=4)",
+			filename:      "20211225_062223-4-" + xxhashChecksum + ".jpg",
+			wantChecksum:  xxhashChecksum,
+			wantAlgorithm: "xxhash",
+		},
+		// --- Legacy format (YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>) ---
+		{
+			name:          "legacy SHA-1 (40 chars → sha1)",
+			filename:      "20211225_062223_" + sha1Checksum + ".jpg",
+			wantChecksum:  sha1Checksum,
+			wantAlgorithm: "sha1",
+		},
+		{
+			name:          "legacy SHA-256 (64 chars → sha256)",
+			filename:      "20211225_062223_" + sha256Checksum + ".jpg",
+			wantChecksum:  sha256Checksum,
+			wantAlgorithm: "sha256",
+		},
+		{
+			name:          "legacy ambiguous length (16 chars → empty algorithm)",
+			filename:      "20220202_123101_abcdef0123456789.heic",
+			wantChecksum:  "abcdef0123456789",
+			wantAlgorithm: "",
+		},
+		{
+			name:          "legacy exactly 8 chars (minimum, ambiguous)",
+			filename:      "19020220_000000_12345678.dng",
+			wantChecksum:  "12345678",
+			wantAlgorithm: "",
 		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := parseChecksum(tc.filename)
+			gotChecksum, gotAlgo, ok := parseChecksum(tc.filename)
 			if !ok {
-				t.Fatalf("parseChecksum(%q) = (_, false), want true", tc.filename)
+				t.Fatalf("parseChecksum(%q) = (_, _, false), want true", tc.filename)
 			}
-			if got != tc.want {
-				t.Errorf("parseChecksum(%q) = %q, want %q", tc.filename, got, tc.want)
+			if gotChecksum != tc.wantChecksum {
+				t.Errorf("parseChecksum(%q) checksum = %q, want %q", tc.filename, gotChecksum, tc.wantChecksum)
+			}
+			if gotAlgo != tc.wantAlgorithm {
+				t.Errorf("parseChecksum(%q) algorithm = %q, want %q", tc.filename, gotAlgo, tc.wantAlgorithm)
 			}
 		})
 	}
@@ -448,14 +500,25 @@ func TestParseChecksum_invalidFormats(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := parseChecksum(tc.filename)
+			got, _, ok := parseChecksum(tc.filename)
 			if ok {
-				t.Errorf("parseChecksum(%q) = (%q, true), want (_, false)", tc.filename, got)
+				t.Errorf("parseChecksum(%q) = (%q, _, true), want (_, _, false)", tc.filename, got)
 			}
 			if got != "" {
 				t.Errorf("parseChecksum(%q) returned non-empty checksum %q on failure", tc.filename, got)
 			}
 		})
+	}
+}
+
+// TestParseChecksum_unknownNewFormatID verifies that a new-format filename with
+// an unrecognised algorithm ID returns (_, _, false).
+func TestParseChecksum_unknownNewFormatID(t *testing.T) {
+	t.Parallel()
+	// ID=9 is not in the registry.
+	got, _, ok := parseChecksum("20211225_062223-9-abcdef0123456789.jpg")
+	if ok {
+		t.Errorf("parseChecksum with unknown ID = (%q, _, true), want (_, _, false)", got)
 	}
 }
 
@@ -465,8 +528,8 @@ func TestParseChecksum_invalidFormats(t *testing.T) {
 // compared against the recomputed hash, so invalid hex will simply never match.
 func TestParseChecksum_nonHexAccepted(t *testing.T) {
 	t.Parallel()
-	// "ghijklmn" is 8 chars but not valid hex — parseChecksum accepts it.
-	got, ok := parseChecksum("20211225_062223_ghijklmn.jpg")
+	// "ghijklmn" is 8 chars but not valid hex — parseChecksum accepts it (legacy format).
+	got, _, ok := parseChecksum("20211225_062223_ghijklmn.jpg")
 	if !ok {
 		t.Fatal("parseChecksum should accept non-hex checksum (length check only)")
 	}
@@ -481,7 +544,7 @@ func TestParseChecksum_nonHexAccepted(t *testing.T) {
 func TestParseChecksum_nullByteInChecksum(t *testing.T) {
 	t.Parallel()
 	// "\x00checksum" is 9 chars — passes the ≥8 minimum.
-	got, ok := parseChecksum("20211225_062223_\x00checksum.jpg")
+	got, _, ok := parseChecksum("20211225_062223_\x00checksum.jpg")
 	if !ok {
 		t.Fatal("parseChecksum should accept null-byte checksum (length check only)")
 	}
@@ -496,7 +559,7 @@ func TestParseChecksum_longChecksumAccepted(t *testing.T) {
 	t.Parallel()
 	longChecksum := strings.Repeat("a", 1000)
 	filename := "20211225_062223_" + longChecksum + ".jpg"
-	got, ok := parseChecksum(filename)
+	got, _, ok := parseChecksum(filename)
 	if !ok {
 		t.Fatal("parseChecksum should accept long checksum")
 	}

@@ -13,17 +13,32 @@
 // limitations under the License.
 
 // Package hash provides a configurable, streaming file hashing engine.
-// It wraps Go's stdlib crypto primitives behind a uniform interface so
-// the rest of the pipeline never imports crypto packages directly.
+// It wraps Go's stdlib crypto primitives and third-party hash libraries
+// behind a uniform interface so the rest of the pipeline never imports
+// crypto packages directly.
+//
+// Supported algorithms and their numeric IDs (embedded in filenames):
+//
+//	0 — md5      (32 hex chars)
+//	1 — sha1     (40 hex chars) — default
+//	2 — sha256   (64 hex chars)
+//	3 — blake3   (64 hex chars)
+//	4 — xxhash   (16 hex chars)
+//
+// See ARCHITECTURE.md Section 4.5.1 for the full algorithm registry.
 package hash
 
 import (
+	"crypto/md5"  //nolint:gosec // MD5 is used for content identification, not security
 	"crypto/sha1" //nolint:gosec // SHA-1 is used for filename checksums, not security
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	gohash "hash"
 	"io"
+
+	"github.com/cespare/xxhash/v2"
+	"github.com/zeebo/blake3"
 )
 
 const copyBufSize = 32 * 1024 // 32 KB — bounds per-file memory usage during hashing
@@ -33,19 +48,26 @@ const copyBufSize = 32 * 1024 // 32 KB — bounds per-file memory usage during h
 type Hasher struct {
 	newFunc func() gohash.Hash
 	name    string
+	id      int // numeric algorithm ID for filename embedding (Section 4.5.1)
 }
 
 // NewHasher returns a Hasher for the named algorithm.
-// Supported values: "sha1" (default), "sha256".
+// Supported values: "md5", "sha1" (default), "sha256", "blake3", "xxhash".
 // Returns an error for any unrecognised algorithm name.
 func NewHasher(algorithm string) (*Hasher, error) {
 	switch algorithm {
+	case "md5":
+		return &Hasher{newFunc: md5.New, name: "md5", id: 0}, nil //nolint:gosec
 	case "sha1":
-		return &Hasher{newFunc: sha1.New, name: "sha1"}, nil //nolint:gosec
+		return &Hasher{newFunc: sha1.New, name: "sha1", id: 1}, nil //nolint:gosec
 	case "sha256":
-		return &Hasher{newFunc: sha256.New, name: "sha256"}, nil
+		return &Hasher{newFunc: sha256.New, name: "sha256", id: 2}, nil
+	case "blake3":
+		return &Hasher{newFunc: func() gohash.Hash { return blake3.New() }, name: "blake3", id: 3}, nil
+	case "xxhash":
+		return &Hasher{newFunc: func() gohash.Hash { return xxhash.New() }, name: "xxhash", id: 4}, nil
 	default:
-		return nil, fmt.Errorf("hash: unsupported algorithm %q (supported: sha1, sha256)", algorithm)
+		return nil, fmt.Errorf("hash: unsupported algorithm %q (supported: md5, sha1, sha256, blake3, xxhash)", algorithm)
 	}
 }
 
@@ -63,3 +85,26 @@ func (h *Hasher) Sum(r io.Reader) (string, error) {
 
 // Algorithm returns the canonical name of the hash algorithm (e.g. "sha1").
 func (h *Hasher) Algorithm() string { return h.name }
+
+// AlgorithmID returns the numeric algorithm identifier embedded in filenames.
+// See ARCHITECTURE.md Section 4.5.1 for the registry.
+func (h *Hasher) AlgorithmID() int { return h.id }
+
+// AlgorithmNameByID returns the algorithm name for a numeric ID, or "" if unknown.
+// Used by verify to auto-detect the algorithm from a filename's embedded ID.
+func AlgorithmNameByID(id int) string {
+	switch id {
+	case 0:
+		return "md5"
+	case 1:
+		return "sha1"
+	case 2:
+		return "sha256"
+	case 3:
+		return "blake3"
+	case 4:
+		return "xxhash"
+	default:
+		return ""
+	}
+}

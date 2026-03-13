@@ -123,7 +123,9 @@ func MonthDir(month time.Month) string {
 //
 // Parameters:
 //   - date:         capture date/time extracted from the file's metadata.
-//   - checksum:     hex-encoded media payload hash (e.g. 40-char SHA-1).
+//   - algoID:       numeric algorithm ID (see ARCHITECTURE.md Section 4.5.1).
+//     0=md5, 1=sha1, 2=sha256, 3=blake3, 4=xxhash.
+//   - checksum:     hex-encoded media payload hash.
 //   - ext:          file extension including the leading dot (e.g. ".JPG").
 //     It is lowercased automatically.
 //   - isDuplicate:  when true the path is rooted under duplicates/<runTimestamp>/.
@@ -132,18 +134,20 @@ func MonthDir(month time.Month) string {
 //
 // Example outputs:
 //
-//	Build(t, sha, ".jpg", false, "") → "2021/12-Dec/20211225_062223_<sha>.jpg"
-//	Build(t, sha, ".JPG", true, "20260306_103000") → "duplicates/20260306_103000/2021/12-Dec/20211225_062223_<sha>.jpg"
-func Build(date time.Time, checksum string, ext string, isDuplicate bool, runTimestamp string) string {
+//	Build(t, 1, sha, ".jpg", false, "") → "2021/12-Dec/20211225_062223-1-<sha>.jpg"
+//	Build(t, 1, sha, ".JPG", true, "20260306_103000") → "duplicates/20260306_103000/2021/12-Dec/20211225_062223-1-<sha>.jpg"
+func Build(date time.Time, algoID int, checksum string, ext string, isDuplicate bool, runTimestamp string) string {
 	ext = strings.ToLower(ext)
 
 	// Locale-aware month directory per spec (Section 4.3).
 	year := date.Year()
 
-	filename := fmt.Sprintf("%04d%02d%02d_%02d%02d%02d_%s%s",
+	// Format: YYYYMMDD_HHMMSS-<algoID>-<checksum>.<ext>
+	// Underscores belong to the datetime portion; hyphens delimit the integrity segment.
+	filename := fmt.Sprintf("%04d%02d%02d_%02d%02d%02d-%d-%s%s",
 		year, int(date.Month()), date.Day(),
 		date.Hour(), date.Minute(), date.Second(),
-		checksum, ext,
+		algoID, checksum, ext,
 	)
 
 	relPath := filepath.Join(fmt.Sprintf("%d", year), MonthDir(date.Month()), filename)
