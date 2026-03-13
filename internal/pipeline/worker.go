@@ -90,6 +90,7 @@ type workerFinalResult struct {
 	skipCopy              bool      // true when the worker skipped I/O due to --skip-duplicates
 	carriedSidecarRels    []string  // dest_rel paths of successfully carried sidecars
 	err                   error
+	dbErr                 error // non-nil when a terminal DB status update failed in the worker
 }
 
 // RunConcurrent executes the sort pipeline with N concurrent workers.
@@ -117,7 +118,10 @@ func RunConcurrent(opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
 	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
 
-	ctx := context.Background()
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, lw, fmtr)
 }
 
@@ -154,8 +158,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				SourcePath: filepath.Join(dirA, sf.Path),
 			})
 			if insertErr == nil {
-				_ = db.UpdateFileStatus(skipFileID, "skipped",
-					archivedb.WithSkipReason(sf.Reason))
+				if dbErr := db.UpdateFileStatus(skipFileID, "skipped",
+					archivedb.WithSkipReason(sf.Reason)); dbErr != nil {
+					_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", sf.Path, dbErr)))
+				}
 			}
 		}
 		result.Skipped++
@@ -200,8 +206,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					Reason: reason,
 				})
 				fileID := fileIDs[df.Path]
-				_ = db.UpdateFileStatus(fileID, "skipped",
-					archivedb.WithSkipReason(reason))
+				if dbErr := db.UpdateFileStatus(fileID, "skipped",
+					archivedb.WithSkipReason(reason)); dbErr != nil {
+					_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", df.RelPath, dbErr)))
+				}
 				result.Skipped++
 				emit(opts.EventBus, progress.Event{
 					Kind:      progress.EventFileSkipped,
@@ -216,6 +224,25 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 		actualDiscovered = append(actualDiscovered, df)
 	}
 
+	// Channel buffer sizing — deadlock safety analysis:
+	//
+	// The coordination protocol has four channel hops per file:
+	//   workCh (coordinator→worker) → resultCh (worker→coordinator) →
+	//   assignChs[i] (coordinator→worker, per-worker) → doneCh (worker→coordinator)
+	//
+	// Worst-case scenario: all N workers simultaneously complete extract+hash
+	// and send to resultCh before the coordinator processes any of them.
+	// resultCh is buffered at n*2, so all N sends succeed without blocking.
+	// Workers then block on assignChs[i] (buffer 1). The coordinator's select
+	// reads from resultCh (not doneCh), processes the dedup check, and sends
+	// to assignChs[i]. Each worker unblocks, performs copy+verify+tag, and
+	// sends to doneCh (buffer n*2). At most N items are ever pending in
+	// resultCh simultaneously, and n*2 > N, so the buffer never fills.
+	// Therefore no deadlock is possible under any load level.
+	//
+	// The ctx.Done() case in the coordinator's select ensures that a
+	// cancellation signal does not leave workers blocked on assignChs[i]:
+	// workers also select on ctx.Done() when waiting for their assignment.
 	workCh := make(chan workItem, n*2)
 	resultCh := make(chan workResult, n*2)
 	doneCh := make(chan workerFinalResult, n*2)
@@ -280,9 +307,11 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						Reason: dfs.reason,
 					})
 					if db != nil {
-						_ = db.UpdateFileStatus(wr.fileID, "skipped",
+						if dbErr := db.UpdateFileStatus(wr.fileID, "skipped",
 							archivedb.WithSkipReason(dfs.reason),
-							archivedb.WithCaptureDate(dfs.captureDate))
+							archivedb.WithCaptureDate(dfs.captureDate)); dbErr != nil {
+							_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", wr.df.RelPath, dbErr)))
+						}
 					}
 					result.Skipped++
 					emit(opts.EventBus, progress.Event{
@@ -296,8 +325,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					continue
 				}
 				if db != nil {
-					_ = db.UpdateFileStatus(wr.fileID, "failed",
-						archivedb.WithError(wr.err.Error()))
+					if dbErr := db.UpdateFileStatus(wr.fileID, "failed",
+						archivedb.WithError(wr.err.Error())); dbErr != nil {
+						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", wr.df.RelPath, dbErr)))
+					}
 				}
 				result.Errors++
 				if opts.Config.Verbosity >= 0 {
@@ -326,7 +357,9 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if db != nil {
 				existingDest, err := db.CheckDuplicate(wr.checksum)
 				if err != nil {
-					_ = db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error()))
+					if dbErr := db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(err.Error())); dbErr != nil {
+						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", wr.df.RelPath, dbErr)))
+					}
 					result.Errors++
 					if opts.Config.Verbosity >= 0 {
 						_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", wr.df.RelPath, err.Error()))
@@ -371,6 +404,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if !ok {
 				goto done
 			}
+			// Warn if a terminal DB status update failed inside the worker.
+			if fr.dbErr != nil {
+				_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, fr.dbErr)))
+			}
 			if fr.err != nil {
 				result.Errors++
 				if opts.Config.Verbosity >= 0 {
@@ -392,10 +429,12 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			} else if fr.skipCopy {
 				// --skip-duplicates: no file was written; update DB and emit output.
 				if db != nil {
-					_ = db.UpdateFileStatus(fr.fileID, "complete",
+					if dbErr := db.UpdateFileStatus(fr.fileID, "complete",
 						archivedb.WithChecksum(fr.checksum),
 						archivedb.WithAlgorithm(opts.Hasher.Algorithm()),
-						archivedb.WithIsDuplicate(true))
+						archivedb.WithIsDuplicate(true)); dbErr != nil {
+						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, dbErr)))
+					}
 				}
 				result.Processed++
 				result.Duplicates++
@@ -429,9 +468,11 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				if db != nil {
 					if finalIsDup {
 						// Pre-copy dedup — just mark complete.
-						_ = db.UpdateFileStatus(fr.fileID, "complete",
+						if dbErr := db.UpdateFileStatus(fr.fileID, "complete",
 							archivedb.WithIsDuplicate(true),
-							archivedb.WithCarriedSidecars(finalSidecars))
+							archivedb.WithCarriedSidecars(finalSidecars)); dbErr != nil {
+							_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, dbErr)))
+						}
 					} else {
 						// Atomic post-copy dedup re-check to handle cross-process races.
 						existingDest, dedupErr := db.CompleteFileWithDedupCheck(fr.fileID, fr.checksum)
@@ -456,8 +497,10 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							dupAbsDest := filepath.Join(dirB, dupRelDest)
 							absDest := filepath.Join(dirB, fr.relDest)
 							if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
-								_ = db.UpdateFileStatus(fr.fileID, "failed",
-									archivedb.WithError(renErr.Error()))
+								if dbErr := db.UpdateFileStatus(fr.fileID, "failed",
+									archivedb.WithError(renErr.Error())); dbErr != nil {
+									_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, dbErr)))
+								}
 								result.Errors++
 								errMsg := fmt.Sprintf("relocate duplicate: %v", renErr)
 								if opts.Config.Verbosity >= 0 {
@@ -471,18 +514,22 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 								completed++
 								continue
 							}
-							_ = db.UpdateFileStatus(fr.fileID, "complete",
+							if dbErr := db.UpdateFileStatus(fr.fileID, "complete",
 								archivedb.WithDestination(dupAbsDest, dupRelDest),
 								archivedb.WithIsDuplicate(true),
-								archivedb.WithCarriedSidecars(finalSidecars))
+								archivedb.WithCarriedSidecars(finalSidecars)); dbErr != nil {
+								_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, dbErr)))
+							}
 							finalRelDest = dupRelDest
 							finalIsDup = true
 							finalExistingDest = existingDest
 						} else {
 							// Non-race path: update carried_sidecars if any.
 							if len(finalSidecars) > 0 {
-								_ = db.UpdateFileStatus(fr.fileID, "complete",
-									archivedb.WithCarriedSidecars(finalSidecars))
+								if dbErr := db.UpdateFileStatus(fr.fileID, "complete",
+									archivedb.WithCarriedSidecars(finalSidecars)); dbErr != nil {
+									_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, dbErr)))
+								}
 							}
 						}
 						// If existingDest == "", CompleteFileWithDedupCheck already set status='complete'.
@@ -698,8 +745,9 @@ func runWorker(ctx context.Context, id int,
 					dryTags := resolveTags(opts.Config, captureDate)
 					emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config)
 				}
+				var dryDBErr error
 				if db != nil {
-					_ = db.UpdateFileStatus(item.fileID, "complete",
+					dryDBErr = db.UpdateFileStatus(item.fileID, "complete",
 						archivedb.WithDestination(assign.absDest, assign.relDest),
 						archivedb.WithIsDuplicate(assign.isDuplicate))
 				}
@@ -710,6 +758,7 @@ func runWorker(ctx context.Context, id int,
 					existingDestForLedger: assign.existingDestForLedger,
 					captureDate:           captureDate,
 					verifiedAt:            time.Now().UTC(),
+					dbErr:                 dryDBErr,
 				}
 				continue
 			}
@@ -718,10 +767,11 @@ func runWorker(ctx context.Context, id int,
 			tmpPath, err := copypkg.Execute(item.df.Path, assign.absDest)
 			if err != nil {
 				ferr := fmt.Errorf("copy: %w", err)
+				var copyDBErr error
 				if db != nil {
-					_ = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
+					copyDBErr = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
 				}
-				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr, dbErr: copyDBErr}
 				continue
 			}
 			if db != nil {
@@ -754,10 +804,11 @@ func runWorker(ctx context.Context, id int,
 					continue
 				}
 				copypkg.CleanupTempFile(tmpPath)
+				var mmDBErr error
 				if db != nil {
-					_ = db.UpdateFileStatus(item.fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
+					mmDBErr = db.UpdateFileStatus(item.fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
 				}
-				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: vr.Error}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: vr.Error, dbErr: mmDBErr}
 				continue
 			}
 
@@ -779,10 +830,11 @@ func runWorker(ctx context.Context, id int,
 					continue
 				}
 				ferr := fmt.Errorf("promote: %w", err)
+				var promDBErr error
 				if db != nil {
-					_ = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
+					promDBErr = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
 				}
-				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr, dbErr: promDBErr}
 				continue
 			}
 			verifiedAt := time.Now().UTC()
@@ -834,15 +886,17 @@ func runWorker(ctx context.Context, id int,
 			}
 
 			// --- Tag ---
+			var finalDBErr error
 			tags := resolveTags(opts.Config, captureDate)
 			if !tags.IsEmpty() {
 				if err := tagging.ApplyWithSidecars(assign.absDest, item.df.Handler, tags, carriedXMPAbs, opts.Config.OverwriteSidecarTags); err != nil {
 					if db != nil {
-						_ = db.UpdateFileStatus(item.fileID, "tag_failed", archivedb.WithError(err.Error()))
+						finalDBErr = db.UpdateFileStatus(item.fileID, "tag_failed", archivedb.WithError(err.Error()))
 					}
 					if opts.Config.Verbosity >= 0 {
 						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("tag failed for %s: %v", item.df.RelPath, err)))
 					}
+					// tag_failed is non-fatal — the file is copied and verified.
 				} else {
 					if db != nil {
 						_ = db.UpdateFileStatus(item.fileID, "tagged")
@@ -865,6 +919,7 @@ func runWorker(ctx context.Context, id int,
 				captureDate:           captureDate,
 				verifiedAt:            verifiedAt,
 				carriedSidecarRels:    carriedSidecarRels,
+				dbErr:                 finalDBErr,
 			}
 		}
 	}

@@ -23,6 +23,7 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -73,6 +74,10 @@ type SortOptions struct {
 	// PathTemplate controls the directory structure for destination paths.
 	// When nil, the default template ("{year}/{month}-{monthname}") is used.
 	PathTemplate *pathbuilder.Template
+	// Context, when non-nil, is used for graceful cancellation (e.g. SIGINT).
+	// Workers finish their current file before exiting. When nil,
+	// context.Background() is used (no cancellation).
+	Context context.Context
 }
 
 // emit sends an event to the bus if one is configured. It is a no-op when
@@ -111,7 +116,16 @@ type SortResult struct {
 //
 // After all files: write ledger to dirA, mark run complete in DB.
 // In dry-run mode the copy/verify/tag steps are skipped; everything else runs.
+//
+// Cancellation: if opts.Context is cancelled (e.g. via SIGINT), the pipeline
+// stops accepting new files, drains in-flight work, and returns gracefully.
 func Run(opts SortOptions) (SortResult, error) {
+	// Resolve context — default to Background when the caller did not provide one.
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	out := opts.Output
 	if out == nil {
 		out = os.Stdout
@@ -212,9 +226,9 @@ func Run(opts SortOptions) (SortResult, error) {
 	fmtr := NewFormatter(opts.ColorOutput)
 	var result SortResult
 	if cfg.Workers > 1 {
-		result = RunConcurrent(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
+		result = runConcurrentCtx(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
 	} else {
-		result = runSequential(opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
+		result = runSequential(ctx, opts, discovered, skipped, fileIDs, dirA, dirB, out, slw, fmtr)
 	}
 
 	// ------------------------------------------------------------------
@@ -247,7 +261,9 @@ func Run(opts SortOptions) (SortResult, error) {
 }
 
 // runSequential processes all discovered files one at a time.
-func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
+// ctx is checked between files; cancellation stops new work but does not
+// interrupt a file that is already in progress.
+func runSequential(ctx context.Context, opts SortOptions, discovered []discovery.DiscoveredFile,
 	skipped []discovery.SkippedFile,
 	fileIDs map[string]int64, dirA, dirB string, out io.Writer, lw *manifest.SafeLedgerWriter, fmtr *Formatter) SortResult {
 
@@ -276,8 +292,10 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 				SourcePath: filepath.Join(dirA, sf.Path),
 			})
 			if insertErr == nil {
-				_ = db.UpdateFileStatus(skipFileID, "skipped",
-					archivedb.WithSkipReason(sf.Reason))
+				if dbErr := db.UpdateFileStatus(skipFileID, "skipped",
+					archivedb.WithSkipReason(sf.Reason)); dbErr != nil {
+					_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", sf.Path, dbErr)
+				}
 			}
 		}
 		result.Skipped++
@@ -291,6 +309,13 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 	}
 
 	for _, df := range discovered {
+		// Stop accepting new files if the context has been cancelled (e.g. SIGINT).
+		select {
+		case <-ctx.Done():
+			return result
+		default:
+		}
+
 		fileID := fileIDs[df.Path]
 
 		// --- Check if previously imported ---
@@ -321,8 +346,10 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 					Status: domain.LedgerStatusSkip,
 					Reason: reason,
 				})
-				_ = db.UpdateFileStatus(fileID, "skipped",
-					archivedb.WithSkipReason(reason))
+				if dbErr := db.UpdateFileStatus(fileID, "skipped",
+					archivedb.WithSkipReason(reason)); dbErr != nil {
+					_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+				}
 				result.Skipped++
 				emit(opts.EventBus, progress.Event{
 					Kind:      progress.EventFileSkipped,
@@ -359,9 +386,11 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 					Reason: dfs.reason,
 				})
 				if db != nil {
-					_ = db.UpdateFileStatus(fileID, "skipped",
+					if dbErr := db.UpdateFileStatus(fileID, "skipped",
 						archivedb.WithSkipReason(dfs.reason),
-						archivedb.WithCaptureDate(dfs.captureDate))
+						archivedb.WithCaptureDate(dfs.captureDate)); dbErr != nil {
+						_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+					}
 				}
 				result.Skipped++
 				emit(opts.EventBus, progress.Event{
@@ -375,7 +404,9 @@ func runSequential(opts SortOptions, discovered []discovery.DiscoveredFile,
 			}
 			result.Errors++
 			if db != nil {
-				_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
+				if dbErr := db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error())); dbErr != nil {
+					_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+				}
 			}
 			if cfg.Verbosity >= 0 {
 				_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", df.RelPath, err.Error()))
@@ -526,10 +557,12 @@ func processFile(
 	// --- Skip duplicates (when --skip-duplicates is set) ---
 	if isDuplicate && cfg.SkipDuplicates {
 		if db != nil {
-			_ = db.UpdateFileStatus(fileID, "complete",
+			if dbErr := db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithChecksum(checksum),
 				archivedb.WithAlgorithm(opts.Hasher.Algorithm()),
-				archivedb.WithIsDuplicate(true))
+				archivedb.WithIsDuplicate(true)); dbErr != nil {
+				_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+			}
 		}
 		matchDetail := existingDestForLedger
 		if cfg.Verbosity >= 0 {
@@ -559,9 +592,11 @@ func processFile(
 			emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg)
 		}
 		if db != nil {
-			_ = db.UpdateFileStatus(fileID, "complete",
+			if dbErr := db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithDestination(absDest, relDest),
-				archivedb.WithIsDuplicate(isDuplicate))
+				archivedb.WithIsDuplicate(isDuplicate)); dbErr != nil {
+				_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+			}
 		}
 		if isDuplicate {
 			le := &domain.LedgerEntry{
@@ -599,7 +634,9 @@ func processFile(
 	if !vr.Success {
 		copypkg.CleanupTempFile(tmpPath)
 		if db != nil {
-			_ = db.UpdateFileStatus(fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
+			if dbErr := db.UpdateFileStatus(fileID, "mismatch", archivedb.WithError(vr.Error.Error())); dbErr != nil {
+				_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+			}
 		}
 		return nil, false, fmt.Errorf("verify: %w", vr.Error)
 	}
@@ -608,7 +645,9 @@ func processFile(
 	if err := copypkg.Promote(tmpPath, absDest); err != nil {
 		copypkg.CleanupTempFile(tmpPath)
 		if db != nil {
-			_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error()))
+			if dbErr := db.UpdateFileStatus(fileID, "failed", archivedb.WithError(err.Error())); dbErr != nil {
+				_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+			}
 		}
 		return nil, false, fmt.Errorf("promote: %w", err)
 	}
@@ -665,7 +704,9 @@ func processFile(
 	if !tags.IsEmpty() {
 		if err := tagging.ApplyWithSidecars(absDest, df.Handler, tags, carriedXMPAbs, cfg.OverwriteSidecarTags); err != nil {
 			if db != nil {
-				_ = db.UpdateFileStatus(fileID, "tag_failed", archivedb.WithError(err.Error()))
+				if dbErr := db.UpdateFileStatus(fileID, "tag_failed", archivedb.WithError(err.Error())); dbErr != nil {
+					_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+				}
 			}
 			if cfg.Verbosity >= 0 {
 				_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("tag failed for %s: %v", df.RelPath, err)))
@@ -688,9 +729,11 @@ func processFile(
 		if isDuplicate {
 			// Pre-copy dedup already determined this is a duplicate.
 			// No race check needed — just mark complete.
-			_ = db.UpdateFileStatus(fileID, "complete",
+			if dbErr := db.UpdateFileStatus(fileID, "complete",
 				archivedb.WithIsDuplicate(true),
-				archivedb.WithCarriedSidecars(carriedSidecarRels))
+				archivedb.WithCarriedSidecars(carriedSidecarRels)); dbErr != nil {
+				_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+			}
 		} else {
 			// Atomically check for a cross-process race: another pixe process may
 			// have completed the same checksum while we were copying.
@@ -705,14 +748,18 @@ func processFile(
 				dupAbsDest := filepath.Join(dirB, dupRelDest)
 				if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
 					// Rename failed — file is still at absDest; mark as failed.
-					_ = db.UpdateFileStatus(fileID, "failed", archivedb.WithError(renErr.Error()))
+					if dbErr := db.UpdateFileStatus(fileID, "failed", archivedb.WithError(renErr.Error())); dbErr != nil {
+						_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+					}
 					return nil, false, fmt.Errorf("relocate duplicate after race: %w", renErr)
 				}
 				// Update DB record with the new duplicate destination.
-				_ = db.UpdateFileStatus(fileID, "complete",
+				if dbErr := db.UpdateFileStatus(fileID, "complete",
 					archivedb.WithDestination(dupAbsDest, dupRelDest),
 					archivedb.WithIsDuplicate(true),
-					archivedb.WithCarriedSidecars(carriedSidecarRels))
+					archivedb.WithCarriedSidecars(carriedSidecarRels)); dbErr != nil {
+					_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+				}
 				relDest = dupRelDest
 				isDuplicate = true
 				existingDestForLedger = existingDest
@@ -720,8 +767,10 @@ func processFile(
 				// Non-race path: CompleteFileWithDedupCheck set status='complete'.
 				// Update carried_sidecars if any were carried.
 				if len(carriedSidecarRels) > 0 {
-					_ = db.UpdateFileStatus(fileID, "complete",
-						archivedb.WithCarriedSidecars(carriedSidecarRels))
+					if dbErr := db.UpdateFileStatus(fileID, "complete",
+						archivedb.WithCarriedSidecars(carriedSidecarRels)); dbErr != nil {
+						_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+					}
 				}
 			}
 		}
