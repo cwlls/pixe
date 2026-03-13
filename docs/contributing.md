@@ -1,5 +1,6 @@
 ---
 title: Contributing
+nav_order: 9
 ---
 
 # Contributing
@@ -17,7 +18,15 @@ New file format support is particularly straightforward: each format is an isola
    $ cd pixe && make build
    ```
 
-3. **Run the test suite** before and after your changes:
+3. **Install the pre-commit hook** to catch stale documentation before pushing:
+
+   ```bash
+   $ make install-hooks
+   ```
+
+   The hook runs `go run ./internal/docgen --check` when you commit changes to CLI flags, handlers, or documentation source files. If docs are stale, it blocks the commit and tells you to run `make docs`.
+
+4. **Run the test suite** before and after your changes:
 
    ```bash
    $ make check        # fmt + vet + unit tests (fast gate)
@@ -25,8 +34,8 @@ New file format support is particularly straightforward: each format is an isola
    $ make lint         # golangci-lint
    ```
 
-4. **Follow the conventions:** Apache 2.0 header on every `.go` file, stdlib-only test assertions (no testify), three import groups (stdlib / external / internal), `-race` always on. See `AGENTS.md` in the repo for the full style guide.
+5. **Follow the conventions:** Apache 2.0 header on every `.go` file, stdlib-only test assertions (no testify), three import groups (stdlib / external / internal), `-race` always on. See `AGENTS.md` in the repo for the full style guide.
 
-5. **Submit a pull request** on GitHub. CI runs formatting checks, vet, lint, and the full test suite on every PR.
+6. **Submit a pull request** on GitHub. CI runs formatting checks, vet, lint, and the full test suite on every PR.
 
 → [Open an issue on GitHub](https://github.com/cwlls/pixe/issues){:target="_blank" rel="noopener"}

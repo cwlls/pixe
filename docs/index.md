@@ -1,5 +1,7 @@
 ---
-title: Pixe
+title: Home
+nav_order: 1
+permalink: /
 description: Safe, deterministic photo and video sorting
 ---
 
@@ -10,20 +12,6 @@ Safe, deterministic photo and video sorting.
 Your originals are never touched. Every copy is verified before it counts. Interrupted runs resume exactly where they left off.
 
 [Get started →](install.md) · [View on GitHub](https://github.com/cwlls/pixe){:target="_blank" rel="noopener"}
-
----
-
-## Documentation
-
-- [Installation](install.md)
-- [Commands](commands.md)
-- [How It Works](how-it-works.md)
-- [Technical Design](technical.md)
-- [Adding a New Format](adding-formats.md)
-- [Package Reference](packages.md)
-- [Contributing](contributing.md)
-- [Changelog](changelog.md)
-- [AI Collaboration](ai.md)
 
 ---
 

@@ -1,5 +1,6 @@
 ---
 title: Package Reference
+nav_order: 8
 ---
 
 # Package Reference

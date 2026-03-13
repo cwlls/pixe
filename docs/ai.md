@@ -1,5 +1,6 @@
 ---
 title: AI Collaboration
+nav_order: 11
 ---
 
 # AI Collaboration

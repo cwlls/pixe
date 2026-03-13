@@ -808,7 +808,7 @@ Jekyll-based static site deployed to GitHub Pages from `docs/`. Uses the **Just 
 
 ### 11.2 Theme Migration: Slate → Just the Docs
 
-The site is migrating from `jekyll-theme-slate` to `just-the-docs`. Slate is a single-page presentation theme with no built-in multi-page navigation — it has no sidebar, no top nav bar, no search, and no breadcrumbs. With 11+ pages (and growing), navigating the site requires returning to the index page every time. Just the Docs is purpose-built for documentation sites and provides all of this out of the box via `_config.yml` configuration.
+The site has migrated from `jekyll-theme-slate` to `just-the-docs`. Slate was a single-page presentation theme with no built-in multi-page navigation — it had no sidebar, no top nav bar, no search, and no breadcrumbs. With 11+ pages (and growing), navigating the site required returning to the index page every time. Just the Docs is purpose-built for documentation sites and provides all of this out of the box via `_config.yml` configuration.
 
 **What changes:**
 
@@ -994,7 +994,7 @@ Two changes to the existing commands page:
 
 ### 11.7 Previous Migrations (Completed)
 
-The migration from the original custom theme to Slate has been completed. The migration from Slate to Just the Docs is described in §11.2.
+The migration from the original custom theme to Slate has been completed. The migration from Slate to Just the Docs (described in §11.2) has also been completed.
 
 Historical custom theme artifacts that were previously deleted: `_sass/`, `_layouts/`, `_includes/`, `assets/`, `_data/`, `_site/`, `.jekyll-cache/`.
 
@@ -1098,15 +1098,15 @@ uninstall-hooks: ## Remove git pre-commit hook
 
 **CI is unchanged.** The pre-commit hook is a local convenience — CI remains the authoritative gate. The `go run ./internal/docgen --check` step in `.github/workflows/ci.yml` stays exactly as-is.
 
-### 12.3 Fixing the Current CI Failure
+### 12.3 CI Failure Resolution
 
-The docs-check CI step is currently failing because `docs/commands.md`, `README.md`, and `docs/changelog.md` are stale. The fix:
+The docs-check CI step that was failing due to stale documentation (`docs/commands.md`, `README.md`, `docs/changelog.md`) has been resolved. The fix involved:
 
-1. Run `make docs` to regenerate all marker-injected content.
-2. Review the diff — it will show new flags (`--yes`, `--no-ledger`) added to the sort flags tables, updated changelog content, and possibly other minor diffs from recent source changes.
-3. Commit the regenerated files.
+1. Running `make docs` to regenerate all marker-injected content.
+2. Adding new flags (`--yes`, `--no-ledger`) to the sort flags tables, updating changelog content, and syncing other recent source changes.
+3. Committing the regenerated files.
 
-This is a one-time catch-up. The pre-commit hook (§12.2) prevents recurrence.
+The pre-commit hook (§12.2) now prevents recurrence by catching stale documentation before commits are made.
 
 ---
 

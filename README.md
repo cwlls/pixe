@@ -140,6 +140,8 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                                                     |
 | --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                                                    |
 | --path-template          |         | token-based template for destination directory structure (default: "{year}/{month}-{monthname}")                                    |
+| -y, --yes                | false   | auto-accept prompts (e.g. continue without ledger when ledger creation fails)                                                       |
+| --no-ledger              | false   | skip ledger creation entirely without prompting or warning                                                                          |
 
 <!-- pixe:end:sort-flags -->
 
@@ -200,6 +202,7 @@ pixe verify --dir /path/to/archive [options]
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml             |
 | -d, --dest      |         | destination archive directory to verify (required)                        |
 | --progress      | false   | show a live progress bar instead of per-file text output (requires a TTY) |
+| -w, --workers   | 0       | number of concurrent workers for verification (default: number of CPUs)   |
 
 <!-- pixe:end:verify-flags -->
 

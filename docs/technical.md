@@ -1,5 +1,6 @@
 ---
 title: Technical Design
+nav_order: 6
 ---
 
 # Technical Design

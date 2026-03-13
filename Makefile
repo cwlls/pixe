@@ -25,7 +25,7 @@ GOLANGCI    := golangci-lint
 # ---------- phony targets -----------------------------------
 .PHONY: help build build-debug run clean test test-unit test-integration test-all \
         test-cover test-cover-html lint vet fmt fmt-check tidy deps check install uninstall \
-        docs docs-check fuzz bench
+        docs docs-check fuzz bench install-hooks uninstall-hooks
 
 # ---------- help --------------------------------------------
 help: ## Show this help message
@@ -125,3 +125,13 @@ install: build ## Install pixe to $GOPATH/bin (or $GOBIN)
 
 uninstall: ## Remove pixe from $GOPATH/bin
 	rm -f $(shell go env GOPATH)/bin/$(BINARY)
+
+# ---------- git hooks ---------------------------------------
+install-hooks: ## Install git pre-commit hook for docs freshness check
+	cp scripts/pre-commit .git/hooks/pre-commit
+	chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed."
+
+uninstall-hooks: ## Remove git pre-commit hook
+	rm -f .git/hooks/pre-commit
+	@echo "Pre-commit hook removed."

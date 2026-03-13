@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Only check docs if any relevant source files are staged.
+# Relevant files: cmd/*.go, internal/domain/handler.go, internal/handler/**/*.go,
+# internal/docgen/*.go, CHANGELOG.md, docs/*.md, docs/_config.yml
+RELEVANT_PATTERNS="cmd/.*\.go|internal/domain/handler\.go|internal/handler/.*\.go|internal/docgen/.*\.go|CHANGELOG\.md|docs/.*\.md|docs/_config\.yml"
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+if ! echo "$STAGED" | grep -qE "$RELEVANT_PATTERNS"; then
+    exit 0  # No relevant files staged — skip docs check
+fi
+
+echo "pre-commit: checking generated documentation..."
+if ! go run ./internal/docgen --check 2>&1; then
+    echo ""
+    echo "Run 'make docs' to regenerate, then 'git add' the updated files."
+    exit 1
+fi

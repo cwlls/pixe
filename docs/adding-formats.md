@@ -1,5 +1,6 @@
 ---
 title: Adding a New File Format
+nav_order: 7
 ---
 
 # Adding a New File Format
