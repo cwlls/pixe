@@ -6,6 +6,10 @@
 
 ## [Unreleased] -- Testing & Quality (Section 16)
 
+### Bug Fixes
+
+- **Fixed GHA integration test flakiness** — `TestVerbosity_Verbose` was checking for `"ms)"` in timing output, but on fast systems (GHA Linux runners), file processing takes <1ms, producing `"(0s)"` instead of `"(Xms)"`. Changed assertion to check for parenthesized timing info without requiring a specific duration unit, making the test system-speed agnostic.
+
 ### Testing & Quality Improvements
 
 - **Fuzz testing for all handler packages** — Added `fuzz_test.go` files to JPEG, HEIC, AVIF, MP4, CR3, PNG, and TIFF-RAW handlers. Each fuzz test covers `Detect()`, `ExtractDate()`, and `HashableReader()` methods with seed corpus from valid files, truncated variants, and cross-format inputs. Fuzz tests are run via `make fuzz` (30s per target).
