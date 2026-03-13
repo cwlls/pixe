@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -164,6 +166,12 @@ func runSort(cmd *cobra.Command, args []string) error {
 	_, noColor := os.LookupEnv("NO_COLOR")
 	useProgress := viper.GetBool("progress") && isTTY
 
+	// Wire SIGINT/SIGTERM to a cancellable context so the pipeline can drain
+	// gracefully. signal.NotifyContext restores default signal behaviour on the
+	// second signal, allowing a hard exit if the user insists.
+	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
 	opts := pipeline.SortOptions{
 		Config:       cfg,
 		Hasher:       h,
@@ -175,6 +183,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		DB:           db,
 		RunID:        runID,
 		ColorOutput:  isTTY && !noColor && cfg.Verbosity >= 0,
+		Context:      ctx,
 	}
 
 	var result pipeline.SortResult

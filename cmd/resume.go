@@ -17,7 +17,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -140,19 +142,45 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Populate all config fields from Viper so the resumed sort behaves
+	// consistently with the original — carry sidecars, copyright, ignore
+	// patterns, etc. are read from the current config (CLI flags, .pixe.yaml,
+	// env) since they are not persisted in the DB's runs table.
+	quiet := viper.GetBool("quiet")
+	verbose := viper.GetBool("verbose")
+	verbosity := 0
+	if quiet {
+		verbosity = -1
+	} else if verbose {
+		verbosity = 1
+	}
+
 	cfg := &config.AppConfig{
-		Source:       run.Source,
-		Destination:  dir,
-		Workers:      workers,
-		Algorithm:    run.Algorithm,
-		DBPath:       dbPath,
-		PathTemplate: pathTemplateStr,
+		Source:               run.Source,
+		Destination:          dir,
+		Workers:              workers,
+		Algorithm:            run.Algorithm,
+		DBPath:               dbPath,
+		PathTemplate:         pathTemplateStr,
+		CarrySidecars:        !viper.GetBool("no_carry_sidecars"),
+		Copyright:            viper.GetString("copyright"),
+		CameraOwner:          viper.GetString("camera_owner"),
+		SkipDuplicates:       viper.GetBool("skip_duplicates"),
+		Recursive:            run.Recursive,
+		OverwriteSidecarTags: viper.GetBool("overwrite_sidecar_tags"),
+		Ignore:               viper.GetStringSlice("ignore"),
+		Verbosity:            verbosity,
 	}
 
 	// Generate a fresh RunID for this resume attempt. The pipeline will
 	// insert a new run record; the interrupted run remains in the DB as
 	// historical context.
 	runID := uuid.New().String()
+
+	// Wire SIGINT/SIGTERM to a cancellable context so the pipeline can drain
+	// gracefully on interruption.
+	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 
 	opts := pipeline.SortOptions{
 		Config:       cfg,
@@ -164,6 +192,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		PixeVersion:  Version(),
 		DB:           db,
 		RunID:        runID,
+		Context:      ctx,
 	}
 
 	_, _ = fmt.Fprintf(os.Stdout, "Resuming sort: source=%s dest=%s\n", run.Source, dir)
