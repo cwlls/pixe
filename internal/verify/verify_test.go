@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"crypto/sha1" //nolint:gosec // SHA-1 used for filename checksums, not security
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -60,11 +59,6 @@ func sha1Hex(data []byte) string {
 // pixeFilename builds a legacy Pixe-format filename: YYYYMMDD_HHMMSS_<checksum>.<ext>.
 func pixeFilename(checksum, ext string) string {
 	return "20211225_062223_" + checksum + ext
-}
-
-// pixeFilenameNew builds a new Pixe-format filename: YYYYMMDD_HHMMSS-<algoID>-<checksum>.<ext>.
-func pixeFilenameNew(algoID int, checksum, ext string) string {
-	return fmt.Sprintf("20211225_062223-%d-%s%s", algoID, checksum, ext)
 }
 
 // buildJPEGContent creates a minimal JPEG file with the given data appended.

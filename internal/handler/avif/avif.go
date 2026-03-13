@@ -126,8 +126,7 @@ func (h *Handler) Detect(filePath string) (bool, error) {
 		return false, nil
 	}
 	// Verify AVIF-specific major brand at offset 8–11.
-	brand := string(header[8:12])
-	return avifBrands[brand], nil
+	return avifBrands[string(header[8:12])], nil
 }
 
 // ExtractDate reads the capture date from AVIF EXIF metadata using a minimal

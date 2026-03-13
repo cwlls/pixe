@@ -25,7 +25,7 @@ GOLANGCI    := golangci-lint
 # ---------- phony targets -----------------------------------
 .PHONY: help build build-debug run clean test test-unit test-integration test-all \
         test-cover test-cover-html lint vet fmt fmt-check tidy deps check install uninstall \
-        docs docs-check
+        docs docs-check fuzz bench
 
 # ---------- help --------------------------------------------
 help: ## Show this help message
@@ -104,6 +104,20 @@ tidy: ## Run go mod tidy
 
 deps: ## Download all module dependencies
 	go mod download
+
+# ---------- fuzz testing ------------------------------------
+fuzz: ## Run fuzz tests across all handlers (30s per target)
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/jpeg/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/heic/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/avif/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/mp4/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/cr3/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/png/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/tiffraw/
+
+# ---------- benchmarks --------------------------------------
+bench: ## Run benchmark suite (10 min timeout for large fixtures)
+	go test -bench . -benchmem -timeout 600s ./internal/benchmark/
 
 # ---------- install / uninstall -----------------------------
 install: build ## Install pixe to $GOPATH/bin (or $GOBIN)

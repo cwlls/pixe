@@ -4566,3 +4566,739 @@ The "AI" page (`ai.md`) is intentionally omitted from the primary navigation —
 - **Changelog generation** — The changelog (`docs/changelog.md`) is currently hand-authored. A future enhancement could extract changelog entries from git tags and their annotated messages, or from a structured `CHANGELOG.md` at the repo root. This is deferred because changelogs benefit from editorial curation that automated extraction cannot provide.
 - **`go doc` server link** — The packages page could link to `pkg.go.dev/github.com/cwlls/pixe-go/internal/...` for full API documentation. However, `internal/` packages are not visible on pkg.go.dev by design. A self-hosted `godoc` or `pkgsite` instance could be added as a future GitHub Pages deployment, but this adds complexity for marginal benefit given the package reference page.
 - **Cobra `--help` output validation** — A future CI step could build the binary and compare `pixe sort --help` output against the generated flag tables to catch cases where the AST extraction diverges from runtime behavior (e.g., flags registered in `init()` functions that the AST parser doesn't follow). This is a belt-and-suspenders check, not a primary concern.
+
+---
+
+## 16. Testing & Quality
+
+> [!NOTE]
+> **Status: ✅ Complete (2026-03-12)**
+> 
+> All 21 tasks from Section 16 have been implemented and verified:
+> - ✅ Fuzz tests for all 7 handler packages (JPEG, HEIC, AVIF, MP4, CR3, PNG, TIFF-RAW)
+> - ✅ Expanded fixture corpus with 8 edge-case helpers in `handlertest` package
+> - ✅ Extended `RunSuite()` with 8 new edge-case subtests (tests 11–18)
+> - ✅ Discovery-level edge-case tests (symlinks, permissions, Unicode paths)
+> - ✅ Centralized benchmark suite: 5 benchmark files covering hash, copy, DB, discovery, and pathbuilder
+> - ✅ Property-based tests for pathbuilder (6 properties via `testing/quick`)
+> - ✅ Makefile targets: `make fuzz` and `make bench`
+> - ✅ All tests pass: `make test`, `make lint`, `make vet`
+
+### 16.1 Overview
+
+Pixe processes irreplaceable media files from arbitrary, untrusted sources — camera SD cards, cloud exports, friend's USB drives, decade-old backup disks. The correctness of every parser, every hash computation, every path construction, and every file copy is load-bearing. This section defines four testing initiatives that harden Pixe's test suite beyond the existing unit and integration tests: fuzz testing for parsers, a centralized benchmark suite for performance regression detection, an expanded synthetic fixture corpus for edge cases, and property-based testing for the path builder.
+
+### 16.2 Fuzz Testing for Handlers (H1)
+
+#### 16.2.1 Motivation
+
+Pixe's file type handlers parse binary formats with complex internal structure — EXIF IFDs, TIFF byte-order-sensitive headers, ISOBMFF box chains, PNG chunk sequences, QuickTime atoms. These parsers operate on untrusted input: a user may sort files from an old corrupted SD card, a partially downloaded cloud export, or a directory containing non-media files with media extensions. A crash or panic in a parser is unacceptable — it would halt the entire sort run, potentially leaving the archive in an incomplete state.
+
+Go's built-in `testing.F` fuzzer (introduced in Go 1.18) is purpose-built for this scenario: it generates malformed, truncated, and adversarial inputs and feeds them to the parser, looking for panics, hangs, and unexpected errors. Fuzz testing complements the existing unit tests (which verify correct behavior on valid input) by exploring the failure surface.
+
+#### 16.2.2 Fuzz Targets
+
+Each handler that performs binary parsing gets a fuzz test file co-located with its package. The fuzz test targets the handler methods that read and interpret file bytes: `Detect()`, `ExtractDate()`, and `HashableReader()`.
+
+| Handler Package | Fuzz File | Parsing Surface | Why It Needs Fuzzing |
+|---|---|---|---|
+| `internal/handler/jpeg/` | `fuzz_test.go` | EXIF IFD parsing, APP1 marker scanning, SOI/EOI boundaries | EXIF is the most complex metadata format; IFD chains can be circular, offsets can point out of bounds |
+| `internal/handler/heic/` | `fuzz_test.go` | ISOBMFF box chain traversal, `meta`/`iinf`/`iloc` box parsing, EXIF blob extraction | Box sizes can be zero or span beyond file length; item references can point to non-existent offsets |
+| `internal/handler/avif/` | `fuzz_test.go` | ISOBMFF box chain (same structure as HEIC), `ftyp` brand parsing | Shares HEIC's ISOBMFF attack surface; brand bytes at offset 8–11 can be arbitrary |
+| `internal/handler/mp4/` | `fuzz_test.go` | QuickTime atom traversal, `mvhd`/`CreationDate` extraction, `moov`/`trak` hierarchy | Atom sizes can be zero (infinite-length atoms) or exceed file bounds; nested atom depths can be extreme |
+| `internal/handler/cr3/` | `fuzz_test.go` | ISOBMFF container (Canon RAW X variant), `moov`→`meta` box path | Canon-specific box layout within standard ISOBMFF; same class of size/offset vulnerabilities |
+| `internal/handler/png/` | `fuzz_test.go` | PNG chunk parsing (`eXIf`, `tEXt`), chunk length validation, CRC handling | Chunk lengths can exceed file size; `eXIf` chunk contains raw EXIF that needs its own fuzzing |
+| `internal/handler/tiffraw/` | `fuzz_test.go` | TIFF IFD chain traversal, byte order detection, `StripOffsets`/`StripByteCounts` extraction, `NewSubfileType` discrimination | IFD `NextOffset` can create loops; strip offsets can point anywhere; byte order header can be invalid |
+
+Handlers that are thin wrappers over `tiffraw.Base` (DNG, NEF, CR2, PEF, ARW, ORF, RW2, TIFF) do **not** get their own fuzz tests. Their parsing logic is entirely in `tiffraw.Base`, which is fuzzed via the `tiffraw` package's fuzz test. The thin wrappers contribute only `Extensions()`, `MagicBytes()`, and `Detect()` — these are trivial byte comparisons that do not warrant fuzzing. The standalone TIFF handler (`internal/handler/tiff/`) is also covered by the `tiffraw` fuzz test since it delegates all parsing to `Base`.
+
+#### 16.2.3 Fuzz Test Structure
+
+Each fuzz test follows a consistent pattern:
+
+```go
+// internal/handler/jpeg/fuzz_test.go
+
+package jpeg
+
+import "testing"
+
+func FuzzDetect(f *testing.F) {
+    // Seed corpus: minimal valid JPEG, truncated JPEG, empty file,
+    // JPEG with corrupt EXIF, JPEG with no APP1 marker.
+    f.Add(validJPEGBytes)
+    f.Add(truncatedJPEGBytes)
+    f.Add([]byte{})
+    f.Add([]byte{0xFF, 0xD8}) // SOI only, no further structure
+
+    f.Fuzz(func(t *testing.T, data []byte) {
+        // Write data to a temp file.
+        path := writeTempFile(t, data, ".jpg")
+
+        // Detect must not panic. Errors are acceptable.
+        h := New()
+        _, _ = h.Detect(path)
+    })
+}
+
+func FuzzExtractDate(f *testing.F) {
+    f.Add(validJPEGBytes)
+    f.Add(truncatedJPEGBytes)
+    f.Add([]byte{})
+
+    f.Fuzz(func(t *testing.T, data []byte) {
+        path := writeTempFile(t, data, ".jpg")
+        h := New()
+
+        // ExtractDate must not panic. It may return an error or
+        // the Ansel Adams fallback date — both are correct.
+        _, _ = h.ExtractDate(path)
+    })
+}
+
+func FuzzHashableReader(f *testing.F) {
+    f.Add(validJPEGBytes)
+    f.Add([]byte{})
+
+    f.Fuzz(func(t *testing.T, data []byte) {
+        path := writeTempFile(t, data, ".jpg")
+        h := New()
+
+        // HashableReader must not panic. If it returns a reader,
+        // reading from it must not panic.
+        r, err := h.HashableReader(path)
+        if err != nil {
+            return
+        }
+        defer r.Close()
+        _, _ = io.ReadAll(r)
+    })
+}
+```
+
+**Key principles:**
+
+- **The only failure condition is a panic.** Fuzz tests do not assert on return values — any error or fallback behavior is valid. The goal is crash resistance, not correctness (correctness is covered by unit tests with known-good inputs).
+- **Seed corpus from synthetic helpers.** Each fuzz test seeds with outputs from the handler's existing `buildFake*` test helper (valid minimal file) plus pathological variants: empty bytes, truncated at various offsets, magic bytes only, and a file from a different format (to test cross-format resilience).
+- **Temp file per invocation.** The handlers' `Detect`, `ExtractDate`, and `HashableReader` methods take file paths, not byte slices. Each fuzz iteration writes the corpus entry to a temp file via `t.TempDir()`. The `writeTempFile` helper is local to each fuzz test file.
+- **Extension matches the handler.** Temp files are written with the handler's expected extension (e.g., `.jpg` for JPEG, `.heic` for HEIC). This ensures the extension-based fast path in `Detect` is exercised alongside the magic-byte path.
+
+#### 16.2.4 ISOBMFF Shared Fuzzing
+
+The HEIC, AVIF, CR3, and MP4 handlers all parse ISOBMFF containers. If a shared `internal/handler/isobmff/` parsing package is extracted in the future (see Section 6.5.3 fallback approach), a single fuzz test in that package would cover the shared parsing logic. Until then, each ISOBMFF handler's fuzz test independently covers its own parsing code path. The seed corpora for HEIC, AVIF, and CR3 include each other's valid minimal files as cross-format seeds — this tests that a handler correctly rejects a valid ISOBMFF file with the wrong brand.
+
+#### 16.2.5 Running Fuzz Tests
+
+Fuzz tests are run separately from the standard test suite — they are long-running by nature and are not included in `make test` or `make test-all`.
+
+```bash
+# Fuzz a specific target for 30 seconds:
+go test -fuzz FuzzDetect -fuzztime 30s ./internal/handler/jpeg/
+
+# Fuzz all targets in a handler package:
+go test -fuzz Fuzz -fuzztime 60s ./internal/handler/heic/
+
+# Fuzz all handlers (useful for CI nightly runs):
+go test -fuzz Fuzz -fuzztime 30s ./internal/handler/...
+go test -fuzz Fuzz -fuzztime 30s ./internal/handler/tiffraw/
+```
+
+**Makefile target:**
+
+```makefile
+fuzz: ## Run fuzz tests across all handlers (30s per target)
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/jpeg/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/heic/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/avif/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/mp4/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/cr3/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/png/
+	go test -fuzz Fuzz -fuzztime 30s ./internal/handler/tiffraw/
+```
+
+**Note:** `go test -fuzz` runs only one fuzz target at a time per invocation. The Makefile target runs them sequentially. A CI nightly job can parallelize across handlers.
+
+#### 16.2.6 Corpus Management
+
+Go stores fuzz corpus entries in `testdata/fuzz/<FuzzFuncName>/` within the package directory. Corpus entries that trigger new code coverage are automatically saved by the fuzzer. These files should be committed to the repository — they serve as regression tests. Once a corpus entry is committed, it is run as a regular test case during `go test` (without `-fuzz`), ensuring that any previously-discovered crash-inducing input is permanently guarded against.
+
+```
+internal/handler/jpeg/
+├── jpeg.go
+├── jpeg_test.go
+├── fuzz_test.go
+└── testdata/
+    └── fuzz/
+        ├── FuzzDetect/
+        │   ├── seed-valid-jpeg
+        │   ├── seed-truncated
+        │   └── corpus-abc123...    ← auto-generated by fuzzer
+        ├── FuzzExtractDate/
+        │   └── ...
+        └── FuzzHashableReader/
+            └── ...
+```
+
+#### 16.2.7 CI Integration
+
+Fuzz tests are **not** part of the standard CI pipeline (they are non-deterministic and time-consuming). Two integration strategies:
+
+1. **Nightly CI job:** A scheduled GitHub Actions workflow runs `make fuzz` with a longer fuzz time (e.g., 5 minutes per target). Failures are reported as issues. This catches regressions introduced by code changes that the unit tests miss.
+2. **Corpus regression in standard CI:** Committed corpus entries run as standard tests during `go test ./internal/handler/...`. This is automatic — Go's test runner executes fuzz corpus files without the `-fuzz` flag. No additional CI configuration needed.
+
+---
+
+### 16.3 Benchmark Suite (H2)
+
+#### 16.3.1 Motivation
+
+Pixe's performance characteristics matter — users sort thousands of files, and the pipeline's throughput is bounded by I/O, hashing, and database operations. Performance regressions (e.g., an accidental O(n²) in discovery, a hash buffer size change, a database query missing an index) should be detectable before release. Go's built-in `testing.B` benchmarks provide a standardized, repeatable framework for this.
+
+#### 16.3.2 Centralized Benchmark Package
+
+Benchmarks live in a centralized package at `internal/benchmark/` rather than scattered across individual packages. This design provides several advantages:
+
+- **Single entry point.** `go test -bench . ./internal/benchmark/` runs the entire benchmark suite. No need to remember which packages have benchmarks.
+- **Consistent methodology.** All benchmarks use the same fixture setup, warm-up strategy, and reporting conventions.
+- **Cross-package benchmarks.** Some benchmarks span multiple packages (e.g., hash → copy → verify pipeline throughput). A centralized package can import and compose these without circular dependencies.
+- **Separation of concerns.** Benchmark code (which may use large fixtures, I/O-heavy setup, and long runtimes) does not clutter the unit test files of core packages.
+
+**Package layout:**
+
+```
+internal/
+└── benchmark/
+    ├── hash_bench_test.go        ← Hashing throughput benchmarks
+    ├── copy_bench_test.go        ← Copy + verify throughput benchmarks
+    ├── db_bench_test.go          ← Database query latency benchmarks
+    ├── discovery_bench_test.go   ← Directory walk speed benchmarks
+    ├── pathbuilder_bench_test.go ← Path construction benchmarks
+    ├── helpers_test.go           ← Shared benchmark fixtures and setup
+    └── testdata/                 ← Large fixture files (generated, not committed — see 16.3.5)
+```
+
+#### 16.3.3 Benchmark Targets
+
+| Benchmark | File | What It Measures | Key Variables |
+|---|---|---|---|
+| **Hash throughput** | `hash_bench_test.go` | Bytes/second for each supported hash algorithm (MD5, SHA-1, SHA-256, BLAKE3, xxHash-64) | File size (1 KB, 1 MB, 10 MB, 100 MB), algorithm |
+| **Copy + verify throughput** | `copy_bench_test.go` | End-to-end bytes/second for the atomic copy-then-verify flow (write temp → hash → rename) | File size (1 MB, 10 MB, 100 MB), same-filesystem vs. cross-filesystem (if detectable) |
+| **DB insert latency** | `db_bench_test.go` | Time per `InsertFile` operation, both single-row and batched | Database size (empty, 1K rows, 10K rows, 100K rows pre-populated) |
+| **DB dedup check latency** | `db_bench_test.go` | Time per `CheckDuplicate` query (indexed `SELECT` on `checksum`) | Database size (1K, 10K, 100K rows), hit vs. miss |
+| **DB skip check latency** | `db_bench_test.go` | Time per `CheckSkip` query (indexed `SELECT` on `source_path`) | Database size (1K, 10K, 100K rows), hit vs. miss |
+| **Discovery walk speed** | `discovery_bench_test.go` | Files/second for `discovery.Walk()` over a synthetic directory tree | Tree size (100, 1K, 10K files), flat vs. nested structure, with/without ignore patterns |
+| **Path construction** | `pathbuilder_bench_test.go` | Time per `pathbuilder.Build()` call | Various date inputs, with/without algorithm ID |
+
+#### 16.3.4 Benchmark Structure
+
+Benchmarks follow Go's standard `testing.B` conventions with sub-benchmarks for parameterization:
+
+```go
+// internal/benchmark/hash_bench_test.go
+
+package benchmark
+
+import (
+    "testing"
+
+    "github.com/cwlls/pixe-go/internal/hash"
+)
+
+func BenchmarkHash(b *testing.B) {
+    algorithms := []string{"md5", "sha1", "sha256", "blake3", "xxhash"}
+    sizes := []struct {
+        name string
+        size int
+    }{
+        {"1KB", 1024},
+        {"1MB", 1 << 20},
+        {"10MB", 10 << 20},
+        {"100MB", 100 << 20},
+    }
+
+    for _, alg := range algorithms {
+        for _, sz := range sizes {
+            b.Run(alg+"/"+sz.name, func(b *testing.B) {
+                data := generateFixture(b, sz.size)
+                b.SetBytes(int64(sz.size))
+                b.ResetTimer()
+
+                for i := 0; i < b.N; i++ {
+                    h := hash.New(alg)
+                    h.Write(data)
+                    _ = h.Sum(nil)
+                }
+            })
+        }
+    }
+}
+```
+
+```go
+// internal/benchmark/db_bench_test.go
+
+package benchmark
+
+import (
+    "testing"
+
+    "github.com/cwlls/pixe-go/internal/archivedb"
+)
+
+func BenchmarkDBDedupCheck(b *testing.B) {
+    sizes := []int{1000, 10000, 100000}
+
+    for _, n := range sizes {
+        b.Run(fmt.Sprintf("rows=%d/hit", n), func(b *testing.B) {
+            db := prepopulateDB(b, n)
+            knownChecksum := getChecksum(db, n/2) // middle of the table
+            b.ResetTimer()
+
+            for i := 0; i < b.N; i++ {
+                _, _ = db.CheckDuplicate(knownChecksum)
+            }
+        })
+
+        b.Run(fmt.Sprintf("rows=%d/miss", n), func(b *testing.B) {
+            db := prepopulateDB(b, n)
+            b.ResetTimer()
+
+            for i := 0; i < b.N; i++ {
+                _, _ = db.CheckDuplicate("nonexistent_checksum_value")
+            }
+        })
+    }
+}
+```
+
+**Naming convention:** `Benchmark<Component>` at the top level, with `/<variant>` sub-benchmarks for parameterization. This produces output like:
+
+```
+BenchmarkHash/sha1/1MB-8          2000     850000 ns/op    1234.56 MB/s
+BenchmarkHash/blake3/1MB-8        5000     320000 ns/op    3276.80 MB/s
+BenchmarkDBDedupCheck/rows=100000/hit-8    50000    28500 ns/op
+BenchmarkDBDedupCheck/rows=100000/miss-8   48000    29200 ns/op
+```
+
+#### 16.3.5 Fixture Generation
+
+Benchmark fixtures (large files for hash and copy benchmarks, pre-populated databases for query benchmarks) are **generated at benchmark runtime**, not committed to the repository. The `helpers_test.go` file provides shared setup functions:
+
+```go
+// generateFixture creates a deterministic byte slice of the given size.
+// Uses a fixed seed for reproducibility across runs.
+func generateFixture(b *testing.B, size int) []byte
+
+// prepopulateDB creates an in-memory SQLite database with n file rows.
+// Checksums and paths are synthetic but realistic in structure.
+func prepopulateDB(b *testing.B, n int) *archivedb.DB
+
+// createFileTree creates a temporary directory with n synthetic files
+// distributed across a realistic year/month directory structure.
+func createFileTree(b *testing.B, n int) string
+```
+
+For I/O benchmarks (copy throughput, discovery walk speed), fixtures are written to `b.TempDir()` which is auto-cleaned. The `testdata/` directory under the benchmark package exists for any manually curated benchmark fixtures but is expected to remain small or empty — synthetic generation is preferred for reproducibility and repository size.
+
+#### 16.3.6 Running Benchmarks
+
+```bash
+# Run the full benchmark suite:
+go test -bench . -benchmem -timeout 600s ./internal/benchmark/
+
+# Run only hash benchmarks:
+go test -bench BenchmarkHash -benchmem ./internal/benchmark/
+
+# Run only DB benchmarks:
+go test -bench BenchmarkDB -benchmem ./internal/benchmark/
+
+# Compare against a baseline (using benchstat):
+go test -bench . -benchmem -count 5 ./internal/benchmark/ > new.txt
+benchstat old.txt new.txt
+```
+
+**Makefile target:**
+
+```makefile
+bench: ## Run benchmark suite
+	go test -bench . -benchmem -timeout 600s ./internal/benchmark/
+```
+
+**Note:** Benchmarks are excluded from `make test` and `make test-all`. They are run manually or in a scheduled CI job. The `-timeout 600s` (10 minutes) accommodates the 100 MB hash and copy benchmarks.
+
+#### 16.3.7 CI Integration
+
+Benchmarks are not part of the standard CI gate (they are slow and environment-sensitive). Two integration strategies:
+
+1. **Manual comparison.** Before a release, run `make bench` on a consistent machine and compare against the prior release's benchmark output using `benchstat`. Document significant regressions in the release notes.
+2. **Nightly CI job (optional).** A scheduled GitHub Actions workflow runs `make bench`, stores the output as a workflow artifact, and optionally compares against the prior run using `benchstat`. Significant regressions (>10% slowdown) trigger a warning. This requires a consistent CI runner (GitHub-hosted runners have variable performance), so results should be interpreted with appropriate tolerance.
+
+---
+
+### 16.4 Fixture Corpus Expansion (H3)
+
+#### 16.4.1 Motivation
+
+The existing test fixtures (produced by `buildFake*` helpers) cover the happy path: valid files with correct headers, standard EXIF, and well-formed structure. Real-world media files are messier — zero-byte files, missing metadata, corrupt headers, enormous metadata blocks, Unicode filenames, and files with mismatched extensions. Expanding the synthetic fixture corpus to cover these edge cases ensures that handlers degrade gracefully rather than panicking or producing incorrect results.
+
+#### 16.4.2 Design: Synthetic Construction
+
+All fixtures are **synthetically constructed in test helper functions**, consistent with the existing pattern (`buildFakeAVIF`, `buildFakeJPEG`, etc.). No real binary files are committed to the repository. This approach:
+
+- **Keeps the repository small.** Real media files are megabytes; synthetic fixtures are bytes to kilobytes.
+- **Makes edge cases explicit.** Each helper function documents exactly what pathological condition it creates.
+- **Enables parameterization.** A helper like `buildCorruptHeader(t, format, corruptionOffset)` can generate many variants from a single function.
+- **Avoids licensing concerns.** No third-party media files in the repository.
+
+#### 16.4.3 Edge Case Categories
+
+The fixture corpus is expanded with the following categories of pathological inputs. Each category is implemented as one or more helper functions in the relevant handler's test file or in the shared `handlertest` package.
+
+| Category | Helper Function | Description | Expected Behavior |
+|---|---|---|---|
+| **Zero-byte file** | `buildEmptyFile(t, ext)` | A file with the correct extension but zero bytes. | `Detect` → `false`. `ExtractDate` → error. `HashableReader` → error or empty reader. No panic. |
+| **Magic bytes only** | `buildMagicOnly(t, format)` | A file containing only the handler's magic byte signature (e.g., 2 bytes for JPEG SOI, 4 bytes for TIFF header) with no further structure. | `Detect` → may return `true` (magic matches) or `false` (insufficient data). `ExtractDate` → error or Ansel Adams fallback. No panic. |
+| **Truncated at structure boundary** | `buildTruncated(t, format, offset)` | A valid file truncated at a known structural boundary: mid-IFD for TIFF, mid-box for ISOBMFF, mid-chunk for PNG. | `ExtractDate` → error or Ansel Adams fallback. `HashableReader` → error or partial read. No panic. |
+| **No EXIF metadata** | `buildNoEXIF(t, format)` | A structurally valid file with no EXIF IFD, no `eXIf` chunk, or no `Exif` item (depending on format). | `ExtractDate` → Ansel Adams date (`1902-02-20`). This is the defined fallback behavior. |
+| **EXIF with only `CreateDate`** | `buildCreateDateOnly(t, format)` | A valid file with EXIF containing `DateTime` (tag 0x0132) but no `DateTimeOriginal` (tag 0x9003). | `ExtractDate` → the `DateTime` value. Validates the fallback chain's second step. |
+| **Corrupt EXIF header** | `buildCorruptEXIF(t, format)` | A file with a valid container structure but corrupt EXIF payload (invalid byte order marker, garbled IFD offsets, circular IFD chain). | `ExtractDate` → error or Ansel Adams fallback. No panic, no infinite loop. |
+| **Extremely large metadata block** | `buildLargeMetadata(t, format, metadataSize)` | A file with a metadata region claiming to be very large (e.g., 100 MB IFD, 1 GB box size). The actual file is small — the metadata size is declared in headers but not backed by real data. | Parser must not allocate based on untrusted size fields. `ExtractDate` → error. No OOM, no panic. |
+| **Mismatched extension** | `buildMismatchedExt(t, actualFormat, claimedExt)` | A valid file of one format (e.g., JPEG) written with a different extension (e.g., `.png`). | `Detect` → `false` (magic bytes don't match the handler for the claimed extension). The correct handler should claim it via magic-byte fallback if discovery attempts all handlers. |
+| **Unicode filenames** | `buildUnicodeFilename(t, format, name)` | A valid file with a filename containing Unicode characters: CJK (`日本語.jpg`), emoji (`📷.heic`), RTL (`صورة.jpg`), combining diacritics (`café.png`), zero-width joiners. | All handler methods must work — file I/O in Go handles Unicode paths natively. The test validates that no handler method assumes ASCII filenames. |
+| **Symlink to media file** | `buildSymlink(t, targetPath, linkName)` | A symbolic link pointing to a valid media file. | `Detect` → follows the symlink and detects the target format. `ExtractDate` → reads the target. Discovery should follow or skip symlinks based on configuration (currently: symlinks are followed by `filepath.Walk` default behavior). |
+
+#### 16.4.4 Shared Helpers in `handlertest`
+
+Generic edge-case helpers that apply to all handlers are added to the `handlertest` package. Format-specific helpers remain in the individual handler test files.
+
+**New helpers in `internal/handler/handlertest/`:**
+
+```go
+// BuildEmptyFile creates a zero-byte file with the given extension in t.TempDir().
+func BuildEmptyFile(t *testing.T, ext string) string
+
+// BuildMagicOnly creates a file containing only the given magic bytes.
+func BuildMagicOnly(t *testing.T, magic []byte, ext string) string
+
+// BuildTruncatedFile takes a full valid file's bytes and truncates at the given offset.
+func BuildTruncatedFile(t *testing.T, data []byte, truncateAt int, ext string) string
+
+// BuildWithFilename creates a file from the given bytes with a specific filename
+// (for Unicode and mismatched-extension testing).
+func BuildWithFilename(t *testing.T, data []byte, filename string) string
+
+// BuildSymlink creates a symlink at linkPath pointing to targetPath.
+func BuildSymlink(t *testing.T, targetPath, linkName string) string
+```
+
+#### 16.4.5 Integration with `handlertest.RunSuite()`
+
+The existing `RunSuite()` 10-test harness (Section 6.4.3) is extended with additional subtests that exercise the edge-case fixtures. The new tests are **opt-in** via the `SuiteConfig` — handlers that provide a `BuildFakeFile` function automatically get the expanded tests.
+
+**New subtests added to `RunSuite()`:**
+
+| # | Test Name | Fixture | Assertion |
+|---|---|---|---|
+| 11 | `Detect(emptyFile)` | `BuildEmptyFile` | Returns `false` or error. No panic. |
+| 12 | `Detect(magicOnly)` | `BuildMagicOnly` | No panic. Return value is handler-dependent. |
+| 13 | `ExtractDate(noEXIF)` | Already exists (test 6) | — |
+| 14 | `ExtractDate(truncated)` | `BuildTruncatedFile` at 50% of valid file size | Returns error or Ansel Adams date. No panic. |
+| 15 | `ExtractDate(corruptEXIF)` | Handler-specific `BuildCorruptEXIF` if provided | Returns error or Ansel Adams date. No panic. |
+| 16 | `HashableReader(emptyFile)` | `BuildEmptyFile` | Returns error. No panic. |
+| 17 | `HashableReader(truncated)` | `BuildTruncatedFile` at 50% of valid file size | Returns error or partial data. No panic. |
+| 18 | `Detect(mismatchedExt)` | Valid file from a different format with this handler's extension | Returns `false`. No panic. |
+
+These tests enforce the **contract** that handlers must be crash-resistant on any input. The assertion for all edge-case tests is the same: **no panic**. Error returns are expected and acceptable.
+
+#### 16.4.6 Discovery-Level Edge Cases
+
+Beyond individual handler testing, the discovery walk (`internal/discovery/`) gains edge-case tests for filesystem-level anomalies:
+
+| Scenario | Test Name | Setup | Expected Behavior |
+|---|---|---|---|
+| **Symlink to file** | `TestWalk_symlinkToFile` | Symlink in `dirA` pointing to a valid JPEG | File is discovered and processed normally (symlink is transparent to `filepath.Walk`) |
+| **Symlink to directory** | `TestWalk_symlinkToDir` | Symlink in `dirA` pointing to a subdirectory containing media files | In recursive mode, files in the symlinked directory are discovered. In non-recursive mode, the symlink is skipped (it is a directory entry). |
+| **Symlink loop** | `TestWalk_symlinkLoop` | Symlink in `dirA` pointing back to `dirA` or to a parent directory | Walk must not infinite-loop. `filepath.Walk` handles this by tracking visited inodes on some platforms; the test verifies graceful termination. |
+| **Unreadable file** | `TestWalk_unreadableFile` | A media file with `0000` permissions in `dirA` | File is discovered but `Detect` or `ExtractDate` returns a permission error. Reported as `ERR`. Walk continues to next file. |
+| **Unreadable directory** | `TestWalk_unreadableDir` | A subdirectory in `dirA` with `0000` permissions (recursive mode) | Walk emits a warning and skips the directory. Other files and directories are processed normally. |
+| **Unicode directory names** | `TestWalk_unicodeDirNames` | `dirA/日本旅行/IMG_0001.jpg` | File is discovered with `RelPath = "日本旅行/IMG_0001.jpg"`. All downstream operations handle the path correctly. |
+
+---
+
+### 16.5 Property-Based Testing for Path Builder (H4)
+
+#### 16.5.1 Motivation
+
+The `pathbuilder.Build()` function is the sole determinant of where a file ends up in the archive. Given a capture date, checksum, algorithm ID, and extension, it produces a path like `2024/07-Jul/20240715_143022-1-abc123def456.jpg`. This function must satisfy several invariants for **any** valid input:
+
+1. **Determinism** — The same inputs always produce the same output.
+2. **Valid path characters** — The output contains no characters that are invalid on any supported filesystem (no `:`, `*`, `?`, `"`, `<`, `>`, `|`, NUL).
+3. **Correct date encoding** — The `YYYYMMDD_HHMMSS` prefix accurately encodes the input date.
+4. **Correct structure** — The path has exactly two directory levels (`YYYY/MM-Mon/`) followed by a filename.
+5. **Extension preservation** — The output extension matches the input extension (lowercased).
+6. **Algorithm ID presence** — The filename contains the correct algorithm ID between the datetime and checksum segments.
+7. **Checksum preservation** — The checksum in the filename matches the input checksum exactly.
+
+The existing table-driven tests verify these properties for a handful of known dates. Property-based testing with `testing/quick` verifies them for **random** dates across the entire valid range, catching edge cases that hand-picked test dates might miss (e.g., leap seconds, year boundaries, dates near epoch, dates far in the future, the Ansel Adams fallback date).
+
+#### 16.5.2 Implementation
+
+The property-based tests live in the `pathbuilder` package alongside the existing unit tests:
+
+```go
+// internal/pathbuilder/pathbuilder_prop_test.go
+
+package pathbuilder
+
+import (
+    "path/filepath"
+    "strings"
+    "testing"
+    "testing/quick"
+    "time"
+    "unicode/utf8"
+
+    "golang.org/x/text/language"
+)
+
+func TestBuild_deterministic(t *testing.T) {
+    // Pin locale for reproducibility.
+    SetLocaleForTesting(language.English)
+
+    f := func(year int16, month uint8, day uint8, hour uint8, min uint8, sec uint8, checksum string, algoID uint8, ext string) bool {
+        // Constrain inputs to valid ranges.
+        y := int(year)%300 + 1900   // 1900–2199
+        mo := time.Month(month%12 + 1)
+        d := int(day%28 + 1)        // 1–28 (always valid)
+        h := int(hour % 24)
+        mi := int(min % 60)
+        s := int(sec % 60)
+        aid := int(algoID % 5)      // 0–4 (valid algorithm IDs)
+
+        if len(checksum) == 0 || len(ext) == 0 {
+            return true // skip degenerate inputs
+        }
+        if !utf8.ValidString(checksum) || !utf8.ValidString(ext) {
+            return true
+        }
+
+        date := time.Date(y, mo, d, h, mi, s, 0, time.UTC)
+        if !strings.HasPrefix(ext, ".") {
+            ext = "." + ext
+        }
+
+        result1 := Build(date, checksum, aid, ext)
+        result2 := Build(date, checksum, aid, ext)
+
+        return result1 == result2
+    }
+
+    if err := quick.Check(f, &quick.Config{MaxCount: 10000}); err != nil {
+        t.Error(err)
+    }
+}
+
+func TestBuild_validPathCharacters(t *testing.T) {
+    SetLocaleForTesting(language.English)
+
+    invalidChars := []byte{':', '*', '?', '"', '<', '>', '|', 0}
+
+    f := func(year int16, month uint8, day uint8, checksum string, algoID uint8) bool {
+        y := int(year)%300 + 1900
+        mo := time.Month(month%12 + 1)
+        d := int(day%28 + 1)
+        aid := int(algoID % 5)
+
+        if len(checksum) == 0 || !utf8.ValidString(checksum) {
+            return true
+        }
+
+        date := time.Date(y, mo, d, 12, 0, 0, 0, time.UTC)
+        result := Build(date, checksum, aid, ".jpg")
+
+        for _, c := range invalidChars {
+            if strings.ContainsRune(result, rune(c)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    if err := quick.Check(f, &quick.Config{MaxCount: 10000}); err != nil {
+        t.Error(err)
+    }
+}
+
+func TestBuild_correctStructure(t *testing.T) {
+    SetLocaleForTesting(language.English)
+
+    f := func(year int16, month uint8, day uint8, hour uint8, min uint8, sec uint8, algoID uint8) bool {
+        y := int(year)%300 + 1900
+        mo := time.Month(month%12 + 1)
+        d := int(day%28 + 1)
+        h := int(hour % 24)
+        mi := int(min % 60)
+        s := int(sec % 60)
+        aid := int(algoID % 5)
+
+        date := time.Date(y, mo, d, h, mi, s, 0, time.UTC)
+        result := Build(date, "abcdef1234567890", aid, ".jpg")
+
+        // Must have exactly 2 path separators (YYYY/MM-Mon/filename).
+        parts := strings.Split(filepath.ToSlash(result), "/")
+        if len(parts) != 3 {
+            return false
+        }
+
+        // Year directory is 4 digits.
+        if len(parts[0]) != 4 {
+            return false
+        }
+
+        // Month directory matches MM-Mon pattern (2 digits, hyphen, 3+ chars).
+        if len(parts[1]) < 6 || parts[1][2] != '-' {
+            return false
+        }
+
+        // Filename contains the algorithm ID and checksum.
+        filename := parts[2]
+        if !strings.Contains(filename, ".jpg") {
+            return false
+        }
+
+        return true
+    }
+
+    if err := quick.Check(f, &quick.Config{MaxCount: 10000}); err != nil {
+        t.Error(err)
+    }
+}
+
+func TestBuild_extensionPreserved(t *testing.T) {
+    SetLocaleForTesting(language.English)
+
+    extensions := []string{".jpg", ".jpeg", ".heic", ".png", ".mp4", ".mov",
+        ".dng", ".nef", ".cr2", ".cr3", ".pef", ".arw", ".orf", ".rw2",
+        ".tif", ".tiff", ".avif"}
+
+    f := func(year int16, month uint8, day uint8, extIdx uint8) bool {
+        ext := extensions[int(extIdx)%len(extensions)]
+        y := int(year)%300 + 1900
+        mo := time.Month(month%12 + 1)
+        d := int(day%28 + 1)
+
+        date := time.Date(y, mo, d, 12, 0, 0, 0, time.UTC)
+        result := Build(date, "abcdef1234567890", 1, ext)
+
+        return strings.HasSuffix(result, ext)
+    }
+
+    if err := quick.Check(f, &quick.Config{MaxCount: 5000}); err != nil {
+        t.Error(err)
+    }
+}
+
+func TestBuild_dateEncoding(t *testing.T) {
+    SetLocaleForTesting(language.English)
+
+    f := func(year int16, month uint8, day uint8, hour uint8, min uint8, sec uint8) bool {
+        y := int(year)%300 + 1900
+        mo := time.Month(month%12 + 1)
+        d := int(day%28 + 1)
+        h := int(hour % 24)
+        mi := int(min % 60)
+        s := int(sec % 60)
+
+        date := time.Date(y, mo, d, h, mi, s, 0, time.UTC)
+        result := Build(date, "abcdef1234567890", 1, ".jpg")
+
+        // Extract the YYYYMMDD_HHMMSS prefix from the filename.
+        parts := strings.Split(filepath.ToSlash(result), "/")
+        filename := parts[len(parts)-1]
+        dateStr := filename[:15] // YYYYMMDD_HHMMSS
+
+        expected := date.Format("20060102_150405")
+        return dateStr == expected
+    }
+
+    if err := quick.Check(f, &quick.Config{MaxCount: 10000}); err != nil {
+        t.Error(err)
+    }
+}
+
+func TestBuild_algorithmIDPresent(t *testing.T) {
+    SetLocaleForTesting(language.English)
+
+    f := func(year int16, algoID uint8) bool {
+        aid := int(algoID % 5)
+        y := int(year)%300 + 1900
+        date := time.Date(y, time.June, 15, 12, 0, 0, 0, time.UTC)
+        result := Build(date, "abcdef1234567890", aid, ".jpg")
+
+        parts := strings.Split(filepath.ToSlash(result), "/")
+        filename := parts[len(parts)-1]
+
+        // Character at position 15 should be '-' (new format delimiter).
+        if len(filename) < 16 || filename[15] != '-' {
+            return false
+        }
+
+        // Character at position 16 should be the algorithm ID digit.
+        expectedDigit := byte('0' + aid)
+        if filename[16] != expectedDigit {
+            return false
+        }
+
+        // Character at position 17 should be '-' (delimiter before checksum).
+        if len(filename) < 18 || filename[17] != '-' {
+            return false
+        }
+
+        return true
+    }
+
+    if err := quick.Check(f, &quick.Config{MaxCount: 5000}); err != nil {
+        t.Error(err)
+    }
+}
+```
+
+#### 16.5.3 Properties Verified
+
+| Property | Test Function | Iterations | Description |
+|---|---|---|---|
+| **Determinism** | `TestBuild_deterministic` | 10,000 | Same inputs → same output, always. |
+| **Valid path characters** | `TestBuild_validPathCharacters` | 10,000 | Output never contains filesystem-illegal characters. |
+| **Correct structure** | `TestBuild_correctStructure` | 10,000 | Output is always `YYYY/MM-Mon/filename.ext` with exactly 2 directory levels. |
+| **Extension preservation** | `TestBuild_extensionPreserved` | 5,000 | Output extension always matches input extension. |
+| **Date encoding** | `TestBuild_dateEncoding` | 10,000 | `YYYYMMDD_HHMMSS` prefix in the filename matches the input date. |
+| **Algorithm ID** | `TestBuild_algorithmIDPresent` | 5,000 | Filename contains the correct algorithm ID at the correct position. |
+
+#### 16.5.4 Locale Sensitivity
+
+The path builder's output includes a locale-aware month abbreviation (e.g., `07-Jul` in English, `07-Juil` in French). Property-based tests pin the locale to `language.English` via `SetLocaleForTesting()` (the existing test infrastructure for locale-sensitive tests). A separate, smaller property test verifies that the month abbreviation changes when the locale changes — but the structural invariants (2 directory levels, date encoding, extension preservation) hold regardless of locale.
+
+#### 16.5.5 Running Property Tests
+
+Property-based tests run as part of the standard test suite — they are regular `Test*` functions, not fuzz tests. `testing/quick` is deterministic for a given `MaxCount` and Go version, so results are reproducible.
+
+```bash
+# Runs as part of normal unit tests:
+make test
+
+# Run only property tests:
+go test -race -timeout 120s ./internal/pathbuilder/ -run TestBuild_ -v
+```
+
+No special Makefile target is needed. The `MaxCount` values (5,000–10,000) keep execution time under 1 second on modern hardware.
+
+---
+
+### 16.6 Summary: Test Infrastructure Additions
+
+| Initiative | Package Location | Runs In | Makefile Target | CI Integration |
+|---|---|---|---|---|
+| **Fuzz testing (H1)** | `internal/handler/<format>/fuzz_test.go`, `internal/handler/tiffraw/fuzz_test.go` | Manual / nightly CI | `make fuzz` | Corpus entries run in `make test`; fuzzing in nightly job |
+| **Benchmarks (H2)** | `internal/benchmark/*_bench_test.go` | Manual / pre-release | `make bench` | Optional nightly comparison |
+| **Fixture corpus (H3)** | `internal/handler/handlertest/`, individual handler test files, `internal/discovery/` | `make test` (standard suite) | — | Standard CI (`make test`) |
+| **Property tests (H4)** | `internal/pathbuilder/pathbuilder_prop_test.go` | `make test` (standard suite) | — | Standard CI (`make test`) |

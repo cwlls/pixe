@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -832,5 +833,198 @@ func TestWalk_pixeignoreFileItself(t *testing.T) {
 	}
 	if len(discovered) != 1 {
 		t.Errorf("discovered: got %d, want 1 (photo.jpg only)", len(discovered))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge-case tests: §16.4.6 Discovery-level edge cases
+// ---------------------------------------------------------------------------
+
+// TestWalk_symlinkToFile verifies that a symlink to a media file is recorded
+// in the skipped list with reason "symlink" (Walk does not follow symlinks).
+func TestWalk_symlinkToFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	// Create a real JPEG in a separate temp dir.
+	targetDir := t.TempDir()
+	targetPath := filepath.Join(targetDir, "real.jpg")
+	writeFile(t, targetPath, jpegBytes)
+
+	// Create a symlink inside dirA pointing to the real file.
+	linkPath := filepath.Join(dir, "link.jpg")
+	if err := os.Symlink(targetPath, linkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: false})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	// Symlinks are skipped, not discovered.
+	if len(discovered) != 0 {
+		t.Errorf("discovered: got %d, want 0 (symlinks are skipped)", len(discovered))
+	}
+	if len(skipped) != 1 {
+		t.Errorf("skipped: got %d, want 1", len(skipped))
+	} else if skipped[0].Reason != "symlink" {
+		t.Errorf("skipped reason = %q, want %q", skipped[0].Reason, "symlink")
+	}
+}
+
+// TestWalk_symlinkToDir verifies that a symlink to a directory is not
+// descended into (filepath.WalkDir does not follow directory symlinks).
+func TestWalk_symlinkToDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	// Create a real subdirectory with a JPEG.
+	realSubDir := t.TempDir()
+	writeFile(t, filepath.Join(realSubDir, "photo.jpg"), jpegBytes)
+
+	// Create a symlink inside dirA pointing to the real subdirectory.
+	linkPath := filepath.Join(dir, "sublink")
+	if err := os.Symlink(realSubDir, linkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	// In recursive mode, the symlinked directory is seen as a symlink entry
+	// by WalkDir and is skipped (WalkDir does not follow directory symlinks).
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	// The symlink itself is recorded as skipped; the files inside are not seen.
+	if len(discovered) != 0 {
+		t.Errorf("discovered: got %d, want 0 (symlinked dir not followed)", len(discovered))
+	}
+	// The symlink directory entry appears in skipped with reason "symlink".
+	foundSymlink := false
+	for _, sf := range skipped {
+		if sf.Reason == "symlink" {
+			foundSymlink = true
+		}
+	}
+	if !foundSymlink {
+		t.Errorf("expected a skipped entry with reason 'symlink', got: %v", skipped)
+	}
+}
+
+// TestWalk_unreadableFile verifies that a media file with no read permissions
+// is skipped with a detection error, and the walk continues to other files.
+func TestWalk_unreadableFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission model differs on Windows")
+	}
+
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	// A readable JPEG.
+	writeFile(t, filepath.Join(dir, "readable.jpg"), jpegBytes)
+
+	// An unreadable JPEG (0000 permissions).
+	unreadablePath := filepath.Join(dir, "unreadable.jpg")
+	writeFile(t, unreadablePath, jpegBytes)
+	if err := os.Chmod(unreadablePath, 0o000); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadablePath, 0o644) })
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, skipped, err := Walk(dir, reg, WalkOptions{Recursive: false})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	// The readable file is discovered; the unreadable one is skipped.
+	if len(discovered) != 1 {
+		t.Errorf("discovered: got %d, want 1 (readable.jpg)", len(discovered))
+	}
+	if len(skipped) != 1 {
+		t.Errorf("skipped: got %d, want 1 (unreadable.jpg)", len(skipped))
+	}
+}
+
+// TestWalk_unreadableDir verifies that a subdirectory with no read permissions
+// causes Walk to return an error (filepath.WalkDir propagates the error).
+func TestWalk_unreadableDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission model differs on Windows")
+	}
+
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	// A readable file in the root.
+	writeFile(t, filepath.Join(dir, "photo.jpg"), jpegBytes)
+
+	// An unreadable subdirectory.
+	subDir := filepath.Join(dir, "locked")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	writeFile(t, filepath.Join(subDir, "hidden.jpg"), jpegBytes)
+	if err := os.Chmod(subDir, 0o000); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(subDir, 0o755) })
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	// Walk returns an error when it cannot read the locked directory.
+	_, _, err := Walk(dir, reg, WalkOptions{Recursive: true})
+	if err == nil {
+		t.Error("Walk should return an error for an unreadable directory")
+	}
+}
+
+// TestWalk_unicodeDirNames verifies that files inside directories with Unicode
+// names are discovered with the correct RelPath.
+func TestWalk_unicodeDirNames(t *testing.T) {
+	dir := t.TempDir()
+	jpegBytes := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 12)...)
+
+	// Create a file inside a Unicode-named subdirectory.
+	unicodeSubDir := filepath.Join(dir, "日本旅行")
+	if err := os.MkdirAll(unicodeSubDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	writeFile(t, filepath.Join(unicodeSubDir, "IMG_0001.jpg"), jpegBytes)
+
+	reg := NewRegistry()
+	reg.Register(&mockHandler{exts: []string{".jpg"}, magic: jpegMagic, name: "jpeg"})
+
+	discovered, _, err := Walk(dir, reg, WalkOptions{Recursive: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	if len(discovered) != 1 {
+		t.Fatalf("discovered: got %d, want 1", len(discovered))
+	}
+
+	wantRel := filepath.Join("日本旅行", "IMG_0001.jpg")
+	if discovered[0].RelPath != wantRel {
+		t.Errorf("RelPath = %q, want %q", discovered[0].RelPath, wantRel)
 	}
 }

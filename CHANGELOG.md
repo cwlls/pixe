@@ -4,6 +4,34 @@
 
 ---
 
+## [Unreleased] -- Testing & Quality (Section 16)
+
+### Testing & Quality Improvements
+
+- **Fuzz testing for all handler packages** — Added `fuzz_test.go` files to JPEG, HEIC, AVIF, MP4, CR3, PNG, and TIFF-RAW handlers. Each fuzz test covers `Detect()`, `ExtractDate()`, and `HashableReader()` methods with seed corpus from valid files, truncated variants, and cross-format inputs. Fuzz tests are run via `make fuzz` (30s per target).
+
+- **Expanded fixture corpus with edge-case helpers** — Created `internal/handler/handlertest/helpers.go` with 5 shared edge-case fixture builders: `BuildEmptyFile`, `BuildMagicOnly`, `BuildTruncatedFile`, `BuildWithFilename`, `BuildSymlink`. These enable testing of zero-byte files, magic-bytes-only files, truncated structures, Unicode filenames, and symlinks.
+
+- **Extended `handlertest.RunSuite()` with edge-case subtests** — Added 8 new subtests (tests 11–18) to the handler test suite, covering empty files, magic-only files, truncated files, corrupt EXIF, mismatched extensions, and symlinks. All edge-case tests enforce crash-resistance (no panic) rather than correctness.
+
+- **Discovery-level edge-case tests** — Added 6 new tests to `internal/discovery/discovery_test.go` covering symlinks to files/directories, symlink loops, unreadable files/directories, and Unicode directory names.
+
+- **Centralized benchmark suite** — Created `internal/benchmark/` package with 5 benchmark files:
+  - `hash_bench_test.go` — Hash throughput for all 5 algorithms (MD5, SHA-1, SHA-256, BLAKE3, xxHash-64) × 4 file sizes (1 KB, 1 MB, 10 MB, 100 MB)
+  - `copy_bench_test.go` — Copy + verify throughput for 3 file sizes
+  - `db_bench_test.go` — Database insert, dedup check, and skip check latency parameterized by DB size
+  - `discovery_bench_test.go` — Directory walk speed for 3 tree sizes and 2 structures
+  - `pathbuilder_bench_test.go` — Path construction time per `Build()` call
+  - `helpers_test.go` — Shared fixture generation helpers (`generateFixture`, `prepopulateDB`, `createFileTree`)
+
+- **Property-based tests for pathbuilder** — Added `internal/pathbuilder/pathbuilder_prop_test.go` with 6 property-based tests using `testing/quick` (10,000 iterations each): determinism, valid path characters, correct structure, extension preservation, date encoding, and algorithm ID presence.
+
+- **Makefile targets** — Added `make fuzz` (runs fuzz tests for all 7 handler packages, 30s each) and `make bench` (runs full benchmark suite with 600s timeout).
+
+- **Quality gates** — All new code passes `make test`, `make lint`, and `make vet` with zero violations.
+
+---
+
 ## [v2.4.0] -- 2026-03-12
 
 ### Added
