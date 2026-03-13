@@ -49,7 +49,7 @@ func TestProgressReader_NilBus(t *testing.T) {
 
 	// Read again to get the rest.
 	buf2 := make([]byte, 10)
-	n, err = pr.Read(buf2)
+	n, _ = pr.Read(buf2)
 	if n != 6 {
 		t.Errorf("second Read returned n=%d, want 6", n)
 	}
@@ -115,14 +115,14 @@ func TestProgressReader_EOFFinalEvent(t *testing.T) {
 
 	// Read all data in one call.
 	buf := make([]byte, 100)
-	n, err := pr.Read(buf)
+	n, _ := pr.Read(buf)
 	if n != len(data) {
 		t.Fatalf("Read returned n=%d, want %d", n, len(data))
 	}
 	// First read returns the data without EOF.
 	// Read again to get EOF.
 	buf2 := make([]byte, 1)
-	_, err = pr.Read(buf2)
+	_, err := pr.Read(buf2)
 	if err != io.EOF {
 		t.Fatalf("second Read returned err=%v, want io.EOF", err)
 	}
@@ -167,13 +167,13 @@ func TestProgressReader_UnknownSize(t *testing.T) {
 
 	// Read all data in one call.
 	buf := make([]byte, 100)
-	n, err := pr.Read(buf)
+	n, _ := pr.Read(buf)
 	if n != len(data) {
 		t.Fatalf("Read returned n=%d, want %d", n, len(data))
 	}
 	// Read again to get EOF.
 	buf2 := make([]byte, 1)
-	_, err = pr.Read(buf2)
+	_, err := pr.Read(buf2)
 	if err != io.EOF {
 		t.Fatalf("second Read returned err=%v, want io.EOF", err)
 	}
