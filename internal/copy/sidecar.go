@@ -55,6 +55,16 @@ func CopySidecar(src, dest string) error {
 		return fmt.Errorf("copy: sidecar stream %q → %q: %w", src, dest, err)
 	}
 
+	// Flush to stable storage before closing. Sidecars are written directly
+	// to their final path (no temp-file atomicity), so Sync is especially
+	// important here — without it a power failure could leave a truncated
+	// sidecar with no subsequent verification step to catch it.
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dest)
+		return fmt.Errorf("copy: sidecar sync %q: %w", dest, err)
+	}
+
 	if err := out.Close(); err != nil {
 		_ = os.Remove(dest)
 		return fmt.Errorf("copy: sidecar close %q: %w", dest, err)
