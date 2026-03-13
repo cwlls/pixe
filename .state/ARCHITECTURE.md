@@ -797,72 +797,206 @@ Additionally, `tea.WithoutSignals()` is **not** used (that would disable the `te
 
 ## 11. Documentation Site (`docs/`)
 
-Jekyll-based static site deployed to GitHub Pages from `docs/`. Uses the **GitHub Pages Slate theme** (`jekyll-theme-slate`) — a stock remote theme with no local overrides.
+Jekyll-based static site deployed to GitHub Pages from `docs/`. Uses the **Just the Docs** theme (`just-the-docs`) — a documentation-focused Jekyll theme with built-in sidebar navigation, search, and breadcrumbs.
 
 ### 11.1 Content Principles
 
 - **Strict markdown.** All `.md` files in `docs/` are written in standard GitHub-Flavored Markdown. No custom CSS classes, no `<div>` layouts, no inline styles, no `onclick` handlers.
 - **HTML is the exception, not the rule.** An occasional HTML tag (e.g., an anchor with `target="_blank"`) is acceptable when markdown has no equivalent. HTML blocks for layout, styling, or interactivity are not.
-- **No custom theme assets.** No `_sass/`, `_layouts/`, `_includes/`, or `assets/css/` directories. The Slate theme provides all styling. The site should work with zero local theme overrides.
+- **No custom theme assets.** No `_sass/`, `_layouts/`, `_includes/`, or `assets/css/` directories. The Just the Docs theme provides all styling. The site should work with zero local theme overrides.
 - **No custom JavaScript.** No `<script>` tags, no accordion toggles, no interactive elements. Content is static markdown rendered by the theme.
 
-### 11.2 Theme Configuration
+### 11.2 Theme Migration: Slate → Just the Docs
 
-The site uses the `jekyll-theme-slate` remote theme via the `github-pages` gem. Configuration in `_config.yml`:
+The site is migrating from `jekyll-theme-slate` to `just-the-docs`. Slate is a single-page presentation theme with no built-in multi-page navigation — it has no sidebar, no top nav bar, no search, and no breadcrumbs. With 11+ pages (and growing), navigating the site requires returning to the index page every time. Just the Docs is purpose-built for documentation sites and provides all of this out of the box via `_config.yml` configuration.
 
-- `theme: jekyll-theme-slate` — stock Slate theme, no `remote_theme` needed when using the `github-pages` gem.
-- `plugins: [jekyll-remote-theme]` — not required when using `theme:` with a GitHub Pages supported theme.
-- No `_layouts/`, `_includes/`, or `_sass/` directories — all provided by the theme.
+**What changes:**
 
-### 11.3 Navigation
+1. **`_config.yml`** — Replace `theme: jekyll-theme-slate` with `remote_theme: just-the-docs/just-the-docs`. Add Just the Docs configuration keys (see §11.3).
+2. **`Gemfile`** — Replace the `github-pages` gem with `jekyll-remote-theme` plugin and the `just-the-docs` gem for local preview.
+3. **Front matter on every `.md` file** — Add `nav_order` (integer) to control sidebar ordering. Some pages gain `parent` for hierarchical grouping. The `title` key (already present on all pages) becomes the sidebar link label.
+4. **`index.md`** — Remove the manual navigation link list (the sidebar replaces it). The landing page content (project description, quick start, FAQ) remains. Add `nav_order: 1` to front matter.
+5. **Remove manual "back to index" links** — Individual pages no longer need inline navigation links to other pages. The persistent sidebar handles all cross-page navigation.
 
-Slate provides a sidebar-style layout. Navigation between pages uses a markdown list or table at the top of `index.md` (the landing page) linking to all other pages. Individual pages link back to the index and to logically adjacent pages via standard markdown links. No `_data/navigation.yml` — navigation is inline markdown.
+**What does NOT change:**
 
-### 11.4 Pages
+- All markdown content within pages remains identical. No HTML rewriting needed.
+- Marker-based docgen injection (`<!-- pixe:begin:... -->`) works the same — markers are HTML comments, invisible in any theme.
+- `_config.yml` version marker (`# <!-- pixe:begin:version -->`) is preserved.
+- No `_layouts/`, `_includes/`, `_sass/`, or `assets/` directories are added. Just the Docs is used as a remote theme with zero local overrides.
 
-| Page | Content |
-|---|---|
-| `index.md` | Landing page: project description, key guarantees, quick-start commands, navigation links to all other pages |
-| `install.md` | Installation methods (go install, build from source) and first-run examples |
-| `commands.md` | Full command reference with flag tables (markdown tables) and examples (fenced code blocks) |
-| `how-it-works.md` | Pipeline stages, output format, naming convention, duplicate handling, sidecar carry, supported formats |
-| `technical.md` | Design rationale: read-only source, copy-then-verify, determinism, no external deps, crash safety |
-| `adding-formats.md` | Developer guide for implementing `FileTypeHandler` with code examples |
-| `contributing.md` | Contribution workflow: issue-first, clone/build, test, conventions, PR |
-| `changelog.md` | Version history (generated from root `CHANGELOG.md` via docgen) |
-| `packages.md` | Generated package reference (docgen output) |
-| `ai.md` | AI collaboration transparency statement |
+### 11.3 Theme Configuration
 
-### 11.5 Content Migration
+`docs/_config.yml` after migration:
 
-The migration from the custom theme to Slate has been completed:
+```yaml
+remote_theme: just-the-docs/just-the-docs
+plugins:
+  - jekyll-remote-theme
 
-1. **Deleted** all custom theme directories: `_sass/`, `_layouts/`, `_includes/`, `assets/`, `_data/`, `_site/`, `.jekyll-cache/`.
-2. **Updated** `_config.yml` to use `theme: jekyll-theme-slate` and removed `sass:` configuration.
-3. **Updated** `Gemfile` to use `github-pages` gem (which bundles `jekyll-theme-slate`).
-4. **Rewrote** every `.md` file to strict markdown:
-   - Replaced all HTML `<table>` blocks with markdown tables.
-   - Replaced all `<div class="...">` layout blocks with markdown equivalents (headings, lists, blockquotes).
-   - Replaced all `<pre>` terminal-styled blocks with fenced code blocks.
-   - Replaced `<span class="term-...">` styled output with plain text in code blocks.
-   - Removed all `layout:` and `section_label:` front matter keys (Slate uses `default` layout automatically). Kept `title:` only.
-   - Converted the `index.md` landing page from full-HTML sections to a markdown document with headings, paragraphs, and code blocks.
-   - Converted the `commands.md` accordion pattern to flat markdown sections (one `###` per command, markdown flag tables, fenced code examples).
-   - Converted `contributing.md` numbered steps from styled `<div>` blocks to a markdown ordered list.
-   - Converted `ai.md` from a styled `<div class="ai-card">` to plain markdown paragraphs.
-5. **Removed** `Gemfile.lock` and regenerated after Gemfile update.
+title: Pixe
+description: Safe, deterministic photo and video sorting
+url: "https://cwlls.github.io"
+baseurl: "/pixe"
 
-### 11.6 Files to Delete
+# <!-- pixe:begin:version -->
+version: "v2.6.2"
+# <!-- pixe:end:version -->
 
-The following files and directories are artifacts of the custom theme and must be removed:
+# Just the Docs configuration
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 3
 
-- `docs/_sass/` (entire directory — 11 SCSS partials)
-- `docs/_layouts/` (entire directory — `default.html`, `landing.html`, `page.html`)
-- `docs/_includes/` (entire directory — `head.html`, `nav.html`, `footer.html`, `hero.html`, `pipeline.html`, `format-grid.html`)
-- `docs/assets/` (entire directory — `css/main.scss`)
-- `docs/_data/` (entire directory — `navigation.yml`)
-- `docs/_site/` (build output, should be gitignored)
-- `docs/.jekyll-cache/` (build cache, should be gitignored)
+# Aux links (top-right corner)
+aux_links:
+  "View on GitHub":
+    - "https://github.com/cwlls/pixe"
+aux_links_new_tab: true
+
+# Footer
+gh_edit_link: false
+
+# Color scheme
+color_scheme: light
+
+# Heading anchor links
+heading_anchors: true
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+```
+
+`docs/Gemfile` after migration:
+
+```ruby
+source "https://rubygems.org"
+
+gem "jekyll", "~> 4.3"
+gem "just-the-docs"
+gem "jekyll-remote-theme"
+```
+
+### 11.4 Navigation Structure
+
+Just the Docs generates the sidebar automatically from front matter on each page. Navigation order is controlled by `nav_order` (lower numbers appear first). All pages are top-level — no nested parent/child hierarchy needed for this site's size.
+
+| Page | `nav_order` | Sidebar Label |
+|---|---|---|
+| `index.md` | 1 | Home |
+| `install.md` | 2 | Installation |
+| `commands.md` | 3 | Commands |
+| `configuration.md` | 4 | Configuration |
+| `how-it-works.md` | 5 | How It Works |
+| `technical.md` | 6 | Technical Design |
+| `adding-formats.md` | 7 | Adding a New Format |
+| `packages.md` | 8 | Package Reference |
+| `contributing.md` | 9 | Contributing |
+| `changelog.md` | 10 | Changelog |
+| `ai.md` | 11 | AI Collaboration |
+
+Front matter example for a typical page:
+
+```yaml
+---
+title: Commands
+nav_order: 3
+---
+```
+
+The `index.md` landing page uses:
+
+```yaml
+---
+title: Home
+nav_order: 1
+permalink: /
+---
+```
+
+The manual navigation list currently in `index.md` (lines 17–27) is removed — the sidebar replaces it. The rest of `index.md` (project description, FAQ, quick start) is unchanged.
+
+### 11.5 New Page: `configuration.md`
+
+A new `docs/configuration.md` page is created to comprehensively document the configuration system. The config file section currently at the bottom of `commands.md` (lines 285–302) is removed from `commands.md` and replaced by a cross-reference link to the new page.
+
+**Page structure:**
+
+1. **Precedence order** — The first section. Documents the full resolution chain from highest to lowest priority:
+
+   | Priority | Source | Example |
+   |---|---|---|
+   | 1 (highest) | CLI flags | `--algorithm sha256` |
+   | 2 | Environment variables | `PIXE_ALGORITHM=sha256` |
+   | 3 | Source-local config | `<source-dir>/.pixe.yaml` |
+   | 4 | Named profile | `~/.pixe/profiles/<name>.yaml` (via `--profile`) |
+   | 5 | Global config file | `~/.pixe.yaml` or `$XDG_CONFIG_HOME/pixe/.pixe.yaml` |
+   | 6 (lowest) | Built-in defaults | Hardcoded in source |
+
+   Explains that Viper resolves in this order. CLI flags always win. Env vars are prefixed `PIXE_` and use `SCREAMING_SNAKE_CASE` (e.g., `PIXE_SKIP_DUPLICATES=true`). Source-local config is automatically loaded from the `--source` directory. Profiles are explicitly selected via `--profile <name>`.
+
+2. **Global config file** — Search paths in order: `./.pixe.yaml` (current directory), `$HOME/.pixe.yaml`, `$XDG_CONFIG_HOME/pixe/.pixe.yaml`. YAML format. Full annotated example showing every valid key.
+
+3. **Settings reference table** — Every valid config key, its CLI flag counterpart, type, default, and description:
+
+   | Config Key | CLI Flag | Type | Default | Description |
+   |---|---|---|---|---|
+   | `dest` | `-d, --dest` | string | (required) | Destination archive directory. Supports `@alias` syntax (see Aliases). |
+   | `algorithm` | `-a, --algorithm` | string | `sha1` | Hash algorithm: `md5`, `sha1`, `sha256`, `blake3`, `xxhash` |
+   | `workers` | `-w, --workers` | int | CPU count | Concurrent worker count |
+   | `recursive` | `-r, --recursive` | bool | `false` | Descend into source subdirectories |
+   | `skip_duplicates` | `--skip-duplicates` | bool | `false` | Skip copying duplicate files (record only) |
+   | `copyright` | `--copyright` | string | (disabled) | Copyright template with `{year}`, `{month}`, `{monthname}`, `{day}` tokens |
+   | `camera_owner` | `--camera-owner` | string | (disabled) | Camera owner metadata string |
+   | `path_template` | `--path-template` | string | `{year}/{month}-{monthname}` | Directory structure template (see §4.5.1 in architecture) |
+   | `no_carry_sidecars` | `--no-carry-sidecars` | bool | `false` | Disable sidecar file carry (`.aae`, `.xmp`) |
+   | `overwrite_sidecar_tags` | `--overwrite-sidecar-tags` | bool | `false` | Overwrite existing XMP values during sidecar merge |
+   | `db_path` | `--db-path` | string | (auto-resolved) | Explicit SQLite database path |
+   | `dry_run` | `--dry-run` | bool | `false` | Preview mode — no copy, verify, or tag operations |
+   | `ignore` | `--ignore` | list | (none) | Glob patterns to exclude from discovery |
+   | `since` | `--since` | string | (none) | Date filter: process files on or after `YYYY-MM-DD` |
+   | `before` | `--before` | string | (none) | Date filter: process files on or before `YYYY-MM-DD` |
+   | `aliases` | (none) | map | (none) | Destination aliases: `name: /path` (see Aliases section) |
+
+   **Flags not available in config files** (CLI-only, documented here for completeness):
+
+   | CLI Flag | Type | Default | Description |
+   |---|---|---|---|
+   | `--config` | string | (auto-discovered) | Explicit config file path |
+   | `--profile` | string | (none) | Named profile to load |
+   | `-q, --quiet` | bool | `false` | Suppress per-file output |
+   | `-v, --verbose` | bool | `false` | Enable verbose output |
+   | `--progress` | bool | `false` | Show live progress bar UI |
+   | `-y, --yes` | bool | `false` | Auto-accept interactive prompts (e.g., ledger write failure) |
+   | `--no-ledger` | bool | `false` | Explicitly skip ledger creation (no prompt, no warning) |
+
+4. **Source-local config** — Explains that a `.pixe.yaml` in the `--source` directory is automatically detected and merged. Documents which keys are merged from source-local config (the 9 keys handled by `mergeSourceConfig`: `dest`, `copyright`, `camera_owner`, `algorithm`, `recursive`, `skip_duplicates`, `no_carry_sidecars`, `overwrite_sidecar_tags`, `path_template`). Notes that `ignore` and `aliases` are merged additively (union, not replacement).
+
+5. **Named profiles** — Explains `--profile <name>` loading from `~/.pixe/profiles/<name>.yaml` or `$XDG_CONFIG_HOME/pixe/profiles/<name>.yaml`. Same merge rules as source-local config. Use case: different settings for different cameras or archive destinations.
+
+6. **Destination aliases** — Explains the `aliases` map and `@name` syntax for `--dest`. Resolution rules, config layering (source-local aliases augment global aliases, collision = source-local wins), error on unknown alias. Full example.
+
+7. **Environment variables** — Lists the `PIXE_` prefix convention. Viper's `AutomaticEnv()` means any config key can be set via `PIXE_<KEY>` (e.g., `PIXE_ALGORITHM`, `PIXE_WORKERS`, `PIXE_DEST`). Bool values accept `true`/`false`/`1`/`0`.
+
+8. **Full annotated example** — A complete `.pixe.yaml` showing every key with inline comments.
+
+**Cross-references:** `commands.md` gains a brief note at the bottom: "For configuration file documentation, precedence rules, profiles, and aliases, see [Configuration](configuration.md)." The config section currently in `commands.md` (lines 285–302) is removed.
+
+### 11.6 Changes to `commands.md`
+
+Two changes to the existing commands page:
+
+1. **Remove config file section** (lines 285–302) — replaced by `configuration.md`. Add a cross-reference link.
+2. **Add `--yes` and `--no-ledger` to the sort flags table** — These flags are registered in `cmd/sort.go` but are currently missing from the docgen-injected flag table. The `extractFlags` AST parser should already be picking them up; if the generated table includes them, a `make docs` run will add them automatically. If the parser is not extracting them (e.g., because they use a different registration pattern), the extractor needs a fix.
+
+### 11.7 Previous Migrations (Completed)
+
+The migration from the original custom theme to Slate has been completed. The migration from Slate to Just the Docs is described in §11.2.
+
+Historical custom theme artifacts that were previously deleted: `_sass/`, `_layouts/`, `_includes/`, `assets/`, `_data/`, `_site/`, `.jekyll-cache/`.
 
 ---
 
@@ -890,6 +1024,89 @@ The root `CHANGELOG.md` is the single source of truth for the project's version 
 - **Staleness gate:** `make docs-check` detects drift between `CHANGELOG.md` and `docs/changelog.md` the same way it detects drift in all other docgen targets.
 
 **Workflow:** Edit `CHANGELOG.md` → run `make docs` → `docs/changelog.md` is updated automatically. CI enforces freshness via `make docs-check`.
+
+### 12.2 Pre-Commit Hook
+
+A Git pre-commit hook prevents stale documentation from being committed. This catches the problem locally — before CI — eliminating the "push, wait for CI, see docs-check failure, run `make docs`, push again" cycle.
+
+**Implementation:** A shell script at `scripts/pre-commit` that is installed into `.git/hooks/pre-commit`. Not a third-party framework (no `pre-commit`, `husky`, or `lefthook` — the project has no Node.js or Python dependencies to justify those tools).
+
+**Hook behavior:**
+
+1. Run `go run ./internal/docgen --check` (same command as CI).
+2. If it exits 0, the commit proceeds.
+3. If it exits non-zero, the commit is blocked with a message:
+
+   ```
+   Documentation is out of date. Run 'make docs' and stage the changes.
+   Stale files:
+     docs/commands.md
+     README.md
+   ```
+
+4. The hook is **fast** — docgen extracts from the Go AST and compares strings. No compilation of the main binary, no test execution. Typical runtime: < 2 seconds.
+
+**Installation:**
+
+- A new `make install-hooks` Makefile target copies `scripts/pre-commit` to `.git/hooks/pre-commit` and sets the executable bit.
+- `make install-hooks` is documented in `AGENTS.md` and `docs/contributing.md`.
+- The hook is **opt-in** — it is not automatically installed by `make build` or `make deps`. Contributors must run `make install-hooks` once after cloning. This is deliberate: auto-installing hooks is surprising behavior, and some workflows (CI, automated tooling) should not have hooks.
+- A `make uninstall-hooks` target removes the hook.
+
+**Script (`scripts/pre-commit`):**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Only check docs if any relevant source files are staged.
+# Relevant files: cmd/*.go, internal/domain/handler.go, internal/handler/**/*.go,
+# internal/docgen/*.go, CHANGELOG.md, docs/*.md, docs/_config.yml
+RELEVANT_PATTERNS="cmd/.*\.go|internal/domain/handler\.go|internal/handler/.*\.go|internal/docgen/.*\.go|CHANGELOG\.md|docs/.*\.md|docs/_config\.yml"
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+if ! echo "$STAGED" | grep -qE "$RELEVANT_PATTERNS"; then
+    exit 0  # No relevant files staged — skip docs check
+fi
+
+echo "pre-commit: checking generated documentation..."
+if ! go run ./internal/docgen --check 2>&1; then
+    echo ""
+    echo "Run 'make docs' to regenerate, then 'git add' the updated files."
+    exit 1
+fi
+```
+
+**Key design decisions:**
+
+- **Selective execution.** The hook only runs `docgen --check` when staged files include sources that could affect generated docs (cmd/*.go, handler files, CHANGELOG.md, etc.). Commits that only touch tests, configs, or non-doc Go files skip the check entirely — zero overhead for most commits.
+- **No auto-fix.** The hook does not run `make docs` automatically. Auto-modifying the working tree during a commit is surprising and can cause confusion with partial staging (`git add -p`). The developer runs `make docs` explicitly, reviews the diff, and stages.
+- **No `--no-verify` shame.** The hook prints a clear, actionable message. Developers who need to bypass it for a valid reason can use `git commit --no-verify`.
+
+**Makefile additions:**
+
+```makefile
+install-hooks: ## Install git pre-commit hook for docs freshness check
+	cp scripts/pre-commit .git/hooks/pre-commit
+	chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed."
+
+uninstall-hooks: ## Remove git pre-commit hook
+	rm -f .git/hooks/pre-commit
+	@echo "Pre-commit hook removed."
+```
+
+**CI is unchanged.** The pre-commit hook is a local convenience — CI remains the authoritative gate. The `go run ./internal/docgen --check` step in `.github/workflows/ci.yml` stays exactly as-is.
+
+### 12.3 Fixing the Current CI Failure
+
+The docs-check CI step is currently failing because `docs/commands.md`, `README.md`, and `docs/changelog.md` are stale. The fix:
+
+1. Run `make docs` to regenerate all marker-injected content.
+2. Review the diff — it will show new flags (`--yes`, `--no-ledger`) added to the sort flags tables, updated changelog content, and possibly other minor diffs from recent source changes.
+3. Commit the regenerated files.
+
+This is a one-time catch-up. The pre-commit hook (§12.2) prevents recurrence.
 
 ---
 
