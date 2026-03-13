@@ -153,23 +153,23 @@ The progress bar is powered by a pipeline event bus (`internal/progress/`) — a
 ## Supported file types
 
 <!-- pixe:begin:format-table -->
-| Format  | Extensions   | Metadata      |
-| ------- | ------------ | ------------- |
-| ARW     | .arw         | XMP sidecar   |
-| AVIF    | .avif        | XMP sidecar   |
-| CR2     | .cr2         | XMP sidecar   |
-| CR3     | .cr3         | XMP sidecar   |
-| DNG     | .dng         | XMP sidecar   |
-| HEIC    | .heic, .heif | XMP sidecar   |
-| JPEG    | .jpg, .jpeg  | Embedded EXIF |
-| MP4/MOV | .mp4, .mov   | XMP sidecar   |
-| NEF     | .nef         | XMP sidecar   |
-| ORF     | .orf         | XMP sidecar   |
-| PEF     | .pef         | XMP sidecar   |
-| PNG     | .png         | XMP sidecar   |
-| RAF     | .raf         | XMP sidecar   |
-| RW2     | .rw2         | XMP sidecar   |
-| TIFF    | .tif, .tiff  | XMP sidecar   |
+| Format  | Extensions   | Metadata    |
+| ------- | ------------ | ----------- |
+| ARW     | .arw         | XMP sidecar |
+| AVIF    | .avif        | XMP sidecar |
+| CR2     | .cr2         | XMP sidecar |
+| CR3     | .cr3         | XMP sidecar |
+| DNG     | .dng         | XMP sidecar |
+| HEIC    | .heic, .heif | XMP sidecar |
+| JPEG    | .jpg, .jpeg  | XMP sidecar |
+| MP4/MOV | .mp4, .mov   | XMP sidecar |
+| NEF     | .nef         | XMP sidecar |
+| ORF     | .orf         | XMP sidecar |
+| PEF     | .pef         | XMP sidecar |
+| PNG     | .png         | XMP sidecar |
+| RAF     | .raf         | XMP sidecar |
+| RW2     | .rw2         | XMP sidecar |
+| TIFF    | .tif, .tiff  | XMP sidecar |
 <!-- pixe:end:format-table -->
 
 All formats support the full pipeline: date extraction, content hashing, copy-then-verify, and metadata tagging (via embedded EXIF for JPEG, or XMP sidecar for all others).

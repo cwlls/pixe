@@ -132,6 +132,7 @@ pixe sort --source /path/to/photos --dest /path/to/archive [options]
 | --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                           |
 | --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                     |
 | --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                    |
+| --path-template          |         | token-based template for destination directory structure (default: "{year}/{month}-{monthname}")    |
 <!-- pixe:end:sort-flags -->
 
 #### Ignore Patterns
@@ -358,23 +359,23 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 ## Supported File Types
 
 <!-- pixe:begin:format-table -->
-| Format  | Extensions   | Metadata      |
-| ------- | ------------ | ------------- |
-| ARW     | .arw         | XMP sidecar   |
-| AVIF    | .avif        | XMP sidecar   |
-| CR2     | .cr2         | XMP sidecar   |
-| CR3     | .cr3         | XMP sidecar   |
-| DNG     | .dng         | XMP sidecar   |
-| HEIC    | .heic, .heif | XMP sidecar   |
-| JPEG    | .jpg, .jpeg  | Embedded EXIF |
-| MP4/MOV | .mp4, .mov   | XMP sidecar   |
-| NEF     | .nef         | XMP sidecar   |
-| ORF     | .orf         | XMP sidecar   |
-| PEF     | .pef         | XMP sidecar   |
-| PNG     | .png         | XMP sidecar   |
-| RAF     | .raf         | XMP sidecar   |
-| RW2     | .rw2         | XMP sidecar   |
-| TIFF    | .tif, .tiff  | XMP sidecar   |
+| Format  | Extensions   | Metadata    |
+| ------- | ------------ | ----------- |
+| ARW     | .arw         | XMP sidecar |
+| AVIF    | .avif        | XMP sidecar |
+| CR2     | .cr2         | XMP sidecar |
+| CR3     | .cr3         | XMP sidecar |
+| DNG     | .dng         | XMP sidecar |
+| HEIC    | .heic, .heif | XMP sidecar |
+| JPEG    | .jpg, .jpeg  | XMP sidecar |
+| MP4/MOV | .mp4, .mov   | XMP sidecar |
+| NEF     | .nef         | XMP sidecar |
+| ORF     | .orf         | XMP sidecar |
+| PEF     | .pef         | XMP sidecar |
+| PNG     | .png         | XMP sidecar |
+| RAF     | .raf         | XMP sidecar |
+| RW2     | .rw2         | XMP sidecar |
+| TIFF    | .tif, .tiff  | XMP sidecar |
 <!-- pixe:end:format-table -->
 
 ### Date Fallback Chain

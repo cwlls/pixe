@@ -37,6 +37,7 @@ $ pixe sort --dest /path/to/archive [options]
 | --progress               | false   | show a live progress bar instead of per-file text output (requires a TTY)                           |
 | --since                  |         | only process files with capture date on or after this date (format: YYYY-MM-DD)                     |
 | --before                 |         | only process files with capture date on or before this date (format: YYYY-MM-DD)                    |
+| --path-template          |         | token-based template for destination directory structure (default: "{year}/{month}-{monthname}")    |
 <!-- pixe:end:sort-flags -->
 
 ### Examples
