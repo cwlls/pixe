@@ -4,7 +4,11 @@
 
 ---
 
-## [Unreleased] -- Testing & Quality (Section 16)
+## [Unreleased] -- Graceful Shutdown & Documentation Fixes
+
+### Added
+
+- **Graceful signal handling for SIGINT/SIGTERM** — The sort and resume pipelines now respond gracefully to interrupt signals. Workers drain cleanly, finishing their current file before exiting. A second signal restores default behavior for hard exit. Implemented via `signal.NotifyContext` wired to pipeline context.
 
 ### Bug Fixes
 
@@ -12,29 +16,90 @@
 
 - **Fixed GHA integration test flakiness** — `TestVerbosity_Verbose` was checking for `"ms)"` in timing output, but on fast systems (GHA Linux runners), file processing takes <1ms, producing `"(0s)"` instead of `"(Xms)"`. Changed assertion to check for parenthesized timing info without requiring a specific duration unit, making the test system-speed agnostic.
 
-### Testing & Quality Improvements
+- **Fixed pipeline terminal UpdateFileStatus error handling** — Intermediate database status updates in worker goroutines now properly check for errors and log them without interrupting the pipeline.
 
-- **Fuzz testing for all handler packages** — Added `fuzz_test.go` files to JPEG, HEIC, AVIF, MP4, CR3, PNG, and TIFF-RAW handlers. Each fuzz test covers `Detect()`, `ExtractDate()`, and `HashableReader()` methods with seed corpus from valid files, truncated variants, and cross-format inputs. Fuzz tests are run via `make fuzz` (30s per target).
+- **Fixed manifest SafeLedgerWriter thread safety** — Serialized `WriteEntry` calls to prevent concurrent writes to the ledger file.
 
-- **Expanded fixture corpus with edge-case helpers** — Created `internal/handler/handlertest/helpers.go` with 5 shared edge-case fixture builders: `BuildEmptyFile`, `BuildMagicOnly`, `BuildTruncatedFile`, `BuildWithFilename`, `BuildSymlink`. These enable testing of zero-byte files, magic-bytes-only files, truncated structures, Unicode filenames, and symlinks.
+- **Fixed copy sidecar sync to disk** — Added `Sync()` call before `Close()` in `CopySidecar` to ensure data is flushed to stable storage.
 
-- **Extended `handlertest.RunSuite()` with edge-case subtests** — Added 8 new subtests (tests 11–18) to the handler test suite, covering empty files, magic-only files, truncated files, corrupt EXIF, mismatched extensions, and symlinks. All edge-case tests enforce crash-resistance (no panic) rather than correctness.
+- **Fixed copy temp file cleanup on all error paths** — Orphaned temp files are now properly cleaned up when copy operations fail.
 
-- **Discovery-level edge-case tests** — Added 6 new tests to `internal/discovery/discovery_test.go` covering symlinks to files/directories, symlink loops, unreadable files/directories, and Unicode directory names.
+### Chore
 
-- **Centralized benchmark suite** — Created `internal/benchmark/` package with 5 benchmark files:
-  - `hash_bench_test.go` — Hash throughput for all 5 algorithms (MD5, SHA-1, SHA-256, BLAKE3, xxHash-64) × 4 file sizes (1 KB, 1 MB, 10 MB, 100 MB)
-  - `copy_bench_test.go` — Copy + verify throughput for 3 file sizes
-  - `db_bench_test.go` — Database insert, dedup check, and skip check latency parameterized by DB size
-  - `discovery_bench_test.go` — Directory walk speed for 3 tree sizes and 2 structures
-  - `pathbuilder_bench_test.go` — Path construction time per `Build()` call
-  - `helpers_test.go` — Shared fixture generation helpers (`generateFixture`, `prepopulateDB`, `createFileTree`)
+- **Fixed repository references after rename** — Updated all import paths and documentation references from old package name to `github.com/cwlls/pixe`.
 
-- **Property-based tests for pathbuilder** — Added `internal/pathbuilder/pathbuilder_prop_test.go` with 6 property-based tests using `testing/quick` (10,000 iterations each): determinism, valid path characters, correct structure, extension preservation, date encoding, and algorithm ID presence.
+- **Added CI badges to README.md** — Added GitHub Actions workflow status badges.
 
-- **Makefile targets** — Added `make fuzz` (runs fuzz tests for all 7 handler packages, 30s each) and `make bench` (runs full benchmark suite with 600s timeout).
+---
 
-- **Quality gates** — All new code passes `make test`, `make lint`, and `make vet` with zero violations.
+## [v2.6.2] -- 2026-03-13
+
+### Chore
+
+- **Fixed repository references after rename** — Updated all import paths and documentation references across 96 files to reflect the new package name.
+
+---
+
+## [v2.6.1] -- 2026-03-13
+
+### Added
+
+- **Graceful signal handling for SIGINT/SIGTERM** — The sort and resume pipelines now respond gracefully to interrupt signals. Workers drain cleanly, finishing their current file before exiting. A second signal restores default behavior for hard exit. Implemented via `signal.NotifyContext` wired to pipeline context.
+
+### Bug Fixes
+
+- **Fixed pipeline terminal UpdateFileStatus error handling** — Intermediate database status updates in worker goroutines now properly check for errors and log them without interrupting the pipeline.
+
+- **Fixed manifest SafeLedgerWriter thread safety** — Serialized `WriteEntry` calls to prevent concurrent writes to the ledger file.
+
+- **Fixed copy sidecar sync to disk** — Added `Sync()` call before `Close()` in `CopySidecar` to ensure data is flushed to stable storage.
+
+- **Fixed copy temp file cleanup on all error paths** — Orphaned temp files are now properly cleaned up when copy operations fail.
+
+---
+
+## [v2.6.0] -- 2026-03-13
+
+### Added
+
+- **Configurable destination path templates** — New `--path-template` flag enables custom destination directory structures using token-based syntax (e.g., `{YYYY}/{MM}/{DD}/{FILENAME}`). Supports 8 tokens: `YYYY`, `MM`, `DD`, `HOUR`, `MIN`, `SEC`, `FILENAME`, `EXT`. Full validation and error handling included.
+
+- **Destination aliases** — Shorthand aliases for common path templates (e.g., `--path-template "yearly"` expands to `{YYYY}/{FILENAME}`). Reduces command-line verbosity for standard layouts.
+
+### Changed
+
+- **Updated pathbuilder.Build() signature** — Now accepts optional `*Template` parameter for custom path construction. Existing code using default date-based paths is unaffected.
+
+### Documentation
+
+- **Updated README and docs for v2.6.0** — Refreshed documentation to reflect new path template and alias features.
+
+---
+
+## [v2.5.0] -- 2026-03-13
+
+### Changed
+
+- **Refactored all handlers to full-file hashing and sidecar-only metadata** — Destination files are now byte-identical copies of their source. Metadata is expressed exclusively via XMP sidecars — no handler modifies any file. This eliminates the need for EXIF writing libraries and simplifies the codebase.
+  - Removed EXIF embedding from JPEG, MP4, CR3, and TIFF-RAW handlers
+  - All metadata writes now route through XMP sidecar generation
+  - Reduces handler complexity and improves data integrity
+
+### Added
+
+- **RAF handler for Fujifilm RAW support** — New `internal/handler/raf/` package adds support for `.raf` files (Fujifilm RAW format). Implements EXIF date extraction and full-file hashing.
+
+### Documentation
+
+- **Updated ARCHITECTURE for full-file hashing and sidecar-only metadata** — Documented the shift to sidecar-only metadata strategy and its implications for handler design.
+
+---
+
+## [v2.4.1] -- 2026-03-12
+
+### Chore
+
+- **Updated ARCHITECTURE file** — Documentation updates to reflect current project state.
 
 ---
 
@@ -51,6 +116,55 @@
 - **Unified handler registry in `cmd/helpers.go`** — `buildRegistry()` now registers 14 handlers (added AVIF after HEIC, TIFF last to avoid claiming RAW files). Handler registration is now centralized and consistent across all CLI commands.
 
 - **Refactored `cmd/resume.go` and `cmd/status.go`** — Removed stale inline handler registration blocks (both were missing PNG, ORF, RW2 handlers). Both commands now call `buildRegistry()` for consistency.
+
+---
+
+## [v2.3.1] -- 2026-03-12
+
+### Bug Fixes
+
+- **Addressed code review findings from v2.3.0 audit** — Fixed issues identified during comprehensive code review of v2.3.0 features.
+
+---
+
+## [v2.3.0] -- 2026-03-12
+
+### Added
+
+- **Testing & Quality (Section 16)** — Comprehensive test infrastructure improvements:
+  - **Fuzz testing for all handler packages** — Added `fuzz_test.go` files to JPEG, HEIC, AVIF, MP4, CR3, PNG, and TIFF-RAW handlers. Each fuzz test covers `Detect()`, `ExtractDate()`, and `HashableReader()` methods with seed corpus from valid files, truncated variants, and cross-format inputs. Fuzz tests are run via `make fuzz` (30s per target).
+  - **Expanded fixture corpus with edge-case helpers** — Created `internal/handler/handlertest/helpers.go` with 5 shared edge-case fixture builders: `BuildEmptyFile`, `BuildMagicOnly`, `BuildTruncatedFile`, `BuildWithFilename`, `BuildSymlink`. These enable testing of zero-byte files, magic-bytes-only files, truncated structures, Unicode filenames, and symlinks.
+  - **Extended `handlertest.RunSuite()` with edge-case subtests** — Added 8 new subtests (tests 11–18) to the handler test suite, covering empty files, magic-only files, truncated files, corrupt EXIF, mismatched extensions, and symlinks. All edge-case tests enforce crash-resistance (no panic) rather than correctness.
+  - **Discovery-level edge-case tests** — Added 6 new tests to `internal/discovery/discovery_test.go` covering symlinks to files/directories, symlink loops, unreadable files/directories, and Unicode directory names.
+  - **Centralized benchmark suite** — Created `internal/benchmark/` package with 5 benchmark files covering hash throughput, copy performance, database latency, directory walk speed, and path construction time.
+  - **Property-based tests for pathbuilder** — Added `internal/pathbuilder/pathbuilder_prop_test.go` with 6 property-based tests using `testing/quick` (10,000 iterations each).
+  - **Makefile targets** — Added `make fuzz` and `make bench` for running fuzz tests and benchmarks.
+
+- **Configurable hash algorithms (I2)** — Added support for MD5, BLAKE3, and xxHash-64 in addition to existing SHA-1 and SHA-256. Algorithm selection via `--algorithm` flag. Destination filenames are tagged with algorithm ID (e.g., `_sha256`, `_blake3`) for transparency.
+
+- **ORF (Olympus) and RW2 (Panasonic) RAW handlers** — New handlers for Olympus and Panasonic RAW formats, expanding RAW support to 11 formats total.
+
+- **PNG file format handler** — Support for `.png` files with EXIF date extraction.
+
+- **`pixe stats` command** — New archive dashboard command for viewing archive statistics and inventory.
+
+- **Config auto-discovery in source directory** — Pixe now searches the source directory for `.pixerc` configuration files, enabling per-project settings.
+
+- **Colorized terminal output with TTY auto-detection** — Output is automatically colorized when writing to a terminal, with `--no-color` flag to disable.
+
+- **`--quiet` and `--verbose` verbosity levels** — New flags for controlling output verbosity. `--quiet` suppresses non-essential output; `--verbose` shows detailed processing information.
+
+- **`--since` and `--before` date filter flags** — New flags on sort command to filter files by capture date range.
+
+- **Config profiles** — `--profile` flag enables loading named configuration profiles from `.pixerc`.
+
+### Changed
+
+- **Migrated docs site from custom Jekyll theme to GitHub Pages Slate theme** — Simplified documentation site configuration and improved visual consistency.
+
+### Removed
+
+- **Removed TUI package and gui subcommand** — The interactive terminal UI (Bubble Tea-based) has been removed. Users can use the CLI commands with the new `--progress` flag for live progress bars instead.
 
 ---
 

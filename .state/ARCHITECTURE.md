@@ -511,7 +511,7 @@ Slate provides a sidebar-style layout. Navigation between pages uses a markdown 
 | `technical.md` | Design rationale: read-only source, copy-then-verify, determinism, no external deps, crash safety |
 | `adding-formats.md` | Developer guide for implementing `FileTypeHandler` with code examples |
 | `contributing.md` | Contribution workflow: issue-first, clone/build, test, conventions, PR |
-| `changelog.md` | Version history |
+| `changelog.md` | Version history (generated from root `CHANGELOG.md` via docgen) |
 | `packages.md` | Generated package reference (docgen output) |
 | `ai.md` | AI collaboration transparency statement |
 
@@ -554,10 +554,24 @@ The following files and directories are artifacts of the custom theme and must b
 
 - **Marker syntax:** `<!-- pixe:begin:section-name -->` / `<!-- pixe:end:section-name -->` — content between markers is replaced. The markers themselves are HTML comments, which is an acceptable use of HTML in the markdown files (they are invisible in rendered output).
 - **Output format:** All generated content is **markdown** — markdown tables, markdown lists, fenced code blocks. No HTML tables or HTML layout in generated output.
-- **Extraction targets:** Version string (git tag), `FileTypeHandler` interface, CLI flags (Cobra registrations), supported format table, package reference (godoc comments), query subcommands.
-- **Page classification:** Hand-authored (no markers), Hybrid (narrative + injected facts), Generated (`packages.md`).
+- **Extraction targets:** Version string (git tag), `FileTypeHandler` interface, CLI flags (Cobra registrations), supported format table, package reference (godoc comments), query subcommands, changelog.
+- **Page classification:** Hand-authored (no markers), Hybrid (narrative + injected facts), Generated (`packages.md`, `changelog.md`).
 - **Makefile:** `make docs` (regenerate), `make docs-check` (CI staleness gate).
 - **Docgen output:** The `docgen` tool emits markdown tables for all documentation targets. All generated content is markdown-only — no HTML tables or HTML layout.
+
+### 12.1 Changelog Sync
+
+The root `CHANGELOG.md` is the single source of truth for the project's version history. The docs site page `docs/changelog.md` is a **generated** file — its version history content is injected by docgen from `CHANGELOG.md`, ensuring the two never drift apart.
+
+**Design:**
+
+- **Source of truth:** `CHANGELOG.md` (root) — maintained manually or by tooling. Contains the full version history in [Keep a Changelog](https://keepachangelog.com/) format.
+- **Target:** `docs/changelog.md` — a Jekyll page with front matter (`title: Changelog`) and `<!-- pixe:begin:changelog -->` / `<!-- pixe:end:changelog -->` markers. Everything between the markers is replaced on each `make docs` run.
+- **Extractor:** `extractChangelog()` in `internal/docgen/extract.go` — reads `CHANGELOG.md`, strips the title line (`# Changelog: Pixe`) and the preamble italics line, and returns the remaining content as-is. No reformatting — the changelog content is already valid markdown.
+- **Target registration:** `buildTargets()` in `main.go` includes `docs/changelog.md` with a single `changelog` section mapped to `extractChangelog`.
+- **Staleness gate:** `make docs-check` detects drift between `CHANGELOG.md` and `docs/changelog.md` the same way it detects drift in all other docgen targets.
+
+**Workflow:** Edit `CHANGELOG.md` → run `make docs` → `docs/changelog.md` is updated automatically. CI enforces freshness via `make docs-check`.
 
 ---
 
