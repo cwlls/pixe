@@ -41,7 +41,7 @@ func date(year, month, day, hour, min, sec int) time.Time {
 func TestBuild_normalPath(t *testing.T) {
 	t.Parallel()
 	d := date(2021, 12, 25, 6, 22, 23)
-	got := Build(d, 1, testChecksum, ".jpg", false, "")
+	got := Build(nil, d, 1, testChecksum, ".jpg", false, "")
 	want := filepath.Join("2021", "12-Dec", "20211225_062223-1-"+testChecksum+".jpg")
 	if got != want {
 		t.Errorf("Build normal:\n  got  %q\n  want %q", got, want)
@@ -51,7 +51,7 @@ func TestBuild_normalPath(t *testing.T) {
 func TestBuild_duplicatePath(t *testing.T) {
 	t.Parallel()
 	d := date(2021, 12, 25, 6, 22, 23)
-	got := Build(d, 1, testChecksum, ".jpg", true, "20260306_103000")
+	got := Build(nil, d, 1, testChecksum, ".jpg", true, "20260306_103000")
 	want := filepath.Join("duplicates", "20260306_103000", "2021", "12-Dec", "20211225_062223-1-"+testChecksum+".jpg")
 	if got != want {
 		t.Errorf("Build duplicate:\n  got  %q\n  want %q", got, want)
@@ -62,7 +62,7 @@ func TestBuild_defaultDate_anselsAdams(t *testing.T) {
 	t.Parallel()
 	// Files with no EXIF date fall back to Ansel Adams' birthday: 1902-02-20.
 	d := date(1902, 2, 20, 0, 0, 0)
-	got := Build(d, 1, testChecksum, ".jpg", false, "")
+	got := Build(nil, d, 1, testChecksum, ".jpg", false, "")
 	want := filepath.Join("1902", "02-Feb", "19020220_000000-1-"+testChecksum+".jpg")
 	if got != want {
 		t.Errorf("Build Ansel Adams date:\n  got  %q\n  want %q", got, want)
@@ -83,7 +83,7 @@ func TestBuild_extensionNormalization(t *testing.T) {
 		{".jpg", ".jpg"},
 	}
 	for _, tc := range cases {
-		got := Build(d, 1, testChecksum, tc.ext, false, "")
+		got := Build(nil, d, 1, testChecksum, tc.ext, false, "")
 		// The extension in the filename should be lowercased.
 		if filepath.Ext(got) != tc.want {
 			t.Errorf("Build ext %q: got ext %q, want %q (full path: %q)",
@@ -108,7 +108,7 @@ func TestBuild_monthDirectoryFormat(t *testing.T) {
 	}
 	for _, tc := range cases {
 		d := date(2022, tc.month, 5, 0, 0, 0)
-		got := Build(d, 1, testChecksum, ".jpg", false, "")
+		got := Build(nil, d, 1, testChecksum, ".jpg", false, "")
 		parts := splitPath(got)
 		if len(parts) < 3 {
 			t.Fatalf("unexpected path structure: %q", got)
@@ -132,8 +132,8 @@ func TestBuild_sameSecondDifferentChecksum(t *testing.T) {
 	d := date(2022, 3, 1, 10, 0, 0)
 	sha1 := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	sha2 := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	p1 := Build(d, 1, sha1, ".jpg", false, "")
-	p2 := Build(d, 1, sha2, ".jpg", false, "")
+	p1 := Build(nil, d, 1, sha1, ".jpg", false, "")
+	p2 := Build(nil, d, 1, sha2, ".jpg", false, "")
 	if p1 == p2 {
 		t.Errorf("same-second different checksums produced identical paths: %q", p1)
 	}
@@ -154,7 +154,7 @@ func TestBuild_algorithmIDInFilename(t *testing.T) {
 		{4, "-4-"}, // xxHash
 	}
 	for _, tc := range cases {
-		got := Build(d, tc.algoID, checksum, ".jpg", false, "")
+		got := Build(nil, d, tc.algoID, checksum, ".jpg", false, "")
 		filename := filepath.Base(got)
 		if !strings.Contains(filename, tc.wantSeg) {
 			t.Errorf("Build(algoID=%d): filename %q does not contain %q", tc.algoID, filename, tc.wantSeg)
@@ -345,13 +345,13 @@ func TestBuildPath_adversarialFilenames(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := Build(d, 1, tc.checksum, tc.ext, false, "")
+			got := Build(nil, d, 1, tc.checksum, tc.ext, false, "")
 			// Output must be non-empty.
 			if got == "" {
 				t.Fatal("Build returned empty path")
 			}
 			// Output must be deterministic — calling again returns the same value.
-			got2 := Build(d, 1, tc.checksum, tc.ext, false, "")
+			got2 := Build(nil, d, 1, tc.checksum, tc.ext, false, "")
 			if got != got2 {
 				t.Errorf("Build not deterministic:\n  first  %q\n  second %q", got, got2)
 			}
@@ -366,6 +366,62 @@ func TestBuildPath_adversarialFilenames(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuild_customTemplate_dayGranularity(t *testing.T) {
+	t.Parallel()
+	tmpl, err := ParseTemplate("{year}/{month}/{day}")
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+	d := date(2021, 12, 25, 6, 22, 23)
+	got := Build(tmpl, d, 1, testChecksum, ".jpg", false, "")
+	want := filepath.Join("2021", "12", "25", "20211225_062223-1-"+testChecksum+".jpg")
+	if got != want {
+		t.Errorf("Build custom template day:\n  got  %q\n  want %q", got, want)
+	}
+}
+
+func TestBuild_customTemplate_flat(t *testing.T) {
+	t.Parallel()
+	tmpl, err := ParseTemplate("{year}")
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+	d := date(2021, 12, 25, 6, 22, 23)
+	got := Build(tmpl, d, 1, testChecksum, ".jpg", false, "")
+	want := filepath.Join("2021", "20211225_062223-1-"+testChecksum+".jpg")
+	if got != want {
+		t.Errorf("Build flat template:\n  got  %q\n  want %q", got, want)
+	}
+}
+
+func TestBuild_customTemplate_withExt(t *testing.T) {
+	t.Parallel()
+	tmpl, err := ParseTemplate("{year}/{ext}")
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+	d := date(2021, 12, 25, 6, 22, 23)
+	got := Build(tmpl, d, 1, testChecksum, ".JPG", false, "")
+	want := filepath.Join("2021", "jpg", "20211225_062223-1-"+testChecksum+".jpg")
+	if got != want {
+		t.Errorf("Build ext template:\n  got  %q\n  want %q", got, want)
+	}
+}
+
+func TestBuild_customTemplate_duplicate(t *testing.T) {
+	t.Parallel()
+	tmpl, err := ParseTemplate("{year}/{month}/{day}")
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+	d := date(2021, 12, 25, 6, 22, 23)
+	got := Build(tmpl, d, 1, testChecksum, ".jpg", true, "20260306_103000")
+	want := filepath.Join("duplicates", "20260306_103000", "2021", "12", "25", "20211225_062223-1-"+testChecksum+".jpg")
+	if got != want {
+		t.Errorf("Build custom template duplicate:\n  got  %q\n  want %q", got, want)
 	}
 }
 

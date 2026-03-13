@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -44,6 +46,7 @@ import (
 	rw2handler "github.com/cwlls/pixe-go/internal/handler/rw2"
 	tiffhandler "github.com/cwlls/pixe-go/internal/handler/tiff"
 	"github.com/cwlls/pixe-go/internal/migrate"
+	"github.com/cwlls/pixe-go/internal/pathbuilder"
 )
 
 // resolveConfig reads Viper values and returns a populated *config.AppConfig.
@@ -51,6 +54,11 @@ import (
 // Workers defaults to runtime.NumCPU() when <= 0.
 // Used by runSort and runGUI.
 func resolveConfig() (*config.AppConfig, error) {
+	pathTemplate := viper.GetString("path_template")
+	if pathTemplate == "" {
+		pathTemplate = pathbuilder.DefaultTemplate
+	}
+
 	cfg := &config.AppConfig{
 		Source:               viper.GetString("source"),
 		Destination:          viper.GetString("dest"),
@@ -65,6 +73,8 @@ func resolveConfig() (*config.AppConfig, error) {
 		Ignore:               viper.GetStringSlice("ignore"),
 		CarrySidecars:        !viper.GetBool("no_carry_sidecars"),
 		OverwriteSidecarTags: viper.GetBool("overwrite_sidecar_tags"),
+		PathTemplate:         pathTemplate,
+		Aliases:              viper.GetStringMapString("aliases"),
 	}
 
 	if s := viper.GetString("since"); s != "" {
@@ -196,6 +206,7 @@ func mergeSourceConfig(local *viper.Viper, cmd *cobra.Command) {
 		{"skip_duplicates", "skip-duplicates"},
 		{"no_carry_sidecars", "no-carry-sidecars"},
 		{"overwrite_sidecar_tags", "overwrite-sidecar-tags"},
+		{"path_template", "path-template"},
 	}
 
 	for _, k := range keys {
@@ -214,6 +225,58 @@ func mergeSourceConfig(local *viper.Viper, cmd *cobra.Command) {
 		additional := local.GetStringSlice("ignore")
 		viper.Set("ignore", append(existing, additional...))
 	}
+
+	// Aliases are merged additively; source-local wins on collision.
+	if local.IsSet("aliases") {
+		existing := viper.GetStringMapString("aliases")
+		additional := local.GetStringMapString("aliases")
+		for k, v := range additional {
+			existing[k] = v
+		}
+		viper.Set("aliases", existing)
+	}
+}
+
+// resolveAlias checks whether dest starts with "@" and, if so, resolves it
+// against the provided aliases map. Returns the resolved filesystem path, or
+// dest unchanged when it does not start with "@".
+//
+// Tilde expansion is applied to the resolved path: a leading "~" is replaced
+// with the current user's home directory, since YAML values are not
+// shell-expanded.
+//
+// Returns an error when:
+//   - dest is "@" with no name following it.
+//   - the alias name is not found in the map.
+func resolveAlias(dest string, aliases map[string]string) (string, error) {
+	if !strings.HasPrefix(dest, "@") {
+		return dest, nil
+	}
+	name := dest[1:]
+	if name == "" {
+		return "", fmt.Errorf("empty alias name in %q: use @<name> to reference a configured alias", dest)
+	}
+	path, ok := aliases[name]
+	if !ok {
+		available := make([]string, 0, len(aliases))
+		for k := range aliases {
+			available = append(available, "@"+k)
+		}
+		sort.Strings(available)
+		if len(available) == 0 {
+			return "", fmt.Errorf("alias %q not found — no aliases are configured in .pixe.yaml", dest)
+		}
+		return "", fmt.Errorf("alias %q not found — available aliases: %s", dest, strings.Join(available, ", "))
+	}
+	// Tilde expansion: YAML values are not shell-expanded.
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve alias %q: expand ~: %w", dest, err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	return path, nil
 }
 
 // loadProfile loads a named config profile and merges it into the global

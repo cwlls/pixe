@@ -94,4 +94,18 @@ type AppConfig struct {
 	// Verbosity controls output detail level.
 	// -1 = quiet (summary only), 0 = normal (default), 1 = verbose (timing info).
 	Verbosity int
+
+	// PathTemplate is the token-based template for the directory structure
+	// leading to the filename. Uses {token} syntax with known tokens:
+	// {year}, {month}, {monthname}, {day}, {hour}, {minute}, {second}, {ext}.
+	// Default: "{year}/{month}-{monthname}" (matches pre-template behavior).
+	// The filename itself (YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>) is not
+	// configurable — only the directory path is templated.
+	PathTemplate string
+
+	// Aliases maps short names to filesystem paths for destination resolution.
+	// Populated from the "aliases" key in .pixe.yaml. Used by the cmd/ layer
+	// to resolve @-prefixed --dest values before populating Destination.
+	// Example: {"nas": "/Volumes/NAS/Photos", "backup": "/Volumes/Backup/Archive"}
+	Aliases map[string]string
 }

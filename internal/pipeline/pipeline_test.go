@@ -1317,6 +1317,50 @@ func TestProcessFile_defaultDuplicates_stillCopied(t *testing.T) {
 	}
 }
 
+// TestRun_customPathTemplate verifies that a non-default path template
+// produces a different directory structure than the default.
+func TestRun_customPathTemplate(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, "with_exif_date.jpg") // date: 2021-12-25
+
+	tmpl, err := pathbuilder.ParseTemplate("{year}/{month}/{day}")
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+
+	var out bytes.Buffer
+	cfg := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1"}
+	opts := newOpts(t, cfg, &out)
+	opts.PathTemplate = tmpl
+
+	_, err = Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v\nOutput:\n%s", err, out.String())
+	}
+
+	// Expect file under dirB/2021/12/25/ (day-granularity template).
+	dayDir := filepath.Join(dirB, "2021", "12", "25")
+	entries, err := os.ReadDir(dayDir)
+	if err != nil {
+		t.Fatalf("ReadDir %q: %v — custom template directory not created", dayDir, err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected 1 file in day dir, got %d", len(entries))
+	}
+	name := entries[0].Name()
+	if !strings.HasPrefix(name, "20211225_062223-") {
+		t.Errorf("filename %q does not start with expected date prefix", name)
+	}
+
+	// The default structure (2021/12-Dec/) must NOT exist.
+	defaultMonthDir := filepath.Join(dirB, "2021", "12-Dec")
+	if _, err := os.Stat(defaultMonthDir); err == nil {
+		t.Errorf("default month directory %q should not exist with custom template", defaultMonthDir)
+	}
+}
+
 func TestRenderCopyright(t *testing.T) {
 	cases := []struct {
 		tmpl string

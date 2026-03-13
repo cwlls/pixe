@@ -70,6 +70,9 @@ type SortOptions struct {
 	// ColorOutput, when true, enables ANSI color codes in status verb output.
 	// Automatically set by the CLI layer based on TTY detection and NO_COLOR.
 	ColorOutput bool
+	// PathTemplate controls the directory structure for destination paths.
+	// When nil, the default template ("{year}/{month}-{monthname}") is used.
+	PathTemplate *pathbuilder.Template
 }
 
 // emit sends an event to the bus if one is configured. It is a no-op when
@@ -545,7 +548,7 @@ func processFile(
 
 	// --- Build destination path ---
 	ext := filepath.Ext(df.Path)
-	relDest := pathbuilder.Build(captureDate, opts.Hasher.AlgorithmID(), checksum, ext, isDuplicate, opts.RunTimestamp)
+	relDest := pathbuilder.Build(opts.PathTemplate, captureDate, opts.Hasher.AlgorithmID(), checksum, ext, isDuplicate, opts.RunTimestamp)
 	absDest := filepath.Join(dirB, relDest)
 
 	if cfg.DryRun {
@@ -698,7 +701,7 @@ func processFile(
 			if existingDest != "" {
 				// Race detected: another process completed this checksum first.
 				// Relocate our copy to the duplicates directory.
-				dupRelDest := pathbuilder.Build(captureDate, opts.Hasher.AlgorithmID(), checksum, ext, true, opts.RunTimestamp)
+				dupRelDest := pathbuilder.Build(opts.PathTemplate, captureDate, opts.Hasher.AlgorithmID(), checksum, ext, true, opts.RunTimestamp)
 				dupAbsDest := filepath.Join(dirB, dupRelDest)
 				if renErr := os.Rename(absDest, dupAbsDest); renErr != nil {
 					// Rename failed — file is still at absDest; mark as failed.

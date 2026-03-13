@@ -9,10 +9,17 @@ This document tracks planned features and improvements for Pixe. Items are group
 
 ---
 
-## B. Pipeline & Core Engine
+## Completed Features
 
-### B4 — Configurable Destination Path Templates 🟡
-Replace the hardcoded `YYYY/MM-Mon/YYYYMMDD_HHMMSS_CHECKSUM.ext` structure with a user-defined template (e.g., `--path-template "{{.Year}}/{{.Month}}-{{.MonthName}}/{{.Filename}}"`). Requires careful design to preserve determinism guarantees.
+### ✅ B4 — Configurable Destination Path Templates
+User-defined path templates via `--path-template` flag. Token-based syntax with `{year}`, `{month}`, `{monthname}`, `{day}`, `{hour}`, `{minute}`, `{second}`, `{ext}`. Default template `{year}/{month}-{monthname}` preserves pre-template behavior. Fully validated at startup.
+
+### ✅ E6 — Destination Aliases
+`pixe sort --dest @nas` resolves `@`-prefixed aliases to filesystem paths configured in `.pixe.yaml` under `aliases`. Supports tilde expansion and source-local alias augmentation.
+
+---
+
+## B. Pipeline & Core Engine
 
 ---
 
@@ -31,9 +38,6 @@ Emit newline-delimited JSON to stdout instead of the human-readable COPY/SKIP/DU
 ---
 
 ## E. Configuration & Workflow
-
-### E6 — Destination Aliases 🟢
-`pixe sort --dest @nas` resolves to a path configured in `.pixe.yaml` under `aliases`. Saves typing long or environment-specific paths on every invocation.
 
 ---
 

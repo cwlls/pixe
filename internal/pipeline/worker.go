@@ -347,7 +347,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			}
 
 			skipCopy := isDuplicate && opts.Config.SkipDuplicates
-			relDest := pathbuilder.Build(wr.date, opts.Hasher.AlgorithmID(), wr.checksum, wr.ext, isDuplicate, opts.RunTimestamp)
+			relDest := pathbuilder.Build(opts.PathTemplate, wr.date, opts.Hasher.AlgorithmID(), wr.checksum, wr.ext, isDuplicate, opts.RunTimestamp)
 			absDest := filepath.Join(dirB, relDest)
 
 			// When no DB is available, record the assignment in memSeen immediately
@@ -451,7 +451,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						}
 						if existingDest != "" {
 							// Race detected — relocate physical file to duplicates/.
-							dupRelDest := pathbuilder.Build(fr.verifiedAt, opts.Hasher.AlgorithmID(), fr.checksum,
+							dupRelDest := pathbuilder.Build(opts.PathTemplate, fr.verifiedAt, opts.Hasher.AlgorithmID(), fr.checksum,
 								filepath.Ext(fr.df.Path), true, opts.RunTimestamp)
 							dupAbsDest := filepath.Join(dirB, dupRelDest)
 							absDest := filepath.Join(dirB, fr.relDest)

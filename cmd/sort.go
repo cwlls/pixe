@@ -95,6 +95,23 @@ func runSort(cmd *cobra.Command, args []string) error {
 	}
 
 	// ------------------------------------------------------------------
+	// 1d. Resolve destination alias (@name → filesystem path).
+	// ------------------------------------------------------------------
+	resolvedDest, err := resolveAlias(cfg.Destination, cfg.Aliases)
+	if err != nil {
+		return err
+	}
+	cfg.Destination = resolvedDest
+
+	// ------------------------------------------------------------------
+	// 1e. Parse and validate the path template.
+	// ------------------------------------------------------------------
+	tmpl, err := pathbuilder.ParseTemplate(cfg.PathTemplate)
+	if err != nil {
+		return err
+	}
+
+	// ------------------------------------------------------------------
 	// 2. Validate inputs.
 	// ------------------------------------------------------------------
 	if cfg.Destination == "" {
@@ -152,6 +169,7 @@ func runSort(cmd *cobra.Command, args []string) error {
 		Hasher:       h,
 		Registry:     reg,
 		RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
+		PathTemplate: tmpl,
 		Output:       os.Stdout,
 		PixeVersion:  Version(),
 		DB:           db,
@@ -218,6 +236,7 @@ func init() {
 	sortCmd.Flags().Bool("progress", false, "show a live progress bar instead of per-file text output (requires a TTY)")
 	sortCmd.Flags().String("since", "", `only process files with capture date on or after this date (format: YYYY-MM-DD)`)
 	sortCmd.Flags().String("before", "", `only process files with capture date on or before this date (format: YYYY-MM-DD)`)
+	sortCmd.Flags().String("path-template", "", `token-based template for destination directory structure (default: "{year}/{month}-{monthname}")`)
 
 	// Mark required flags (--source defaults to cwd; --dest has no default).
 	_ = sortCmd.MarkFlagRequired("dest")
@@ -237,4 +256,5 @@ func init() {
 	_ = viper.BindPFlag("progress", sortCmd.Flags().Lookup("progress"))
 	_ = viper.BindPFlag("since", sortCmd.Flags().Lookup("since"))
 	_ = viper.BindPFlag("before", sortCmd.Flags().Lookup("before"))
+	_ = viper.BindPFlag("path_template", sortCmd.Flags().Lookup("path-template"))
 }

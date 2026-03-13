@@ -361,15 +361,15 @@ func TestIntegration_FullSort(t *testing.T) {
 	}
 
 	// File with EXIF date 2021-12-25 must land under 2021/12-Dec/.
-	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223-")
 	if len(files2021) != 1 {
-		t.Errorf("expected 1 file in 2021/12-Dec/ with prefix 20211225_062223_, got %d", len(files2021))
+		t.Errorf("expected 1 file in 2021/12-Dec/ with prefix 20211225_062223-, got %d", len(files2021))
 	}
 
 	// File with no EXIF must land under 1902/2/ (or duplicates/.../1902/2/).
-	noExifFiles := findFiles(t, dirB, "19020220_000000_")
+	noExifFiles := findFiles(t, dirB, "19020220_000000-")
 	if len(noExifFiles) == 0 {
-		t.Error("expected at least 1 file with Ansel Adams prefix 19020220_000000_")
+		t.Error("expected at least 1 file with Ansel Adams prefix 19020220_000000-")
 	}
 }
 
@@ -445,9 +445,9 @@ func TestIntegration_NoDateFallback(t *testing.T) {
 	}
 
 	// Walk all of dirB looking for the Ansel Adams prefix.
-	files := findFiles(t, dirB, "19020220_000000_")
+	files := findFiles(t, dirB, "19020220_000000-")
 	if len(files) == 0 {
-		t.Error("no file with Ansel Adams prefix 19020220_000000_ found in dirB")
+		t.Error("no file with Ansel Adams prefix 19020220_000000- found in dirB")
 	}
 
 	// The path must contain "1902" and "02-Feb" directory components.
@@ -475,9 +475,8 @@ func TestIntegration_NoDateFallback(t *testing.T) {
 
 // TestIntegration_SecondRunDeduplicates verifies that running the pipeline
 // twice against the same source/dest produces consistent results.
-// The 3 fixture files all share the same image payload checksum (EXIF is
-// stripped before hashing), so only the first file processed is "original"
-// and the remaining 2 are always duplicates — on both runs.
+// The 3 fixture files have different checksums, so all 3 are processed as
+// originals on both runs (no duplicates detected without a database).
 func TestIntegration_SecondRunDeduplicates(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
@@ -486,7 +485,7 @@ func TestIntegration_SecondRunDeduplicates(t *testing.T) {
 	copyFixture(t, dirA, fixtureExif2, "IMG_0002.jpg")
 	copyFixture(t, dirA, fixtureNoExif, "IMG_0003.jpg")
 
-	// First run — all 3 files processed; 2 are duplicates (same image payload).
+	// First run — all 3 files processed; no duplicates (different checksums).
 	result1, err := pipeline.Run(buildOpts(t, dirA, dirB, false))
 	if err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -497,8 +496,8 @@ func TestIntegration_SecondRunDeduplicates(t *testing.T) {
 	if result1.Errors != 0 {
 		t.Fatalf("first run: Errors = %d, want 0", result1.Errors)
 	}
-	if result1.Duplicates != 2 {
-		t.Errorf("first run: Duplicates = %d, want 2", result1.Duplicates)
+	if result1.Duplicates != 0 {
+		t.Errorf("first run: Duplicates = %d, want 0", result1.Duplicates)
 	}
 
 	// Second run — same source files, same dedup behaviour (no DB, so in-memory dedup).
@@ -512,8 +511,8 @@ func TestIntegration_SecondRunDeduplicates(t *testing.T) {
 	if result2.Processed != 3 {
 		t.Errorf("second run: Processed = %d, want 3", result2.Processed)
 	}
-	if result2.Duplicates != 2 {
-		t.Errorf("second run: Duplicates = %d, want 2", result2.Duplicates)
+	if result2.Duplicates != 0 {
+		t.Errorf("second run: Duplicates = %d, want 0", result2.Duplicates)
 	}
 }
 
@@ -629,7 +628,7 @@ func TestIntegration_RAW_Discovery(t *testing.T) {
 	// Verify each file was discovered and output files exist with correct extensions
 	extensions := []string{".dng", ".nef", ".cr2", ".cr3", ".pef", ".arw"}
 	for _, ext := range extensions {
-		files := findFiles(t, dirB, "19020220_000000_")
+		files := findFiles(t, dirB, "19020220_000000-")
 		found := false
 		for _, f := range files {
 			if strings.HasSuffix(f, ext) {
@@ -667,13 +666,13 @@ func TestIntegration_RAW_FullSort(t *testing.T) {
 	}
 
 	// Verify JPEG lands in 2021/12-Dec/
-	jpegFiles := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	jpegFiles := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223-")
 	if len(jpegFiles) != 1 {
 		t.Errorf("expected 1 JPEG file in 2021/12-Dec/, got %d", len(jpegFiles))
 	}
 
 	// Verify RAW files land in 1902/02-Feb/ with lowercase extensions
-	rawFiles := findFiles(t, dirB, "19020220_000000_")
+	rawFiles := findFiles(t, dirB, "19020220_000000-")
 	if len(rawFiles) < 2 {
 		t.Errorf("expected at least 2 RAW files with Ansel Adams prefix, got %d", len(rawFiles))
 	}
@@ -739,13 +738,13 @@ func TestIntegration_RAW_MixedWithJPEG(t *testing.T) {
 	}
 
 	// Verify JPEG file is in 2021/12-Dec/
-	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	files2021 := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223-")
 	if len(files2021) != 1 {
 		t.Errorf("expected 1 file in 2021/12-Dec/, got %d", len(files2021))
 	}
 
 	// Verify RAW files are in 1902/02-Feb/
-	rawFiles := findFiles(t, dirB, "19020220_000000_")
+	rawFiles := findFiles(t, dirB, "19020220_000000-")
 	if len(rawFiles) < 2 {
 		t.Errorf("expected at least 2 RAW files with Ansel Adams prefix, got %d", len(rawFiles))
 	}
@@ -878,10 +877,10 @@ func TestIntegration_SQLite_FullSort(t *testing.T) {
 		}
 	}
 
-	// Verify ledger has version 4 and run_id.
+	// Verify ledger has version 5 and run_id.
 	ledger := loadLedger(t, dirA)
-	if ledger.Header.Version != 4 {
-		t.Errorf("ledger Version = %d, want 4", ledger.Header.Version)
+	if ledger.Header.Version != 5 {
+		t.Errorf("ledger Version = %d, want 5", ledger.Header.Version)
 	}
 	if ledger.Header.RunID != opts.RunID {
 		t.Errorf("ledger RunID = %q, want %q", ledger.Header.RunID, opts.RunID)
@@ -1172,7 +1171,7 @@ func TestSort_tempFileCleanupOnResume(t *testing.T) {
 	}
 
 	// Find the canonical file that was created.
-	canonicalFiles := findFiles(t, dirB, "20211225_062223_")
+	canonicalFiles := findFiles(t, dirB, "20211225_062223-")
 	if len(canonicalFiles) != 1 {
 		t.Fatalf("expected 1 canonical file after first run, got %d", len(canonicalFiles))
 	}
@@ -1301,9 +1300,9 @@ func TestIntegration_UppercaseExtension(t *testing.T) {
 	}
 
 	// The destination file must exist under the expected date directory.
-	files := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	files := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223-")
 	if len(files) != 1 {
-		t.Fatalf("expected 1 file in 2021/12-Dec/ with prefix 20211225_062223_, got %d", len(files))
+		t.Fatalf("expected 1 file in 2021/12-Dec/ with prefix 20211225_062223-, got %d", len(files))
 	}
 
 	// The destination extension must be lowercase ".jpg" — never ".JPG".

@@ -489,7 +489,7 @@ func TestPNG_Discovery(t *testing.T) {
 	}
 
 	// PNG with no EXIF → Ansel Adams date → 1902/02-Feb/.
-	pngFiles := findFiles(t, dirB, "19020220_000000_")
+	pngFiles := findFiles(t, dirB, "19020220_000000-")
 	found := false
 	for _, f := range pngFiles {
 		if strings.HasSuffix(f, ".png") {
@@ -527,7 +527,7 @@ func TestPNG_ExtensionPreserved(t *testing.T) {
 	}
 
 	// Destination must have lowercase .png extension.
-	pngFiles := findFiles(t, dirB, "19020220_000000_")
+	pngFiles := findFiles(t, dirB, "19020220_000000-")
 	for _, f := range pngFiles {
 		if strings.HasSuffix(f, ".PNG") {
 			t.Errorf("destination has uppercase .PNG extension: %q", f)
@@ -571,7 +571,7 @@ func TestPNG_MixedWithJPEG(t *testing.T) {
 	}
 
 	// PNG must land in 1902/02-Feb/ with .png extension.
-	pngFiles := findFiles(t, dirB, "19020220_000000_")
+	pngFiles := findFiles(t, dirB, "19020220_000000-")
 	foundPNG := false
 	for _, f := range pngFiles {
 		if strings.HasSuffix(f, ".png") {
@@ -614,7 +614,7 @@ func TestORF_Discovery(t *testing.T) {
 	}
 
 	// ORF with no EXIF → Ansel Adams date.
-	orfFiles := findFiles(t, dirB, "19020220_000000_")
+	orfFiles := findFiles(t, dirB, "19020220_000000-")
 	found := false
 	for _, f := range orfFiles {
 		if strings.HasSuffix(f, ".orf") {
@@ -655,7 +655,7 @@ func TestRW2_Discovery(t *testing.T) {
 	}
 
 	// RW2 with no EXIF → Ansel Adams date.
-	rw2Files := findFiles(t, dirB, "19020220_000000_")
+	rw2Files := findFiles(t, dirB, "19020220_000000-")
 	found := false
 	for _, f := range rw2Files {
 		if strings.HasSuffix(f, ".rw2") {
@@ -706,7 +706,7 @@ func TestORF_RW2_MixedBatch(t *testing.T) {
 	}
 
 	// PNG, ORF, RW2 must all land in 1902/02-Feb/ with correct extensions.
-	anselFiles := findFiles(t, dirB, "19020220_000000_")
+	anselFiles := findFiles(t, dirB, "19020220_000000-")
 	extsSeen := map[string]bool{}
 	for _, f := range anselFiles {
 		extsSeen[filepath.Ext(f)] = true

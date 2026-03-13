@@ -58,7 +58,7 @@ func BenchmarkPathBuilder(b *testing.B) {
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_ = pathbuilder.Build(tc.date, 1, benchChecksum, ".jpg", false, "")
+				_ = pathbuilder.Build(nil, tc.date, 1, benchChecksum, ".jpg", false, "")
 			}
 		})
 	}
@@ -76,7 +76,7 @@ func BenchmarkPathBuilderAllAlgorithms(b *testing.B) {
 		id, name := id, name
 		b.Run(name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_ = pathbuilder.Build(date, id, benchChecksum, ".jpg", false, "")
+				_ = pathbuilder.Build(nil, date, id, benchChecksum, ".jpg", false, "")
 			}
 		})
 	}

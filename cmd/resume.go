@@ -130,12 +130,23 @@ func runResume(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	// 7. Build config and pipeline options, then run.
 	// ------------------------------------------------------------------
+	// Parse the path template (use default if not configured).
+	pathTemplateStr := viper.GetString("path_template")
+	if pathTemplateStr == "" {
+		pathTemplateStr = pathbuilder.DefaultTemplate
+	}
+	tmpl, err := pathbuilder.ParseTemplate(pathTemplateStr)
+	if err != nil {
+		return err
+	}
+
 	cfg := &config.AppConfig{
-		Source:      run.Source,
-		Destination: dir,
-		Workers:     workers,
-		Algorithm:   run.Algorithm,
-		DBPath:      dbPath,
+		Source:       run.Source,
+		Destination:  dir,
+		Workers:      workers,
+		Algorithm:    run.Algorithm,
+		DBPath:       dbPath,
+		PathTemplate: pathTemplateStr,
 	}
 
 	// Generate a fresh RunID for this resume attempt. The pipeline will
@@ -148,6 +159,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		Hasher:       h,
 		Registry:     reg,
 		RunTimestamp: pathbuilder.RunTimestamp(time.Now()),
+		PathTemplate: tmpl,
 		Output:       os.Stdout,
 		PixeVersion:  Version(),
 		DB:           db,

@@ -15,16 +15,19 @@
 // Package pathbuilder constructs deterministic output paths for sorted media
 // files using the Pixe naming convention:
 //
-//	<YYYY>/<MM>-<Mon>/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+//	<dir-template>/YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>
+//
+// The directory structure is controlled by a Template (see template.go).
+// The default template "{year}/{month}-{monthname}" produces:
+//
+//	<YYYY>/<MM>-<Mon>/YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>
 //
 // Duplicate files are routed under a timestamped subdirectory:
 //
-//	duplicates/<runTimestamp>/<YYYY>/<MM>-<Mon>/YYYYMMDD_HHMMSS_<CHECKSUM>.<ext>
+//	duplicates/<runTimestamp>/<dir-template>/YYYYMMDD_HHMMSS-<ALGO_ID>-<CHECKSUM>.<ext>
 //
-// The month directory is a zero-padded two-digit number, a hyphen, and the
-// locale-aware three-letter title-cased month abbreviation (e.g. "03-Mar").
-// The abbreviation is derived from the user's system locale. The file
-// extension is always lowercased.
+// The month directory abbreviation is locale-aware. The file extension is
+// always lowercased.
 package pathbuilder
 
 import (
@@ -37,14 +40,24 @@ import (
 	"golang.org/x/text/language"
 )
 
+// defaultTmpl is the package-level default template, initialised once.
+// It is used when Build is called with a nil template.
+var defaultTmpl *Template
+
+func init() {
+	systemLocale = detectSystemLocale()
+	var err error
+	defaultTmpl, err = ParseTemplate(DefaultTemplate)
+	if err != nil {
+		// DefaultTemplate is a compile-time constant — this must never fail.
+		panic("pathbuilder: failed to parse DefaultTemplate: " + err.Error())
+	}
+}
+
 const duplicatesDir = "duplicates"
 
 // systemLocale is the resolved locale tag, detected once at package init.
 var systemLocale language.Tag
-
-func init() {
-	systemLocale = detectSystemLocale()
-}
 
 // detectSystemLocale reads LANGUAGE, LC_ALL, LC_TIME, or LANG from the
 // environment and parses the first valid BCP 47 / POSIX locale tag.
@@ -122,6 +135,9 @@ func MonthDir(month time.Month) string {
 // Build returns the relative output path for a media file.
 //
 // Parameters:
+//   - tmpl:         directory structure template. Pass nil to use the default
+//     template ("{year}/{month}-{monthname}"), which reproduces the pre-template
+//     hardcoded structure.
 //   - date:         capture date/time extracted from the file's metadata.
 //   - algoID:       numeric algorithm ID (see ARCHITECTURE.md Section 4.5.1).
 //     0=md5, 1=sha1, 2=sha256, 3=blake3, 4=xxhash.
@@ -132,25 +148,28 @@ func MonthDir(month time.Month) string {
 //   - runTimestamp: the sort run's start time formatted as "YYYYMMDD_HHMMSS",
 //     used only when isDuplicate is true.
 //
-// Example outputs:
+// Example outputs (default template):
 //
-//	Build(t, 1, sha, ".jpg", false, "") → "2021/12-Dec/20211225_062223-1-<sha>.jpg"
-//	Build(t, 1, sha, ".JPG", true, "20260306_103000") → "duplicates/20260306_103000/2021/12-Dec/20211225_062223-1-<sha>.jpg"
-func Build(date time.Time, algoID int, checksum string, ext string, isDuplicate bool, runTimestamp string) string {
-	ext = strings.ToLower(ext)
+//	Build(nil, t, 1, sha, ".jpg", false, "") → "2021/12-Dec/20211225_062223-1-<sha>.jpg"
+//	Build(nil, t, 1, sha, ".JPG", true, "20260306_103000") → "duplicates/20260306_103000/2021/12-Dec/20211225_062223-1-<sha>.jpg"
+func Build(tmpl *Template, date time.Time, algoID int, checksum string, ext string, isDuplicate bool, runTimestamp string) string {
+	if tmpl == nil {
+		tmpl = defaultTmpl
+	}
 
-	// Locale-aware month directory per spec (Section 4.3).
-	year := date.Year()
+	ext = strings.ToLower(ext)
+	extNoDot := strings.TrimPrefix(ext, ".")
 
 	// Format: YYYYMMDD_HHMMSS-<algoID>-<checksum>.<ext>
 	// Underscores belong to the datetime portion; hyphens delimit the integrity segment.
 	filename := fmt.Sprintf("%04d%02d%02d_%02d%02d%02d-%d-%s%s",
-		year, int(date.Month()), date.Day(),
+		date.Year(), int(date.Month()), date.Day(),
 		date.Hour(), date.Minute(), date.Second(),
 		algoID, checksum, ext,
 	)
 
-	relPath := filepath.Join(fmt.Sprintf("%d", year), MonthDir(date.Month()), filename)
+	dirPath := tmpl.Expand(date, extNoDot)
+	relPath := filepath.Join(dirPath, filename)
 
 	if isDuplicate {
 		relPath = filepath.Join(duplicatesDir, runTimestamp, relPath)

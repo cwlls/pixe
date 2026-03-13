@@ -148,7 +148,7 @@ func TestSort_directoryIgnore(t *testing.T) {
 	}
 
 	// Exactly 1 JPEG in dirB — photo.jpg with EXIF date 2021-12-25.
-	jpegFiles := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223_")
+	jpegFiles := findFiles(t, filepath.Join(dirB, "2021", "12-Dec"), "20211225_062223-")
 	if len(jpegFiles) != 1 {
 		t.Errorf("expected 1 JPEG in 2021/12-Dec/, got %d", len(jpegFiles))
 	}

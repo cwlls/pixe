@@ -48,8 +48,8 @@ func TestBuild_prop_deterministic(t *testing.T) {
 			ext = "." + ext
 		}
 
-		result1 := Build(captureDate, aid, checksum, ext, false, "")
-		result2 := Build(captureDate, aid, checksum, ext, false, "")
+		result1 := Build(nil, captureDate, aid, checksum, ext, false, "")
+		result2 := Build(nil, captureDate, aid, checksum, ext, false, "")
 
 		return result1 == result2
 	}
@@ -82,7 +82,7 @@ func TestBuild_prop_validPathCharacters(t *testing.T) {
 		checksum := hexChecksums[int(checksumIdx)%len(hexChecksums)]
 
 		captureDate := time.Date(y, mo, d, 12, 0, 0, 0, time.UTC)
-		result := Build(captureDate, aid, checksum, ".jpg", false, "")
+		result := Build(nil, captureDate, aid, checksum, ".jpg", false, "")
 
 		for _, c := range invalidChars {
 			if strings.ContainsRune(result, c) {
@@ -110,7 +110,7 @@ func TestBuild_prop_correctStructure(t *testing.T) {
 		aid := int(algoID % 5)
 
 		captureDate := time.Date(y, mo, d, h, mi, s, 0, time.UTC)
-		result := Build(captureDate, aid, "abcdef1234567890", ".jpg", false, "")
+		result := Build(nil, captureDate, aid, "abcdef1234567890", ".jpg", false, "")
 
 		// Must have exactly 2 path separators (YYYY/MM-Mon/filename).
 		parts := strings.Split(filepath.ToSlash(result), "/")
@@ -153,7 +153,7 @@ func TestBuild_prop_extensionPreserved(t *testing.T) {
 		d := int(day%28 + 1)
 
 		captureDate := time.Date(y, mo, d, 12, 0, 0, 0, time.UTC)
-		result := Build(captureDate, 1, "abcdef1234567890", ext, false, "")
+		result := Build(nil, captureDate, 1, "abcdef1234567890", ext, false, "")
 
 		return strings.HasSuffix(result, ext)
 	}
@@ -175,7 +175,7 @@ func TestBuild_prop_dateEncoding(t *testing.T) {
 		s := int(sec % 60)
 
 		captureDate := time.Date(y, mo, d, h, mi, s, 0, time.UTC)
-		result := Build(captureDate, 1, "abcdef1234567890", ".jpg", false, "")
+		result := Build(nil, captureDate, 1, "abcdef1234567890", ".jpg", false, "")
 
 		// Extract the YYYYMMDD_HHMMSS prefix from the filename.
 		parts := strings.Split(filepath.ToSlash(result), "/")
@@ -204,7 +204,7 @@ func TestBuild_prop_algorithmIDPresent(t *testing.T) {
 		aid := int(algoID % 5)
 		y := int(year)%300 + 1900
 		captureDate := time.Date(y, time.June, 15, 12, 0, 0, 0, time.UTC)
-		result := Build(captureDate, aid, "abcdef1234567890", ".jpg", false, "")
+		result := Build(nil, captureDate, aid, "abcdef1234567890", ".jpg", false, "")
 
 		parts := strings.Split(filepath.ToSlash(result), "/")
 		if len(parts) < 1 {
