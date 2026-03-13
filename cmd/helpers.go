@@ -40,6 +40,7 @@ import (
 	orfhandler "github.com/cwlls/pixe-go/internal/handler/orf"
 	pefhandler "github.com/cwlls/pixe-go/internal/handler/pef"
 	pnghandler "github.com/cwlls/pixe-go/internal/handler/png"
+	rafhandler "github.com/cwlls/pixe-go/internal/handler/raf"
 	rw2handler "github.com/cwlls/pixe-go/internal/handler/rw2"
 	tiffhandler "github.com/cwlls/pixe-go/internal/handler/tiff"
 	"github.com/cwlls/pixe-go/internal/migrate"
@@ -125,6 +126,7 @@ func buildRegistry() *discovery.Registry {
 	reg.Register(pefhandler.New())
 	reg.Register(arwhandler.New())
 	reg.Register(orfhandler.New())
+	reg.Register(rafhandler.New())
 	reg.Register(rw2handler.New())
 	reg.Register(tiffhandler.New())
 	return reg

@@ -167,6 +167,7 @@ The progress bar is powered by a pipeline event bus (`internal/progress/`) — a
 | ORF     | .orf         | XMP sidecar   |
 | PEF     | .pef         | XMP sidecar   |
 | PNG     | .png         | XMP sidecar   |
+| RAF     | .raf         | XMP sidecar   |
 | RW2     | .rw2         | XMP sidecar   |
 | TIFF    | .tif, .tiff  | XMP sidecar   |
 <!-- pixe:end:format-table -->

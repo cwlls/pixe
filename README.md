@@ -372,6 +372,7 @@ Environment variables prefixed with `PIXE_` also override config file values (e.
 | ORF     | .orf         | XMP sidecar   |
 | PEF     | .pef         | XMP sidecar   |
 | PNG     | .png         | XMP sidecar   |
+| RAF     | .raf         | XMP sidecar   |
 | RW2     | .rw2         | XMP sidecar   |
 | TIFF    | .tif, .tiff  | XMP sidecar   |
 <!-- pixe:end:format-table -->

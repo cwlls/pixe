@@ -87,6 +87,8 @@ This page is generated from the Go package doc comments in the source tree. Each
 
 **`internal/handler/png`** — Package png implements the FileTypeHandler contract for PNG images.
 
+**`internal/handler/raf`** — Package raf provides a FileTypeHandler for Fujifilm's RAF raw image format.
+
 **`internal/handler/rw2`** — Package rw2 implements the FileTypeHandler contract for Panasonic RW2 RAW images.
 
 **`internal/handler/tiff`** — Package tiff implements the FileTypeHandler contract for standalone TIFF images.
