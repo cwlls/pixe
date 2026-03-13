@@ -357,11 +357,72 @@ Implementation: `internal/cli/` — `ProgressModel` struct.
 
 ## 11. Documentation Site (`docs/`)
 
-Jekyll-based static site deployed to GitHub Pages from `docs/`. Multi-page site with custom local theme preserving the original visual identity: dark background, warm amber accent, monospace brand typography.
+Jekyll-based static site deployed to GitHub Pages from `docs/`. Uses the **GitHub Pages Slate theme** (`jekyll-theme-slate`) — a stock remote theme with no local overrides.
 
-**Pages:** `index.md` (landing), `install.md`, `commands.md`, `how-it-works.md`, `technical.md`, `contributing.md`, `adding-formats.md`, `changelog.md`, `ai.md`, `packages.md` (generated).
+### 11.1 Content Principles
 
-**Theme:** SCSS partials in `_sass/` with design tokens extracted from the original single-page site. Layouts: `default.html`, `landing.html`, `page.html`. Navigation via `_data/navigation.yml`.
+- **Strict markdown.** All `.md` files in `docs/` are written in standard GitHub-Flavored Markdown. No custom CSS classes, no `<div>` layouts, no inline styles, no `onclick` handlers.
+- **HTML is the exception, not the rule.** An occasional HTML tag (e.g., an anchor with `target="_blank"`) is acceptable when markdown has no equivalent. HTML blocks for layout, styling, or interactivity are not.
+- **No custom theme assets.** No `_sass/`, `_layouts/`, `_includes/`, or `assets/css/` directories. The Slate theme provides all styling. The site should work with zero local theme overrides.
+- **No custom JavaScript.** No `<script>` tags, no accordion toggles, no interactive elements. Content is static markdown rendered by the theme.
+
+### 11.2 Theme Configuration
+
+The site uses the `jekyll-theme-slate` remote theme via the `github-pages` gem. Configuration in `_config.yml`:
+
+- `theme: jekyll-theme-slate` — stock Slate theme, no `remote_theme` needed when using the `github-pages` gem.
+- `plugins: [jekyll-remote-theme]` — not required when using `theme:` with a GitHub Pages supported theme.
+- No `_layouts/`, `_includes/`, or `_sass/` directories — all provided by the theme.
+
+### 11.3 Navigation
+
+Slate provides a sidebar-style layout. Navigation between pages uses a markdown list or table at the top of `index.md` (the landing page) linking to all other pages. Individual pages link back to the index and to logically adjacent pages via standard markdown links. No `_data/navigation.yml` — navigation is inline markdown.
+
+### 11.4 Pages
+
+| Page | Content |
+|---|---|
+| `index.md` | Landing page: project description, key guarantees, quick-start commands, navigation links to all other pages |
+| `install.md` | Installation methods (go install, build from source) and first-run examples |
+| `commands.md` | Full command reference with flag tables (markdown tables) and examples (fenced code blocks) |
+| `how-it-works.md` | Pipeline stages, output format, naming convention, duplicate handling, sidecar carry, supported formats |
+| `technical.md` | Design rationale: read-only source, copy-then-verify, determinism, no external deps, crash safety |
+| `adding-formats.md` | Developer guide for implementing `FileTypeHandler` with code examples |
+| `contributing.md` | Contribution workflow: issue-first, clone/build, test, conventions, PR |
+| `changelog.md` | Version history |
+| `packages.md` | Generated package reference (docgen output) |
+| `ai.md` | AI collaboration transparency statement |
+
+### 11.5 Content Migration
+
+The migration from the custom theme to Slate has been completed:
+
+1. **Deleted** all custom theme directories: `_sass/`, `_layouts/`, `_includes/`, `assets/`, `_data/`, `_site/`, `.jekyll-cache/`.
+2. **Updated** `_config.yml` to use `theme: jekyll-theme-slate` and removed `sass:` configuration.
+3. **Updated** `Gemfile` to use `github-pages` gem (which bundles `jekyll-theme-slate`).
+4. **Rewrote** every `.md` file to strict markdown:
+   - Replaced all HTML `<table>` blocks with markdown tables.
+   - Replaced all `<div class="...">` layout blocks with markdown equivalents (headings, lists, blockquotes).
+   - Replaced all `<pre>` terminal-styled blocks with fenced code blocks.
+   - Replaced `<span class="term-...">` styled output with plain text in code blocks.
+   - Removed all `layout:` and `section_label:` front matter keys (Slate uses `default` layout automatically). Kept `title:` only.
+   - Converted the `index.md` landing page from full-HTML sections to a markdown document with headings, paragraphs, and code blocks.
+   - Converted the `commands.md` accordion pattern to flat markdown sections (one `###` per command, markdown flag tables, fenced code examples).
+   - Converted `contributing.md` numbered steps from styled `<div>` blocks to a markdown ordered list.
+   - Converted `ai.md` from a styled `<div class="ai-card">` to plain markdown paragraphs.
+5. **Removed** `Gemfile.lock` and regenerated after Gemfile update.
+
+### 11.6 Files to Delete
+
+The following files and directories are artifacts of the custom theme and must be removed:
+
+- `docs/_sass/` (entire directory — 11 SCSS partials)
+- `docs/_layouts/` (entire directory — `default.html`, `landing.html`, `page.html`)
+- `docs/_includes/` (entire directory — `head.html`, `nav.html`, `footer.html`, `hero.html`, `pipeline.html`, `format-grid.html`)
+- `docs/assets/` (entire directory — `css/main.scss`)
+- `docs/_data/` (entire directory — `navigation.yml`)
+- `docs/_site/` (build output, should be gitignored)
+- `docs/.jekyll-cache/` (build cache, should be gitignored)
 
 ---
 
@@ -369,10 +430,12 @@ Jekyll-based static site deployed to GitHub Pages from `docs/`. Multi-page site 
 
 `internal/docgen/` — a development-time Go tool (`go run ./internal/docgen`) that extracts code-sourced facts from the Go AST and injects them into documentation files via marker-based replacement.
 
-- **Marker syntax:** `<!-- pixe:begin:section-name -->` / `<!-- pixe:end:section-name -->` — content between markers is replaced.
+- **Marker syntax:** `<!-- pixe:begin:section-name -->` / `<!-- pixe:end:section-name -->` — content between markers is replaced. The markers themselves are HTML comments, which is an acceptable use of HTML in the markdown files (they are invisible in rendered output).
+- **Output format:** All generated content is **markdown** — markdown tables, markdown lists, fenced code blocks. No HTML tables or HTML layout in generated output.
 - **Extraction targets:** Version string (git tag), `FileTypeHandler` interface, CLI flags (Cobra registrations), supported format table, package reference (godoc comments), query subcommands.
 - **Page classification:** Hand-authored (no markers), Hybrid (narrative + injected facts), Generated (`packages.md`).
 - **Makefile:** `make docs` (regenerate), `make docs-check` (CI staleness gate).
+- **Docgen output:** The `docgen` tool emits markdown tables for all documentation targets. All generated content is markdown-only — no HTML tables or HTML layout.
 
 ---
 
