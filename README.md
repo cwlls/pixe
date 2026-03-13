@@ -1,3 +1,4 @@
+[![CI](https://github.com/cwlls/pixe/actions/workflows/ci.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/ci.yml)[![Release](https://github.com/cwlls/pixe/actions/workflows/release.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/release.yml)
 # Pixe
 
 A safe, deterministic photo and video sorting utility.
