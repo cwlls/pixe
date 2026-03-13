@@ -174,11 +174,18 @@ func (lw *LedgerWriter) WriteEntry(entry domain.LedgerEntry) error {
 	return lw.enc.Encode(entry)
 }
 
-// Close flushes and closes the underlying file.
+// Close syncs and closes the underlying file.
+// Sync is called before Close to ensure all buffered writes are flushed to
+// stable storage — without it a power failure between the last WriteEntry
+// and process exit could lose recent ledger entries.
 // If lw is nil the call is a no-op and returns nil.
 func (lw *LedgerWriter) Close() error {
 	if lw == nil {
 		return nil
+	}
+	if err := lw.f.Sync(); err != nil {
+		_ = lw.f.Close()
+		return fmt.Errorf("manifest: sync ledger: %w", err)
 	}
 	return lw.f.Close()
 }
@@ -205,13 +212,15 @@ func NewSafeLedgerWriter(lw *LedgerWriter, out io.Writer) *SafeLedgerWriter {
 
 // WriteEntry delegates to the underlying LedgerWriter. On the first error,
 // a warning is printed to out. Subsequent errors are silently absorbed.
+// The full operation is serialized under mu so concurrent callers cannot
+// interleave writes into the underlying json.Encoder.
 func (sw *SafeLedgerWriter) WriteEntry(entry domain.LedgerEntry) {
 	if sw == nil || sw.lw == nil {
 		return
 	}
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	if err := sw.lw.WriteEntry(entry); err != nil {
-		sw.mu.Lock()
-		defer sw.mu.Unlock()
 		if !sw.failed {
 			sw.failed = true
 			_, _ = fmt.Fprintf(sw.out,
@@ -222,10 +231,13 @@ func (sw *SafeLedgerWriter) WriteEntry(entry domain.LedgerEntry) {
 
 // Close flushes and closes the underlying LedgerWriter.
 // If sw is nil the call is a no-op and returns nil.
+// mu is held to prevent a race between a final WriteEntry and Close.
 func (sw *SafeLedgerWriter) Close() error {
 	if sw == nil || sw.lw == nil {
 		return nil
 	}
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
 	return sw.lw.Close()
 }
 
