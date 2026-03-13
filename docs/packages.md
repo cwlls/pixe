@@ -68,11 +68,9 @@ This page is generated from the Go package doc comments in the source tree. Each
 
 ### User Interface
 
-**`internal/progress`** — Package progress provides the pipeline event bus — a structured, typed channel that decouples the sort and verify pipelines from their output presentation. The pipeline emits Event values; consumers (CLI progress bars, the interactive TUI, or the plain-text writer) subscribe and render events in their own way.
+**`internal/progress`** — Package progress provides the pipeline event bus — a structured, typed channel that decouples the sort and verify pipelines from their output presentation. The pipeline emits Event values; consumers (the CLI progress bar in internal/cli, or the plain-text writer) subscribe and render events in their own way.
 
 **`internal/cli`** — Package cli provides the Bubble Tea progress bar model used by the `pixe sort --progress` and `pixe verify --progress` commands.
-
-**`internal/tui`** — Package tui implements the interactive terminal UI for `pixe gui`.
 
 ### Other
 

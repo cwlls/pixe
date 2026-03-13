@@ -43,7 +43,7 @@ title: Pixe — Safe, Deterministic Photo Sorting
        <div class="problem-card">
          <div class="problem-q">Can I see what's happening in real time?</div>
          <span class="tag-ok">Yes</span>
-         <p class="problem-a">Use <code>pixe gui</code> for a full interactive TUI with live progress bars, activity logs, and per-worker status. Or add <code>--progress</code> to any sort or verify command for a lightweight progress bar.</p>
+          <p class="problem-a">Add <code>--progress</code> to any sort or verify command for a live progress bar with ETA, status counters, and current file display.</p>
        </div>
      </div>
   </div>
@@ -81,8 +81,7 @@ title: Pixe — Safe, Deterministic Photo Sorting
 
     <div class="pre-label">Sort your photos</div>
     <pre><span class="term-prompt">$</span> <span class="term-cmd">pixe sort --dest ~/Archive</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --source ~/Photos --dest ~/Archive --recursive</span>
-<span class="term-prompt">$</span> <span class="term-cmd">pixe gui --dest ~/Archive</span></pre>
+<span class="term-prompt">$</span> <span class="term-cmd">pixe sort --source ~/Photos --dest ~/Archive --recursive</span></pre>
 
     <div class="pre-label">Example output</div>
     <pre><span class="term-copy">COPY</span> IMG_0001.jpg -&gt; 2021/12-Dec/20211225_062223_abc123ef.jpg

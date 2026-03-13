@@ -627,7 +627,6 @@ var packageCategories = []struct {
 		Packages: []string{
 			"internal/progress",
 			"internal/cli",
-			"internal/tui",
 		},
 	},
 }

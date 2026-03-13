@@ -14,13 +14,13 @@
 
 // Package progress provides the pipeline event bus — a structured, typed
 // channel that decouples the sort and verify pipelines from their output
-// presentation. The pipeline emits Event values; consumers (CLI progress
-// bars, the interactive TUI, or the plain-text writer) subscribe and render
-// events in their own way.
+// presentation. The pipeline emits Event values; consumers (the CLI progress
+// bar in internal/cli, or the plain-text writer) subscribe and render events
+// in their own way.
 //
 // This package has zero external dependencies — it is pure Go stdlib.
-// Charm/Bubble Tea dependencies are confined to the internal/cli and
-// internal/tui packages that consume events.
+// Charm/Bubble Tea dependencies are confined to the internal/cli package
+// that consumes events for the --progress bar.
 package progress
 
 import "time"

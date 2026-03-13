@@ -110,7 +110,7 @@ func resolveConfig() (*config.AppConfig, error) {
 }
 
 // buildRegistry creates and populates a discovery.Registry with all
-// supported file type handlers. Used by sort, verify, status, and gui.
+// supported file type handlers. Used by sort, verify, and status.
 func buildRegistry() *discovery.Registry {
 	reg := discovery.NewRegistry()
 	reg.Register(jpeghandler.New())

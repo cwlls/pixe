@@ -137,15 +137,11 @@ The database uses WAL mode for concurrent-process safety. Multiple `pixe sort` p
 
 ---
 
-### Live progress and interactive UI
+### Live progress
 
-Pixe provides two ways to observe pipeline progress in real time:
+Add `--progress` to `pixe sort` or `pixe verify` to replace per-file text output with a live progress bar. Shows a gradient bar, file count, ETA, current file, and status counters. Only activates when stdout is a TTY; plain text is the default.
 
-**`--progress` flag** — Add `--progress` to `pixe sort` or `pixe verify` to replace per-file text output with a live progress bar. Shows a gradient bar, file count, ETA, current file, and status counters. Only activates when stdout is a TTY; plain text is the default.
-
-**`pixe gui`** — The interactive terminal UI. Three tabs: Sort (configure, run, review), Verify (configure, run, review), and Status (source directory classification). The Sort and Verify tabs show a live progress bar, scrollable activity log, and per-worker status pane. The Status tab classifies files into the same five categories as `pixe status` without requiring a separate command.
-
-Both are powered by a pipeline event bus (`internal/progress/`) — a pure stdlib, non-blocking channel that the sort and verify pipelines emit structured events into. The plain-text output and the event bus are always active simultaneously; the `--progress` flag and `pixe gui` simply consume events instead of printing text.
+The progress bar is powered by a pipeline event bus (`internal/progress/`) — a pure stdlib, non-blocking channel that the sort and verify pipelines emit structured events into. The plain-text output and the event bus are always active simultaneously; `--progress` simply consumes events instead of printing text.
 
 ---
 
