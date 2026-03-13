@@ -101,6 +101,15 @@ Every discovered file produces exactly one stdout line:
 | `DUPE` | Content duplicate of an already-archived file |
 | `ERR` | Processing failed at some pipeline stage |
 
+**Sidecar annotations:** When a file has associated sidecar files (`.xmp`, `.aae`) that were carried alongside it, this is indicated with an **inline annotation** on the parent file's output line rather than a separate sub-line. Format: `[+xmp]`, `[+aae]`, or `[+xmp +aae]` if multiple sidecars are present. This keeps the output compact — one line per file, always.
+
+```
+COPY IMG_0001.jpg -> ...Photos/2021/12-Dec/20211225_062223-1-abc123.jpg [+xmp]
+COPY DSC_5678.nef -> ...Photos/2022/03-Mar/20220316_232122-1-321c7d6f.nef [+xmp +aae]
+```
+
+This replaces the previous `+sidecar` sub-line pattern. The inline annotation is used consistently across sort output, the `PlainWriter` event consumer, and verify output (see §7.6).
+
 **Destination path display:** The destination side of sort output includes an **ellipsis prefix with the `--dest` directory's basename**, making it immediately clear which archive the file was sorted into without printing the full absolute path. Format: `...<basename>/<template-path>/<filename>`.
 
 Example: if `--dest /Volumes/NAS/Photos`, the output reads:
@@ -109,7 +118,16 @@ Example: if `--dest /Volumes/NAS/Photos`, the output reads:
 COPY IMG_0001.jpg -> ...Photos/2021/12-Dec/20211225_062223-1-abc123.jpg
 ```
 
-This applies to all output paths in sort (`COPY`, `DUPE`, `DRY-RUN`, `+sidecar`), the `PlainWriter` event consumer, and the `status` command's SORTED section (which displays the destination recorded in the ledger). The ellipsis prefix communicates that the path is relative to a known destination root, not the current working directory.
+This applies to all output paths in sort (`COPY`, `DUPE`, `DRY-RUN`), the `PlainWriter` event consumer, and the `status` command's SORTED section (which displays the destination recorded in the ledger). The ellipsis prefix communicates that the path is relative to a known destination root, not the current working directory.
+
+**Sort summary:** At the end of a sort, a two-line summary is printed:
+
+```
+Done. processed=4 duplicates=0 skipped=0 errors=0
+(1m 23s)
+```
+
+The elapsed time is computed from the pipeline's `startedAt` timestamp. The duration is also sent via the event bus (`RunSummary.Duration`) for the progress bar UI. See §4.13 for how duration is displayed in other contexts.
 
 All outcomes are also streamed to the JSONL ledger and recorded in the database. Colorized output is applied when stdout is a TTY (respects `NO_COLOR`). Suppressed in `--quiet` mode.
 
@@ -245,16 +263,71 @@ Enabled by default (`--no-carry-sidecars` to disable). During discovery, `.aae` 
 
 Implementation: `internal/discovery/sidecar.go` — `associateSidecars()`.
 
-### 4.12 Additional Features
+### 4.12 Ledger Write Failure — User Prompt
+
+When the pipeline attempts to create the JSONL ledger in `dirA` and fails (e.g., read-only filesystem, permission denied), the user is prompted before processing begins. This is the **only interactive prompt** in the codebase.
+
+**Prompt behavior:**
+
+```
+Warning: cannot create ledger in /path/to/dirA: permission denied
+Without a ledger, this source directory will have no record of which files were sorted.
+Continue without ledger? [y/N]
+```
+
+The prompt is brief — one line stating what happened, one line stating the consequence, one line with the choice. Default is **No** (cancel). Cancellation exits with **exit code 0** and a "Cancelled." message — it is not an error.
+
+**Non-interactive overrides:**
+
+| Flag | Behavior |
+|---|---|
+| `--yes` / `-y` | Auto-accept: continue without the ledger (no prompt shown) |
+| `--no-ledger` | Explicitly acknowledge running without a ledger (no prompt shown, no warning) |
+
+Both flags suppress the interactive prompt. The difference: `--yes` is a general "answer yes to prompts" flag (available for future prompts), while `--no-ledger` is a specific declaration of intent. Either flag results in `slw` staying `nil` and the sort proceeding without a ledger — identical to the current behavior when the warning was silently absorbed.
+
+**Stdin detection:** When stdin is not a TTY (piped input, cron, CI), the prompt cannot be shown. In this case, the behavior matches `--yes` — a warning is printed and the sort continues. This ensures non-interactive usage is never blocked by a prompt. The `--no-ledger` flag is the recommended way to suppress the warning in scripts.
+
+**Scope:** The prompt is implemented in `internal/pipeline/` (where the ledger is opened). The `SortOptions` struct gains `Yes bool` and `NoLedger bool` fields, populated by `cmd/sort.go` from the CLI flags. The prompt reads from `os.Stdin` and writes to `opts.Output`. No new dependencies — `bufio.NewReader(os.Stdin)` is sufficient.
+
+**Database is unaffected.** The archive database in `dirB` is separate from the ledger in `dirA`. A ledger failure does not affect DB recording. The prompt is specifically about the source-side JSONL ledger.
+
+### 4.13 Run Duration Tracking
+
+Sort run elapsed time is tracked and displayed across all contexts where run information appears.
+
+**Storage:** Duration is **computed on the fly** from `started_at` and `finished_at` in the `runs` table — no additional column. When `finished_at` is NULL (interrupted runs), duration is not displayed (or displayed as "—").
+
+**Display locations:**
+
+| Context | Format | Example |
+|---|---|---|
+| Sort summary (plain text) | Second line in parentheses | `(1m 23s)` |
+| Sort summary (event bus) | `RunSummary.Duration` field | `time.Duration` |
+| `query run <id>` header | `Duration:` key/value line (after `Finished:`) | `Duration:    1m 23s` |
+| `query runs` table | `DURATION` column | `1m 23s` |
+| `query run --json` | `"duration_seconds"` field (numeric) | `83.0` |
+| `query runs --json` | `"duration_seconds"` per run | `83.0` |
+
+**Formatting rules:**
+- Sub-second: `0.8s`
+- Seconds: `23s`
+- Minutes: `1m 23s`
+- Hours: `1h 5m 12s`
+- Interrupted/in-progress runs: `—` (em-dash) in table output, `null` in JSON output.
+
+**Implementation:** A shared `formatDuration(started, finished *time.Time) string` helper in `cmd/query_format.go` handles the computation and formatting. The `archivedb.Run` struct already has `StartedAt time.Time` and `FinishedAt *time.Time` — no struct changes needed.
+
+### 4.14 Additional Features
 
 - **Date filters:** `--since` and `--before` flags filter by capture date. Skipped files recorded with `skip_reason = 'outside date range'`.
 - **Config auto-discovery:** Source-local `.pixe.yaml` merged with global config. Priority: CLI flags > source-local > profile > global > env > defaults.
 - **Config profiles:** `--profile <name>` loads from `~/.pixe/profiles/<name>.yaml`.
 - **Verbosity:** `--quiet` (suppresses per-file output), `--verbose` (adds timing info). Mutually exclusive.
 - **`pixe stats`:** Archive dashboard showing totals, format breakdown, date range. Supports `--json`.
-- **Destination aliases:** See §4.13.
+- **Destination aliases:** See §4.15.
 
-### 4.13 Destination Aliases
+### 4.15 Destination Aliases
 
 `pixe sort --dest @nas` resolves the `@`-prefixed alias to a filesystem path configured in `.pixe.yaml` under the `aliases` map. This saves typing long or environment-specific paths on every invocation.
 
@@ -292,7 +365,7 @@ aliases:
 > - **Full-file hashing.** All handlers hash the complete file contents. Verification is a simple full-file re-hash — no format-specific scoping.
 > - **Database-backed resumability.** Per-file state tracked across runs.
 > - **Streaming JSONL ledger.** Partial but valid on interruption.
-> - **No silent outcomes.** Every file produces stdout output and a ledger entry.
+> - **No silent outcomes.** Every file produces stdout output and a ledger entry. Ledger write failures prompt the user before processing begins (see §4.12).
 > - **Concurrent-run safety.** SQLite WAL mode + busy-retry.
 
 > [!IMPORTANT]
@@ -430,13 +503,27 @@ Key flags are defined in each command's source file under `cmd/`. See `cmd/helpe
 
 ### 7.2 Configuration File
 
-`.pixe.yaml` supports: `dest`, `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list), `path_template` (string, see §4.5.1), `aliases` (map of name→path, see §4.13).
+`.pixe.yaml` supports: `dest`, `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list), `path_template` (string, see §4.5.1), `aliases` (map of name→path, see §4.15).
 
 **Required-flag validation:** Commands that require `--dest` (sort, verify, resume, clean, query, stats) must **not** use Cobra's `MarkFlagRequired`. Cobra's required-flag check runs before Viper config merging, so a `dest` value in `.pixe.yaml` is rejected because the CLI flag was not explicitly provided. Instead, these commands validate the resolved value after `resolveConfig()` (or equivalent Viper reads) and return a clear error if the value is empty. This allows `dest:` in the config file, `PIXE_DEST` env var, or source-local `.pixe.yaml` to satisfy the requirement without a CLI flag.
 
 ### 7.3 Query Command
 
 `pixe query` opens the DB in read-only mode. Supports `--json` for structured output. All subcommands produce fixed-width columnar tables (default) or JSON. Run IDs support prefix matching. See `cmd/query_*.go` for subcommand implementations.
+
+**Truncation with ellipsis:** In table display mode, checksums and run IDs are truncated to the first 8 characters for readability. Truncated values display a trailing ellipsis (`…`) to visually indicate the value is not complete:
+
+```
+RUN ID       VERSION   SOURCE              STARTED               STATUS     FILES
+a1b2c3d4…    0.10.0    /path/to/source     2026-03-12 14:30:00   completed  42
+
+SOURCE FILE              STATUS     DESTINATION                          CHECKSUM     CAPTURE DATE
+IMG_0001.jpg             complete   2021/12-Dec/20211225_062223-1-...    7d97e98f…    2021-12-25
+```
+
+Full (untruncated) values are always available in `--json` output. The `truncChecksum()` and `truncID()` helpers both append `…` when the value exceeds 8 characters.
+
+**Run duration in query output:** The `query run <id>` header block includes a `Duration:` line (computed from `started_at` and `finished_at`). The `query runs` table includes a `DURATION` column. See §4.13 for formatting rules.
 
 ### 7.4 Status Command
 
@@ -445,6 +532,27 @@ Operates entirely from `dirA` — compares files on disk against `.pixe_ledger.j
 ### 7.5 Clean Command
 
 Combines orphaned artifact removal (`.pixe-tmp` files, orphaned XMP sidecars) and database compaction (`VACUUM`). Supports `--dry-run`, `--temp-only`, `--vacuum-only` (mutually exclusive). Guards against vacuuming during active sort runs.
+
+### 7.6 Verify Sidecar Awareness
+
+The verify command walks `dirB` and re-hashes media files to confirm integrity. Sidecar files (`.xmp`, `.aae`) are **not** unknown files — they are expected artifacts of the sort process and should not be reported as `UNRECOGNISED`.
+
+**Behavior:**
+
+1. **Skip sidecar files during walk.** When the verify walker encounters a file with a `.xmp` or `.aae` extension, it does not attempt to parse a checksum from the filename, does not hash it, and does not count it as unrecognised. Sidecar files are silently collected during the walk.
+2. **Associate sidecars with parent files.** After (or during) the walk, sidecar files are matched to their parent media files by filename stem. For example, `20211225_062223-1-abc123.arw.xmp` is associated with `20211225_062223-1-abc123.arw`.
+3. **Inline annotation on parent.** When a verified file has associated sidecars, the verify output includes an inline annotation — the same `[+xmp]` / `[+aae]` format used by sort (see §4.3):
+
+```
+  OK          20211225_062223-1-abc123.arw [+xmp]
+  OK          20211225_062223-1-abc123.jpg [+xmp +aae]
+  MISMATCH    20220202_123101-1-447d3060.jpg [+xmp]
+```
+
+4. **Orphaned sidecars.** A sidecar file with no matching parent media file in the same directory is reported as `UNRECOGNISED` — it genuinely is unexpected. This handles cases where a media file was manually deleted but its sidecar was left behind.
+5. **Verify summary.** The summary line remains `verified=X mismatches=Y unrecognised=Z`. Sidecar files that are successfully associated with parents do not increment any counter. Orphaned sidecars increment `unrecognised`.
+
+**Implementation:** The sidecar extension check is a simple set lookup (`".xmp"`, `".aae"`). No handler registry involvement — sidecars are identified purely by extension. The association logic mirrors `internal/discovery/sidecar.go` but operates on destination filenames (which follow the Pixe naming convention).
 
 ---
 
@@ -462,7 +570,7 @@ Priority: `--db-path` flag → `dirB/.pixe/dbpath` marker → `dirB/.pixe/pixe.d
 
 Two primary tables: `runs` and `files`. See `internal/archivedb/` for the full schema.
 
-- **`runs`:** `id` (UUID), `pixe_version`, `source`, `destination`, `algorithm`, `workers`, `recursive`, `started_at`, `finished_at`, `status` (running/completed/interrupted).
+- **`runs`:** `id` (UUID), `pixe_version`, `source`, `destination`, `algorithm`, `workers`, `recursive`, `started_at`, `finished_at`, `status` (running/completed/interrupted). Duration is computed on the fly from `started_at` and `finished_at` — no dedicated column (see §4.13).
 - **`files`:** `run_id` (FK), `source_path`, `dest_path`, `dest_rel`, `checksum`, `algorithm`, `status` (12 valid states), `skip_reason`, `is_duplicate`, `capture_date`, `file_size`, timestamps per stage, `error`, `carried_sidecars` (JSON array).
 - **Indexes** on `checksum` (where complete), `run_id`, `status`, `source_path`, `capture_date`.
 - **Schema versioning** via `schema_version` table. Migrations are additive (`ALTER TABLE ADD COLUMN`).
@@ -476,6 +584,8 @@ WAL mode, busy timeout (5s), per-file transaction commits. Cross-process dedup r
 Streaming JSONL format. Line 1 is a header (run metadata), subsequent lines are per-file entries. Written by the coordinator goroutine. Truncated at start of each run. Partial but valid on interruption.
 
 Current version: `5`. Fields: `path`, `status` (copy/skip/duplicate/error), `checksum`, `destination`, `verified_at`, `sidecars`, `matches`, `reason`.
+
+**Write failure handling:** If the ledger cannot be created (permission denied, read-only filesystem, etc.), the user is prompted before processing begins. See §4.12 for the full prompt design, `--yes`, and `--no-ledger` flags.
 
 ### 8.6 Migration
 
