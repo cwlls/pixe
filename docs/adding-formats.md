@@ -126,7 +126,7 @@ import (
     "io"
     "time"
 
-    "github.com/cwlls/pixe-go/internal/domain"
+    "github.com/cwlls/pixe/internal/domain"
 )
 
 // Handler processes WebP image files.
@@ -231,7 +231,7 @@ If your format is TIFF-based (DNG, NEF, CR2, PEF, ARW all are), embed `tiffraw.B
 ```go
 package myfmt
 
-import "github.com/cwlls/pixe-go/internal/handler/tiffraw"
+import "github.com/cwlls/pixe/internal/handler/tiffraw"
 
 type Handler struct{ tiffraw.Base }
 

@@ -1,4 +1,4 @@
-# AGENTS.md — Pixe-Go
+# AGENTS.md — pixe
 
 ## Build & Run
 
@@ -78,9 +78,9 @@ import (
     "github.com/spf13/cobra"
     "github.com/spf13/viper"
 
-    "github.com/cwlls/pixe-go/internal/archivedb"
-    copypkg "github.com/cwlls/pixe-go/internal/copy"    // named: avoids collision with builtin
-    jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"  // named: handler packages share type names
+    "github.com/cwlls/pixe/internal/archivedb"
+    copypkg "github.com/cwlls/pixe/internal/copy"    // named: avoids collision with builtin
+    jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"  // named: handler packages share type names
 )
 ```
 

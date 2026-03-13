@@ -20,7 +20,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // MergeTags reads the existing XMP sidecar at sidecarPath, injects the

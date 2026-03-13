@@ -24,14 +24,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	copypkg "github.com/cwlls/pixe-go/internal/copy"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/manifest"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/progress"
-	"github.com/cwlls/pixe-go/internal/tagging"
+	"github.com/cwlls/pixe/internal/archivedb"
+	copypkg "github.com/cwlls/pixe/internal/copy"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/manifest"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/progress"
+	"github.com/cwlls/pixe/internal/tagging"
 )
 
 // syncWriter wraps an io.Writer with a mutex so multiple goroutines can

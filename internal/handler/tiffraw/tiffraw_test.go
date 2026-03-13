@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/domain" // for MetadataTags
+	"github.com/cwlls/pixe/internal/domain" // for MetadataTags
 )
 
 // TestBase_MetadataSupport verifies that tiffraw.Base declares MetadataSidecar.

@@ -31,8 +31,8 @@ import (
 
 	rwexif "github.com/rwcarlsen/goexif/exif"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/fileutil"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/fileutil"
 )
 
 // pngMagic is the 8-byte PNG file signature.

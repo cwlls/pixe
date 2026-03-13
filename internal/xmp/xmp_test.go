@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // --- SidecarPath tests ---

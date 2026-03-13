@@ -472,7 +472,7 @@
 ## [v0.9.5] - 2026-03-07
 
 - **Refactor**:
-  - Renamed the module to `github.com/cwlls/pixe-go` for better clarity and consistency.
+  - Renamed the module to `github.com/cwlls/pixe` for better clarity and consistency.
 
 - **Documentation**:
   - Added a project README to document the project's purpose and setup.

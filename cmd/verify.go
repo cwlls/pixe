@@ -24,10 +24,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/cli"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/progress"
-	"github.com/cwlls/pixe-go/internal/verify"
+	"github.com/cwlls/pixe/internal/cli"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/progress"
+	"github.com/cwlls/pixe/internal/verify"
 )
 
 // verifyCmd is the "pixe verify" subcommand.

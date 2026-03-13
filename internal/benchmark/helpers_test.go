@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
+	"github.com/cwlls/pixe/internal/archivedb"
 )
 
 // generateFixture creates a deterministic byte slice of the given size.

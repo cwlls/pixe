@@ -22,7 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
+	"github.com/cwlls/pixe/internal/archivedb"
 )
 
 // queryRunCmd is the "pixe query run <id>" subcommand.

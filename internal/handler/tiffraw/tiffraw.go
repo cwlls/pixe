@@ -48,7 +48,7 @@ import (
 
 	rwexif "github.com/rwcarlsen/goexif/exif"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // anselsAdams is the fallback date when no EXIF date can be extracted.

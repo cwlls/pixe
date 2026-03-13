@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // minimalXMP is a bare-bones XMP sidecar with an empty rdf:Description.

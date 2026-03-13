@@ -47,10 +47,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsoprea/go-heic-exif-extractor"
+	heicexif "github.com/dsoprea/go-heic-exif-extractor"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/fileutil"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/fileutil"
 )
 
 // Compile-time interface check.

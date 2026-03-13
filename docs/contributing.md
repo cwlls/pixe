@@ -13,8 +13,8 @@ New file format support is particularly straightforward: each format is an isola
 2. **Clone and build:**
 
    ```bash
-   $ git clone https://github.com/cwlls/pixe-go.git
-   $ cd pixe-go && make build
+   $ git clone https://github.com/cwlls/pixe.git
+   $ cd pixe && make build
    ```
 
 3. **Run the test suite** before and after your changes:
@@ -29,4 +29,4 @@ New file format support is particularly straightforward: each format is an isola
 
 5. **Submit a pull request** on GitHub. CI runs formatting checks, vet, lint, and the full test suite on every PR.
 
-→ [Open an issue on GitHub](https://github.com/cwlls/pixe-go/issues){:target="_blank" rel="noopener"}
+→ [Open an issue on GitHub](https://github.com/cwlls/pixe/issues){:target="_blank" rel="noopener"}

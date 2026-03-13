@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	copypkg "github.com/cwlls/pixe-go/internal/copy"
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/hash"
+	copypkg "github.com/cwlls/pixe/internal/copy"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/hash"
 )
 
 // fullFileHandler is a minimal FileTypeHandler that returns the full file

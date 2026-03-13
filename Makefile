@@ -1,6 +1,6 @@
 # ============================================================
-# Makefile — pixe-go
-# module: github.com/cwlls/pixe-go
+# Makefile — pixe
+# module: github.com/cwlls/pixe
 # ============================================================
 # Build logic (ldflags, target platforms, archive formats) is defined
 # exclusively in .goreleaser.yaml. The Makefile delegates all binary

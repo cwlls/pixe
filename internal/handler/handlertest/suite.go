@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // readFakeFileBytes builds a fake file and reads its bytes. Used to generate

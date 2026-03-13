@@ -30,8 +30,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/fileutil"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/fileutil"
 )
 
 const magicReadSize = 16 // bytes — enough for all supported format signatures

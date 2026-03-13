@@ -31,17 +31,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	"github.com/cwlls/pixe-go/internal/config"
-	copypkg "github.com/cwlls/pixe-go/internal/copy"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/ignore"
-	"github.com/cwlls/pixe-go/internal/manifest"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/progress"
-	"github.com/cwlls/pixe-go/internal/tagging"
+	"github.com/cwlls/pixe/internal/archivedb"
+	"github.com/cwlls/pixe/internal/config"
+	copypkg "github.com/cwlls/pixe/internal/copy"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/ignore"
+	"github.com/cwlls/pixe/internal/manifest"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/progress"
+	"github.com/cwlls/pixe/internal/tagging"
 )
 
 // SortOptions holds the resolved runtime options for a sort run.

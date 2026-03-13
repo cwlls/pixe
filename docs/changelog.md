@@ -142,7 +142,7 @@ title: Changelog
 
 ## [v0.9.5] — 2026-03-07
 
-- Renamed module to `github.com/cwlls/pixe-go`.
+- Renamed module to `github.com/cwlls/pixe`.
 
 ## [v0.9.0–v0.9.4] — 2026-03-06/07
 
@@ -150,4 +150,4 @@ title: Changelog
 
 ---
 
-> All changes are tracked in the git history. For detailed commit logs, see the [full git log](https://github.com/cwlls/pixe-go/commits/main){:target="_blank" rel="noopener"}.
+> All changes are tracked in the git history. For detailed commit logs, see the [full git log](https://github.com/cwlls/pixe/commits/main){:target="_blank" rel="noopener"}.

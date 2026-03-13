@@ -31,9 +31,9 @@ import (
 //
 // ldflags targets:
 //
-//	-X github.com/cwlls/pixe-go/cmd.version={{.Version}}
-//	-X github.com/cwlls/pixe-go/cmd.commit={{.Commit}}
-//	-X github.com/cwlls/pixe-go/cmd.buildDate={{.Date}}
+//	-X github.com/cwlls/pixe/cmd.version={{.Version}}
+//	-X github.com/cwlls/pixe/cmd.commit={{.Commit}}
+//	-X github.com/cwlls/pixe/cmd.buildDate={{.Date}}
 var (
 	version   = "dev"
 	commit    = "unknown"

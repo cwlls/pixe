@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 const (

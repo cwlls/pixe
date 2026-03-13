@@ -36,7 +36,7 @@ structure with embedded integrity checksums.
 Source files are never modified. Every copy is verified before being
 considered complete. Interrupted runs can always be resumed.
 
-Documentation: https://github.com/cwlls/pixe-go`,
+Documentation: https://github.com/cwlls/pixe`,
 }
 
 // Execute is the entry point called from main.go.

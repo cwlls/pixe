@@ -21,7 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
+	"github.com/cwlls/pixe/internal/archivedb"
 )
 
 // queryFilesCmd is the "pixe query files" subcommand.

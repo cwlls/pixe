@@ -23,14 +23,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
-	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe/internal/config"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/domain"
+	arwhandler "github.com/cwlls/pixe/internal/handler/arw"
+	jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/pipeline"
 )
 
 const (

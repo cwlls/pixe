@@ -1,4 +1,4 @@
-module github.com/cwlls/pixe-go
+module github.com/cwlls/pixe
 
 go 1.25.0
 

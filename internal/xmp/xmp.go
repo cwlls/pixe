@@ -33,7 +33,7 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // xmpTemplate is the XMP packet template. It conditionally includes

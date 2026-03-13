@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/pathbuilder"
 )
 
 const benchChecksum = "7d97e98f8af710c7e7fe703abc8f639e0ee507c4"

@@ -38,8 +38,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/hash"
 )
 
 const copyBufSize = 32 * 1024 // 32 KB

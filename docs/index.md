@@ -9,7 +9,7 @@ Safe, deterministic photo and video sorting.
 
 Your originals are never touched. Every copy is verified before it counts. Interrupted runs resume exactly where they left off.
 
-[Get started →](install.md) · [View on GitHub](https://github.com/cwlls/pixe-go){:target="_blank" rel="noopener"}
+[Get started →](install.md) · [View on GitHub](https://github.com/cwlls/pixe){:target="_blank" rel="noopener"}
 
 ---
 
@@ -79,7 +79,7 @@ discover → extract → hash → copy → verify → tag → complete
 Install (requires Go 1.21+):
 
 ```bash
-go install github.com/cwlls/pixe-go@latest
+go install github.com/cwlls/pixe@latest
 ```
 
 Sort your photos:

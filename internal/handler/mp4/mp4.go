@@ -47,8 +47,8 @@ import (
 
 	mp4lib "github.com/abema/go-mp4"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/fileutil"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/fileutil"
 )
 
 // Compile-time interface check.

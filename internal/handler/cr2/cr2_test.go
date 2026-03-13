@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/handler/handlertest"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/handler/handlertest"
 )
 
 // Compile-time interface check.

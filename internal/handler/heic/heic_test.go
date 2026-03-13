@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/domain"
+	"github.com/cwlls/pixe/internal/domain"
 )
 
 // buildFakeHEIC creates a minimal file with the ISOBMFF ftyp box signature

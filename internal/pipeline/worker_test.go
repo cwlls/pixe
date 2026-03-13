@@ -20,11 +20,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/manifest"
+	"github.com/cwlls/pixe/internal/config"
+	"github.com/cwlls/pixe/internal/discovery"
+	jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/manifest"
 )
 
 // copyFixtureN copies the named JPEG fixture into dir with a unique name.

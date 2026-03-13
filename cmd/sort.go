@@ -29,11 +29,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/cli"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/pipeline"
-	"github.com/cwlls/pixe-go/internal/progress"
+	"github.com/cwlls/pixe/internal/cli"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/pipeline"
+	"github.com/cwlls/pixe/internal/progress"
 )
 
 // sortCmd is the "pixe sort" subcommand.

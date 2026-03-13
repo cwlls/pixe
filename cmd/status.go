@@ -26,10 +26,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/ignore"
-	"github.com/cwlls/pixe-go/internal/manifest"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/ignore"
+	"github.com/cwlls/pixe/internal/manifest"
 )
 
 // statusFile holds the classification result for a single file.

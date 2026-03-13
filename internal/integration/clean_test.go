@@ -23,9 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	arwhandler "github.com/cwlls/pixe-go/internal/handler/arw"
-	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe/internal/archivedb"
+	arwhandler "github.com/cwlls/pixe/internal/handler/arw"
+	"github.com/cwlls/pixe/internal/pipeline"
 )
 
 // pixeXMPPattern matches Pixe-generated XMP sidecar filenames — duplicated

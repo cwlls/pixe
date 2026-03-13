@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/ignore"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/ignore"
 )
 
 // DiscoveredFile pairs a source path with its resolved FileTypeHandler.

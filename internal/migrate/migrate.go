@@ -30,9 +30,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/manifest"
+	"github.com/cwlls/pixe/internal/archivedb"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/manifest"
 )
 
 const (

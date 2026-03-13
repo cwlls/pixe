@@ -24,15 +24,15 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/manifest"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/tagging"
+	"github.com/cwlls/pixe/internal/archivedb"
+	"github.com/cwlls/pixe/internal/config"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/domain"
+	jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/manifest"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/tagging"
 )
 
 // TestMain pins the locale to English so that month directory assertions are

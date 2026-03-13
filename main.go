@@ -15,7 +15,7 @@
 // Pixe sorts photographs and raw files into a date-based archive structure.
 package main
 
-import "github.com/cwlls/pixe-go/cmd"
+import "github.com/cwlls/pixe/cmd"
 
 func main() {
 	cmd.Execute()

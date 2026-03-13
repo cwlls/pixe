@@ -20,12 +20,12 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/domain"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	"github.com/cwlls/pixe-go/internal/ignore"
-	"github.com/cwlls/pixe-go/internal/manifest"
-	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/domain"
+	jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"
+	"github.com/cwlls/pixe/internal/ignore"
+	"github.com/cwlls/pixe/internal/manifest"
+	"github.com/cwlls/pixe/internal/pipeline"
 )
 
 // classifySource runs the pixe status classification logic against dirA and

@@ -26,12 +26,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/dblocator"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe/internal/archivedb"
+	"github.com/cwlls/pixe/internal/config"
+	"github.com/cwlls/pixe/internal/dblocator"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/pipeline"
 )
 
 // resumeCmd is the "pixe resume" subcommand.

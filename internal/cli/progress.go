@@ -22,7 +22,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 
-	pixeprogress "github.com/cwlls/pixe-go/internal/progress"
+	pixeprogress "github.com/cwlls/pixe/internal/progress"
 )
 
 // eventMsg wraps a progress.Event for delivery to the Bubble Tea model.

@@ -40,8 +40,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/xmp"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/xmp"
 )
 
 // RenderCopyright substitutes {{.Year}} in tmplStr with the 4-digit capture

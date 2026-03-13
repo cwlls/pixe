@@ -9,14 +9,14 @@ title: Installation
 The fastest way to install Pixe. Requires Go 1.21 or later.
 
 ```bash
-go install github.com/cwlls/pixe-go@latest
+go install github.com/cwlls/pixe@latest
 ```
 
 ## Build from source
 
 ```bash
-git clone https://github.com/cwlls/pixe-go.git
-cd pixe-go
+git clone https://github.com/cwlls/pixe.git
+cd pixe
 make build
 ```
 

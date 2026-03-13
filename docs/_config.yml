@@ -2,7 +2,7 @@ theme: jekyll-theme-slate
 title: Pixe
 description: Safe, deterministic photo and video sorting
 url: "https://cwlls.github.io"
-baseurl: "/pixe-go"
+baseurl: "/pixe"
 # <!-- pixe:begin:version -->
 version: "v2.6.1"
 # <!-- pixe:end:version -->

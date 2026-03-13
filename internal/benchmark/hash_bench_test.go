@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/cwlls/pixe-go/internal/hash"
+	"github.com/cwlls/pixe/internal/hash"
 )
 
 // BenchmarkHash measures hashing throughput for all supported algorithms

@@ -24,7 +24,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
+	"github.com/cwlls/pixe/internal/archivedb"
 )
 
 // ---------------------------------------------------------------------------

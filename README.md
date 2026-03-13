@@ -85,14 +85,14 @@ Use the `--skip-duplicates` flag to skip copying duplicate files entirely instea
 ### Install Latest Release
 
 ```bash
-go install github.com/cwlls/pixe-go@latest
+go install github.com/cwlls/pixe@latest
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/cwlls/pixe-go.git
-cd pixe-go
+git clone https://github.com/cwlls/pixe.git
+cd pixe
 make build
 ```
 
@@ -405,4 +405,4 @@ This project is under active development. Implementation progress is tracked in 
 
 ---
 
-Documentation: https://github.com/cwlls/pixe-go
+Documentation: https://github.com/cwlls/pixe

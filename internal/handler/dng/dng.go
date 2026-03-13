@@ -33,9 +33,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cwlls/pixe-go/internal/domain"
-	"github.com/cwlls/pixe-go/internal/fileutil"
-	"github.com/cwlls/pixe-go/internal/handler/tiffraw"
+	"github.com/cwlls/pixe/internal/domain"
+	"github.com/cwlls/pixe/internal/fileutil"
+	"github.com/cwlls/pixe/internal/handler/tiffraw"
 )
 
 // Compile-time interface check.

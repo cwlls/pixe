@@ -22,12 +22,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe/internal/config"
+	"github.com/cwlls/pixe/internal/discovery"
+	jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/pipeline"
 )
 
 // buildIgnoreOpts constructs a SortOptions with the given ignore patterns and

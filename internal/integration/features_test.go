@@ -30,15 +30,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cwlls/pixe-go/internal/config"
-	"github.com/cwlls/pixe-go/internal/discovery"
-	jpeghandler "github.com/cwlls/pixe-go/internal/handler/jpeg"
-	orfhandler "github.com/cwlls/pixe-go/internal/handler/orf"
-	pnghandler "github.com/cwlls/pixe-go/internal/handler/png"
-	rw2handler "github.com/cwlls/pixe-go/internal/handler/rw2"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/pathbuilder"
-	"github.com/cwlls/pixe-go/internal/pipeline"
+	"github.com/cwlls/pixe/internal/config"
+	"github.com/cwlls/pixe/internal/discovery"
+	jpeghandler "github.com/cwlls/pixe/internal/handler/jpeg"
+	orfhandler "github.com/cwlls/pixe/internal/handler/orf"
+	pnghandler "github.com/cwlls/pixe/internal/handler/png"
+	rw2handler "github.com/cwlls/pixe/internal/handler/rw2"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/pathbuilder"
+	"github.com/cwlls/pixe/internal/pipeline"
 )
 
 // ─── helpers ────────────────────────────────────────────────────────────────

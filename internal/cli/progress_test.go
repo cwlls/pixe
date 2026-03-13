@@ -20,7 +20,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	pixeprogress "github.com/cwlls/pixe-go/internal/progress"
+	pixeprogress "github.com/cwlls/pixe/internal/progress"
 )
 
 // newTestModel creates a ProgressModel with a real bus for testing.

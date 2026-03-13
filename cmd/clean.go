@@ -25,8 +25,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/cwlls/pixe-go/internal/archivedb"
-	"github.com/cwlls/pixe-go/internal/dblocator"
+	"github.com/cwlls/pixe/internal/archivedb"
+	"github.com/cwlls/pixe/internal/dblocator"
 )
 
 // pixeXMPPattern matches Pixe-generated XMP sidecar filenames:

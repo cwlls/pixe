@@ -25,9 +25,9 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X github.com/cwlls/pixe-go/cmd.version={{.Version}}
-        -X github.com/cwlls/pixe-go/cmd.commit={{.Commit}}
-        -X github.com/cwlls/pixe-go/cmd.buildDate={{.Date}}
+        -X github.com/cwlls/pixe/cmd.version={{.Version}}
+        -X github.com/cwlls/pixe/cmd.commit={{.Commit}}
+        -X github.com/cwlls/pixe/cmd.buildDate={{.Date}}
     # Point this to your main.go location (often "." or "./cmd/myapp")
     main: .
 

@@ -32,9 +32,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cwlls/pixe-go/internal/discovery"
-	"github.com/cwlls/pixe-go/internal/hash"
-	"github.com/cwlls/pixe-go/internal/progress"
+	"github.com/cwlls/pixe/internal/discovery"
+	"github.com/cwlls/pixe/internal/hash"
+	"github.com/cwlls/pixe/internal/progress"
 )
 
 // Result holds the outcome of a verify run.
