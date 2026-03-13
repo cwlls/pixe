@@ -22,6 +22,60 @@ import (
 	"time"
 )
 
+// formatDuration computes and formats the elapsed time between started and
+// finished. Returns "—" if finished is nil (interrupted/in-progress runs).
+//
+// Formatting rules:
+//
+//	Sub-second:  "0.8s"
+//	Seconds:     "23s"
+//	Minutes:     "1m 23s"
+//	Hours:       "1h 5m 12s"
+func formatDuration(started time.Time, finished *time.Time) string {
+	if finished == nil {
+		return "—"
+	}
+	d := finished.Sub(started)
+	if d < 0 {
+		d = 0
+	}
+	return fmtDuration(d)
+}
+
+// fmtDuration formats a time.Duration using the compact human-readable rules
+// shared by formatDuration (query output) and formatElapsed (sort summary).
+func fmtDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	total := int(d.Seconds())
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
+// formatDurationSeconds returns the elapsed seconds as a *float64 for JSON
+// output. Returns nil if finished is nil.
+func formatDurationSeconds(started time.Time, finished *time.Time) *float64 {
+	if finished == nil {
+		return nil
+	}
+	d := finished.Sub(started)
+	if d < 0 {
+		d = 0
+	}
+	v := d.Seconds()
+	return &v
+}
+
 // queryResult is the top-level JSON envelope for --json output.
 type queryResult struct {
 	Query   string `json:"query"`
@@ -108,8 +162,8 @@ func printRow(w io.Writer, cells []string, widths []int) {
 	_, _ = fmt.Fprintln(w, strings.Join(parts, "  "))
 }
 
-// truncChecksum returns the first 8 characters of a checksum for table display.
-// Returns "—" if the input is empty.
+// truncChecksum returns the first 8 characters of a checksum for table display,
+// followed by "…" (U+2026) to indicate truncation. Returns "—" if empty.
 func truncChecksum(s string) string {
 	if s == "" {
 		return "—"
@@ -117,15 +171,16 @@ func truncChecksum(s string) string {
 	if len(s) <= 8 {
 		return s
 	}
-	return s[:8]
+	return s[:8] + "…"
 }
 
-// truncID returns the first 8 characters of a UUID for table display.
+// truncID returns the first 8 characters of a UUID for table display,
+// followed by "…" (U+2026) to indicate truncation.
 func truncID(s string) string {
 	if len(s) <= 8 {
 		return s
 	}
-	return s[:8]
+	return s[:8] + "…"
 }
 
 // formatDate formats a *time.Time as "YYYY-MM-DD" for table display.

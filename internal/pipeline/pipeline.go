@@ -23,13 +23,17 @@
 package pipeline
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/mattn/go-isatty"
 
 	"github.com/cwlls/pixe/internal/archivedb"
 	"github.com/cwlls/pixe/internal/config"
@@ -84,6 +88,14 @@ type SortOptions struct {
 	// When empty, relDest is shown without a prefix. This is purely cosmetic —
 	// it does not affect the ledger, database, or filesystem paths.
 	DestLabel string
+
+	// Yes, when true, suppresses interactive prompts and auto-accepts them.
+	// Equivalent to the --yes / -y CLI flag.
+	Yes bool
+
+	// NoLedger, when true, explicitly opts out of ledger creation without
+	// prompting or warning. Equivalent to the --no-ledger CLI flag.
+	NoLedger bool
 }
 
 // emit sends an event to the bus if one is configured. It is a no-op when
@@ -231,7 +243,13 @@ func Run(opts SortOptions) (SortResult, error) {
 		}
 		rawLW, lwErr := manifest.NewLedgerWriter(dirA, header)
 		if lwErr != nil {
-			_, _ = fmt.Fprintf(out, "WARNING: could not open ledger in %s: %v\n", dirA, lwErr)
+			cancelled, promptErr := handleLedgerFailure(out, dirA, lwErr, opts.Yes, opts.NoLedger)
+			if promptErr != nil {
+				return SortResult{}, fmt.Errorf("pipeline: ledger prompt: %w", promptErr)
+			}
+			if cancelled {
+				return SortResult{}, nil // exit code 0 — user chose to cancel
+			}
 			// slw stays nil — processing continues without a ledger.
 		} else {
 			slw = manifest.NewSafeLedgerWriter(rawLW, out)
@@ -264,6 +282,7 @@ func Run(opts SortOptions) (SortResult, error) {
 
 	_, _ = fmt.Fprintf(out, "\nDone. processed=%d duplicates=%d skipped=%d errors=%d\n",
 		result.Processed, result.Duplicates, result.Skipped, result.Errors)
+	_, _ = fmt.Fprintf(out, "(%s)\n", formatElapsed(time.Since(startedAt)))
 
 	emit(opts.EventBus, progress.Event{
 		Kind: progress.EventRunComplete,
@@ -466,18 +485,22 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 				IsDuplicate: true,
 				MatchesDest: le.Matches,
 				Destination: le.Destination,
+				SidecarExts: sidecarExts(df.Sidecars, le.Sidecars),
 				WorkerID:    -1,
 				Completed:   result.Skipped + result.Processed + result.Errors,
 			})
 		} else {
 			dest := ""
+			var scExts []string
 			if le != nil {
 				dest = le.Destination
+				scExts = sidecarExts(df.Sidecars, le.Sidecars)
 			}
 			emit(opts.EventBus, progress.Event{
 				Kind:        progress.EventFileComplete,
 				RelPath:     df.RelPath,
 				Destination: dest,
+				SidecarExts: scExts,
 				WorkerID:    -1,
 				Completed:   result.Skipped + result.Processed + result.Errors,
 			})
@@ -618,10 +641,16 @@ func processFile(
 
 	if cfg.DryRun {
 		if cfg.Verbosity >= 0 {
-			_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", df.RelPath, displayDest(destLabel, relDest))
-			// Emit sidecar association lines even in dry-run (no files copied).
-			dryTags := resolveTags(cfg, captureDate)
-			emitSidecarLines(out, df.Sidecars, relDest, dryTags, cfg, destLabel)
+			// Build sidecar annotation from associated sidecars (no files copied in dry-run).
+			var dryAnnotation string
+			if cfg.CarrySidecars && len(df.Sidecars) > 0 {
+				var exts []string
+				for _, sc := range df.Sidecars {
+					exts = append(exts, sc.Ext)
+				}
+				dryAnnotation = formatSidecarAnnotation(exts)
+			}
+			_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s%s\n", df.RelPath, displayDest(destLabel, relDest), dryAnnotation)
 		}
 		if db != nil {
 			if dbErr := db.UpdateFileStatus(fileID, "complete",
@@ -820,18 +849,17 @@ func processFile(
 	}
 
 	// --- Emit output line after outcome is known ---
+	annotation := formatSidecarAnnotation(sidecarExts(df.Sidecars, carriedSidecarRels))
 	if cfg.Verbosity >= 0 {
 		if isDuplicate {
 			matchDetail := existingDestForLedger
 			if matchDetail == "" {
 				matchDetail = relDest
 			}
-			_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", df.RelPath,
-				fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail))))
-			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg, destLabel)
+			_, _ = fmt.Fprint(out, fmtr.FormatOutputWithAnnotation("DUPE", df.RelPath,
+				fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail)), annotation))
 		} else {
-			_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", df.RelPath, displayDest(destLabel, relDest)))
-			emitSidecarLines(out, df.Sidecars, relDest, tags, cfg, destLabel)
+			_, _ = fmt.Fprint(out, fmtr.FormatOutputWithAnnotation("COPY", df.RelPath, displayDest(destLabel, relDest), annotation))
 		}
 	}
 
@@ -859,21 +887,69 @@ func processFile(
 	return le, false, nil
 }
 
-// emitSidecarLines writes +sidecar output lines for each sidecar associated
-// with a discovered file. Called after the parent COPY/DUPE line is emitted.
-// destLabel is the display prefix for destination paths (e.g. "...Photos"); see displayDest.
-func emitSidecarLines(out io.Writer, sidecars []discovery.SidecarFile, parentRelDest string, tags domain.MetadataTags, cfg *config.AppConfig, destLabel string) {
-	if !cfg.CarrySidecars || len(sidecars) == 0 {
-		return
+// formatElapsed formats a time.Duration as a compact human-readable string
+// for the sort summary line (e.g. "1m 23s", "45s", "0.8s").
+func formatElapsed(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
-	for _, sc := range sidecars {
-		sidecarRel := parentRelDest + sc.Ext
-		suffix := ""
-		if sc.Ext == ".xmp" && !tags.IsEmpty() {
-			suffix = " (merge tags)"
-		}
-		_, _ = fmt.Fprintf(out, "     +sidecar %s -> %s%s\n", sc.RelPath, displayDest(destLabel, sidecarRel), suffix)
+	total := int(d.Seconds())
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
 	}
+}
+
+// handleLedgerFailure handles the case where the ledger cannot be created.
+// It prompts the user interactively when appropriate, or auto-accepts based on
+// the --yes and --no-ledger flags and stdin TTY detection.
+//
+// Returns (cancelled=true, nil) when the user chose to cancel.
+// Returns (cancelled=false, nil) when processing should continue without a ledger.
+// Returns (false, err) on an unexpected I/O error reading stdin.
+func handleLedgerFailure(out io.Writer, dirA string, lwErr error, yes, noLedger bool) (cancelled bool, err error) {
+	if noLedger {
+		// Explicit opt-out — no warning, no prompt.
+		return false, nil
+	}
+
+	// Always print the warning.
+	_, _ = fmt.Fprintf(out, "Warning: cannot create ledger in %s: %v\n", dirA, lwErr)
+
+	if yes || !isatty.IsTerminal(os.Stdin.Fd()) {
+		// Auto-accept (--yes flag) or non-interactive stdin (CI, pipes, cron).
+		// Print warning and continue.
+		return false, nil
+	}
+
+	// Interactive prompt.
+	_, _ = fmt.Fprintf(out, "Without a ledger, this source directory will have no record of which files were sorted.\n")
+	_, _ = fmt.Fprintf(out, "Continue without ledger? [y/N] ")
+
+	reader := bufio.NewReader(os.Stdin)
+	line, readErr := reader.ReadString('\n')
+	if readErr != nil && readErr != io.EOF {
+		return false, readErr
+	}
+	answer := strings.TrimSpace(line)
+	if !isYesAnswer(answer) {
+		_, _ = fmt.Fprintln(out, "Cancelled.")
+		return true, nil
+	}
+	return false, nil
+}
+
+// isYesAnswer reports whether the user's answer is an affirmative response.
+func isYesAnswer(s string) bool {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	return lower == "y" || lower == "yes"
 }
 
 // resolveTags renders the Copyright placeholder and returns a MetadataTags value.

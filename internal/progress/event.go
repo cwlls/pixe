@@ -107,6 +107,12 @@ type Event struct {
 	SidecarRelPath string
 	SidecarExt     string
 
+	// SidecarExts holds the extensions of successfully carried sidecars for
+	// inline annotation display (e.g. []string{".xmp", ".aae"}).
+	// Populated on EventFileComplete, EventFileDuplicate, EventVerifyOK,
+	// and EventVerifyMismatch when sidecars are associated with the file.
+	SidecarExts []string
+
 	// Summary (EventRunComplete, EventVerifyDone).
 	Summary *RunSummary
 }

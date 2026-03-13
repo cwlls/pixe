@@ -37,14 +37,18 @@ discover → extract → hash → copy → verify → carry sidecars → tag →
 Each file produces one output line:
 
 ```
-COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223-1-7d97e98f.jpg
-     +sidecar IMG_0001.aae -> 2021/12-Dec/20211225_062223-1-7d97e98f.jpg.aae
+COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223-1-7d97e98f.jpg [+aae]
 SKIP notes.txt -> unsupported format: .txt
 SKIP IMG_0002.jpg -> previously imported
-DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223-1-7d97e98f.jpg
+DUPE IMG_0003.jpg -> matches 2021/12-Dec/20211225_062223-1-7d97e98f.jpg [+xmp]
 ERR  corrupt.jpg -> extract date: no EXIF data
 Done. processed=3 duplicates=1 skipped=2 errors=1
+(1m 23s)
 ```
+
+**Sidecar annotations:** When a file has associated sidecar files (`.xmp`, `.aae`) that were carried alongside it, this is indicated with an inline annotation on the parent file's output line. Format: `[+xmp]`, `[+aae]`, or `[+xmp +aae]` if multiple sidecars are present. This keeps the output compact — one line per file, always.
+
+**Duration:** The sort summary includes an elapsed time line showing how long the operation took.
 
 ### Output Naming Convention
 

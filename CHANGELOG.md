@@ -4,6 +4,35 @@
 
 ---
 
+## [Unreleased] -- UX Improvements: Ledger Prompt, Sidecar Annotations, Run Duration, Truncation Ellipsis
+
+### Added
+
+- **Interactive ledger write failure prompt** — When the pipeline cannot create the JSONL ledger in the source directory (e.g., read-only filesystem, permission denied), the user is prompted before processing begins. The prompt explains the consequence and offers a choice to continue without a ledger or cancel. Cancellation exits with code 0 (not an error).
+
+- **`--yes` / `-y` flag** — Auto-accept interactive prompts (e.g., continue without ledger). Useful for scripting and CI environments.
+
+- **`--no-ledger` flag** — Explicitly skip ledger creation without prompting or warning. Recommended for scripts that intentionally run without a ledger.
+
+- **Inline sidecar annotations in sort output** — When a file has associated sidecar files (`.xmp`, `.aae`) that were carried alongside it, this is now indicated with an inline annotation on the parent file's output line rather than a separate sub-line. Format: `[+xmp]`, `[+aae]`, or `[+xmp +aae]` if multiple sidecars are present. Example: `COPY IMG_0001.jpg -> 2021/12-Dec/20211225_062223-1-7d97e98f.jpg [+aae]`. This keeps the output compact — one line per file, always.
+
+- **Inline sidecar annotations in verify output** — The verify command now recognizes sidecar files (`.xmp`, `.aae`) as expected artifacts and does not report them as unrecognised. Associated sidecars are shown as inline annotations on the parent file's verification line (same format as sort). Orphaned sidecars (no matching parent) are still reported as unrecognised.
+
+- **Run duration tracking and display** — Sort run elapsed time is now tracked and displayed across all contexts:
+  - Sort summary includes a second line with elapsed time: `(1m 23s)`
+  - `query run <id>` header includes a `Duration:` line
+  - `query runs` table includes a `DURATION` column
+  - JSON output includes `duration_seconds` field (float64)
+  - Duration is computed on the fly from `started_at` and `finished_at` — no schema change
+
+- **Truncation ellipsis in query output** — Truncated checksums and run IDs in table display now show a trailing ellipsis (`…`) to visually indicate the value is not complete. Example: `7d97e98f…` instead of `7d97e98f`. Full values are always available in `--json` output.
+
+### Changed
+
+- **Sort summary format** — Now includes elapsed time on a second line after the "Done." line.
+
+---
+
 ## [Unreleased] -- Output Formatting, Copyright Syntax, Config File Dest, Flag Consistency
 
 ### Changed

@@ -17,9 +17,12 @@ package pipeline
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"github.com/cwlls/pixe/internal/discovery"
 )
 
 // Formatter produces status lines with optional color.
@@ -77,6 +80,73 @@ func (f *Formatter) FormatOutput(verb, source, detail string) string {
 		verb = f.verbStyle(verb).Render(verb)
 	}
 	return fmt.Sprintf("%s %s -> %s\n", verb, source, detail)
+}
+
+// FormatOutput returns a single stdout line for a file outcome with an optional
+// sidecar annotation appended inline (e.g. " [+xmp]").
+// verb is one of "COPY", "SKIP", "DUPE", "ERR ".
+// annotation is the result of formatSidecarAnnotation; pass "" for no annotation.
+func (f *Formatter) FormatOutputWithAnnotation(verb, source, detail, annotation string) string {
+	if f.color {
+		verb = f.verbStyle(verb).Render(verb)
+	}
+	return fmt.Sprintf("%s %s -> %s%s\n", verb, source, detail, annotation)
+}
+
+// formatSidecarAnnotation builds the inline sidecar annotation string from a
+// list of sidecar extensions (e.g. []string{".xmp", ".aae"} → " [+xmp +aae]").
+// Returns "" when exts is empty.
+func formatSidecarAnnotation(exts []string) string {
+	if len(exts) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, ext := range exts {
+		// Strip leading dot for display: ".xmp" → "+xmp"
+		if len(ext) > 1 && ext[0] == '.' {
+			parts = append(parts, "+"+ext[1:])
+		} else {
+			parts = append(parts, "+"+ext)
+		}
+	}
+	result := " ["
+	for i, p := range parts {
+		if i > 0 {
+			result += " "
+		}
+		result += p
+	}
+	result += "]"
+	return result
+}
+
+// sidecarExts returns the unique extensions of successfully carried sidecars
+// in a stable order (.xmp before .aae).
+func sidecarExts(sidecars []discovery.SidecarFile, carried []string) []string {
+	if len(carried) == 0 {
+		return nil
+	}
+	// Build a set of carried extensions from the carried rel paths.
+	carriedSet := make(map[string]struct{}, len(carried))
+	for _, rel := range carried {
+		ext := filepath.Ext(rel)
+		carriedSet[ext] = struct{}{}
+	}
+	// Return in canonical order.
+	var exts []string
+	for _, order := range []string{".xmp", ".aae"} {
+		if _, ok := carriedSet[order]; ok {
+			exts = append(exts, order)
+		}
+	}
+	// Any other extensions not in the canonical list.
+	for ext := range carriedSet {
+		if ext != ".xmp" && ext != ".aae" {
+			exts = append(exts, ext)
+		}
+	}
+	_ = sidecars // parameter kept for future use
+	return exts
 }
 
 // FormatWarning returns a warning line (sidecar carry failure, tag failure, etc.).

@@ -87,6 +87,7 @@ func printRunTable(run *archivedb.Run, files []*archivedb.FileRecord) error {
 	_, _ = fmt.Fprintf(w, "Started:     %s\n", formatDateTime(run.StartedAt))
 	if run.FinishedAt != nil {
 		_, _ = fmt.Fprintf(w, "Finished:    %s\n", formatDateTime(*run.FinishedAt))
+		_, _ = fmt.Fprintf(w, "Duration:    %s\n", formatDuration(run.StartedAt, run.FinishedAt))
 	}
 	_, _ = fmt.Fprintf(w, "Status:      %s\n", run.Status)
 	_, _ = fmt.Fprintln(w)
@@ -147,15 +148,16 @@ func printRunTable(run *archivedb.Run, files []*archivedb.FileRecord) error {
 // printRunJSON writes run detail results as a JSON object.
 func printRunJSON(run *archivedb.Run, files []*archivedb.FileRecord) error {
 	type runJSON struct {
-		ID          string  `json:"id"`
-		Version     string  `json:"version"`
-		Source      string  `json:"source"`
-		Destination string  `json:"destination"`
-		Algorithm   string  `json:"algorithm"`
-		Workers     int     `json:"workers"`
-		Started     string  `json:"started"`
-		Finished    *string `json:"finished,omitempty"`
-		Status      string  `json:"status"`
+		ID              string   `json:"id"`
+		Version         string   `json:"version"`
+		Source          string   `json:"source"`
+		Destination     string   `json:"destination"`
+		Algorithm       string   `json:"algorithm"`
+		Workers         int      `json:"workers"`
+		Started         string   `json:"started"`
+		Finished        *string  `json:"finished,omitempty"`
+		DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+		Status          string   `json:"status"`
 	}
 	type fileJSON struct {
 		SourcePath  string  `json:"source_path"`
@@ -186,6 +188,7 @@ func printRunJSON(run *archivedb.Run, files []*archivedb.FileRecord) error {
 	if run.FinishedAt != nil {
 		ts := formatDateTime(*run.FinishedAt)
 		rj.Finished = &ts
+		rj.DurationSeconds = formatDurationSeconds(run.StartedAt, run.FinishedAt)
 	}
 
 	fjs := make([]fileJSON, 0, len(files))

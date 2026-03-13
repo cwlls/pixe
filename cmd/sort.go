@@ -191,6 +191,8 @@ func runSort(cmd *cobra.Command, args []string) error {
 		RunID:        runID,
 		ColorOutput:  isTTY && !noColor && cfg.Verbosity >= 0,
 		DestLabel:    destLabel,
+		Yes:          viper.GetBool("yes"),
+		NoLedger:     viper.GetBool("no_ledger"),
 	}
 
 	var result pipeline.SortResult
@@ -276,6 +278,8 @@ func init() {
 	sortCmd.Flags().String("since", "", `only process files with capture date on or after this date (format: YYYY-MM-DD)`)
 	sortCmd.Flags().String("before", "", `only process files with capture date on or before this date (format: YYYY-MM-DD)`)
 	sortCmd.Flags().String("path-template", "", `token-based template for destination directory structure (default: "{year}/{month}-{monthname}")`)
+	sortCmd.Flags().BoolP("yes", "y", false, "auto-accept prompts (e.g. continue without ledger when ledger creation fails)")
+	sortCmd.Flags().Bool("no-ledger", false, "skip ledger creation entirely without prompting or warning")
 
 	// Note: --dest is validated manually in runSort after Viper config merging,
 	// so that dest: in .pixe.yaml or PIXE_DEST env var can satisfy the requirement
@@ -297,4 +301,6 @@ func init() {
 	_ = viper.BindPFlag("since", sortCmd.Flags().Lookup("since"))
 	_ = viper.BindPFlag("before", sortCmd.Flags().Lookup("before"))
 	_ = viper.BindPFlag("path_template", sortCmd.Flags().Lookup("path-template"))
+	_ = viper.BindPFlag("yes", sortCmd.Flags().Lookup("yes"))
+	_ = viper.BindPFlag("no_ledger", sortCmd.Flags().Lookup("no-ledger"))
 }

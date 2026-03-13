@@ -777,3 +777,162 @@ func TestRun_Concurrent_EventEmission(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Sidecar awareness tests
+// ---------------------------------------------------------------------------
+
+// TestRun_sidecarFilesNotCountedAsUnrecognised verifies that .xmp and .aae
+// sidecar files are not reported as UNRECOGNISED when they have a matching
+// parent media file.
+func TestRun_sidecarFilesNotCountedAsUnrecognised(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+
+	content := buildJPEGContent([]byte("media content"))
+	checksum := sha1Hex(content)
+	mediaName := pixeFilename(checksum, ".jpg")
+	writeTestFile(t, dir, mediaName, content)
+
+	// Write a .xmp sidecar alongside the media file.
+	writeTestFile(t, dir, mediaName+".xmp", []byte("<xmp/>"))
+
+	var buf bytes.Buffer
+	result, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Unrecognised != 0 {
+		t.Errorf("Unrecognised = %d, want 0 (sidecar should not be counted)\noutput:\n%s", result.Unrecognised, buf.String())
+	}
+	if result.Verified != 1 {
+		t.Errorf("Verified = %d, want 1\noutput:\n%s", result.Verified, buf.String())
+	}
+}
+
+// TestRun_sidecarAnnotationOnParentLine verifies that when a media file has an
+// associated sidecar, the verify output line includes the inline annotation.
+func TestRun_sidecarAnnotationOnParentLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+
+	content := buildJPEGContent([]byte("media content"))
+	checksum := sha1Hex(content)
+	mediaName := pixeFilename(checksum, ".jpg")
+	writeTestFile(t, dir, mediaName, content)
+	writeTestFile(t, dir, mediaName+".xmp", []byte("<xmp/>"))
+
+	var buf bytes.Buffer
+	_, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "[+xmp]") {
+		t.Errorf("output missing [+xmp] annotation; got:\n%s", output)
+	}
+}
+
+// TestRun_orphanedSidecarCountedAsUnrecognised verifies that a sidecar file
+// with no matching parent media file is reported as UNRECOGNISED.
+func TestRun_orphanedSidecarCountedAsUnrecognised(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	reg := newTestRegistry()
+	hasher := newTestHasher(t)
+
+	content := buildJPEGContent([]byte("media content"))
+	checksum := sha1Hex(content)
+	mediaName := pixeFilename(checksum, ".jpg")
+	writeTestFile(t, dir, mediaName, content)
+
+	// Write an orphaned .xmp sidecar (no matching parent).
+	writeTestFile(t, dir, "orphan.xmp", []byte("<xmp/>"))
+
+	var buf bytes.Buffer
+	result, err := Run(Options{
+		Dir:      dir,
+		Hasher:   hasher,
+		Registry: reg,
+		Output:   &buf,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Unrecognised != 1 {
+		t.Errorf("Unrecognised = %d, want 1 (orphaned sidecar should be counted)\noutput:\n%s", result.Unrecognised, buf.String())
+	}
+	if result.Verified != 1 {
+		t.Errorf("Verified = %d, want 1\noutput:\n%s", result.Verified, buf.String())
+	}
+}
+
+// TestAssociateSidecars verifies the sidecar association logic.
+func TestAssociateSidecars(t *testing.T) {
+	t.Parallel()
+
+	mediaNames := []string{
+		"20211225_062223-1-abc123.arw",
+		"20211225_062223-1-abc123.jpg",
+	}
+	sidecarNames := []string{
+		"20211225_062223-1-abc123.arw.xmp", // matches arw
+		"20211225_062223-1-abc123.jpg.aae", // matches jpg
+		"orphan.xmp",                       // no match
+	}
+
+	parentMap, orphans := associateSidecars(mediaNames, sidecarNames)
+
+	// arw should have .xmp
+	if exts := parentMap["20211225_062223-1-abc123.arw"]; len(exts) != 1 || exts[0] != ".xmp" {
+		t.Errorf("arw sidecars = %v, want [.xmp]", exts)
+	}
+	// jpg should have .aae
+	if exts := parentMap["20211225_062223-1-abc123.jpg"]; len(exts) != 1 || exts[0] != ".aae" {
+		t.Errorf("jpg sidecars = %v, want [.aae]", exts)
+	}
+	// orphan.xmp should be in orphans
+	if len(orphans) != 1 || orphans[0] != "orphan.xmp" {
+		t.Errorf("orphans = %v, want [orphan.xmp]", orphans)
+	}
+}
+
+// TestIsSidecarFile verifies the sidecar extension detection.
+func TestIsSidecarFile(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"photo.xmp", true},
+		{"photo.XMP", true},
+		{"photo.aae", true},
+		{"photo.AAE", true},
+		{"photo.jpg", false},
+		{"photo.arw", false},
+		{"photo.arw.xmp", true},
+	}
+	for _, tc := range cases {
+		got := isSidecarFile(tc.name)
+		if got != tc.want {
+			t.Errorf("isSidecarFile(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

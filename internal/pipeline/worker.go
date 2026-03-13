@@ -545,14 +545,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 				result.Processed++
 				if finalIsDup {
 					result.Duplicates++
+					annotation := formatSidecarAnnotation(sidecarExts(fr.df.Sidecars, finalSidecars))
 					if opts.Config.Verbosity >= 0 {
 						matchDetail := finalExistingDest
 						if matchDetail == "" {
 							matchDetail = finalRelDest
 						}
-						_, _ = fmt.Fprint(out, fmtr.FormatOutput("DUPE", fr.df.RelPath,
-							fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail))))
-						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config, destLabel)
+						_, _ = fmt.Fprint(out, fmtr.FormatOutputWithAnnotation("DUPE", fr.df.RelPath,
+							fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail)), annotation))
 					}
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
@@ -569,13 +569,14 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						MatchesDest: finalExistingDest,
 						Destination: finalRelDest,
 						Checksum:    fr.checksum,
+						SidecarExts: sidecarExts(fr.df.Sidecars, finalSidecars),
 						WorkerID:    -1,
 						Completed:   result.Skipped + result.Processed + result.Errors,
 					})
 				} else {
+					annotation := formatSidecarAnnotation(sidecarExts(fr.df.Sidecars, finalSidecars))
 					if opts.Config.Verbosity >= 0 {
-						_, _ = fmt.Fprint(out, fmtr.FormatOutput("COPY", fr.df.RelPath, displayDest(destLabel, finalRelDest)))
-						emitSidecarLines(out, fr.df.Sidecars, finalRelDest, resolveTags(opts.Config, fr.captureDate), opts.Config, destLabel)
+						_, _ = fmt.Fprint(out, fmtr.FormatOutputWithAnnotation("COPY", fr.df.RelPath, displayDest(destLabel, finalRelDest), annotation))
 					}
 					lw.WriteEntry(domain.LedgerEntry{
 						Path:        fr.df.RelPath,
@@ -590,6 +591,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						RelPath:     fr.df.RelPath,
 						Destination: finalRelDest,
 						Checksum:    fr.checksum,
+						SidecarExts: sidecarExts(fr.df.Sidecars, finalSidecars),
 						WorkerID:    -1,
 						Completed:   result.Skipped + result.Processed + result.Errors,
 					})
@@ -749,9 +751,15 @@ func runWorker(ctx context.Context, id int,
 
 			if opts.Config.DryRun {
 				if opts.Config.Verbosity >= 0 {
-					_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s\n", item.df.RelPath, displayDest(opts.DestLabel, assign.relDest))
-					dryTags := resolveTags(opts.Config, captureDate)
-					emitSidecarLines(out, item.df.Sidecars, assign.relDest, dryTags, opts.Config, opts.DestLabel)
+					var dryAnnotation string
+					if opts.Config.CarrySidecars && len(item.df.Sidecars) > 0 {
+						var exts []string
+						for _, sc := range item.df.Sidecars {
+							exts = append(exts, sc.Ext)
+						}
+						dryAnnotation = formatSidecarAnnotation(exts)
+					}
+					_, _ = fmt.Fprintf(out, "  DRY-RUN  %s -> %s%s\n", item.df.RelPath, displayDest(opts.DestLabel, assign.relDest), dryAnnotation)
 				}
 				var dryDBErr error
 				if db != nil {

@@ -1388,3 +1388,152 @@ func TestRenderCopyright(t *testing.T) {
 		t.Errorf("RenderCopyright(nil) = %q, want empty string", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Sort summary duration tests
+// ---------------------------------------------------------------------------
+
+// TestRun_summaryIncludesDuration verifies that the sort summary output
+// includes an elapsed time line in parentheses.
+func TestRun_summaryIncludesDuration(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	copyFixture(t, dirA, "with_exif_date.jpg")
+
+	var out bytes.Buffer
+	cfg := &config.AppConfig{Source: dirA, Destination: dirB, Algorithm: "sha1"}
+	_, err := Run(newOpts(t, cfg, &out))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	output := out.String()
+	// The duration line should be present and wrapped in parentheses.
+	if !strings.Contains(output, "(") || !strings.Contains(output, "s)") {
+		t.Errorf("output missing duration line; got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatElapsed tests
+// ---------------------------------------------------------------------------
+
+func TestFormatElapsed_subSecond(t *testing.T) {
+	t.Parallel()
+	got := formatElapsed(500 * time.Millisecond)
+	if got != "0.5s" {
+		t.Errorf("formatElapsed(500ms) = %q, want %q", got, "0.5s")
+	}
+}
+
+func TestFormatElapsed_seconds(t *testing.T) {
+	t.Parallel()
+	got := formatElapsed(45 * time.Second)
+	if got != "45s" {
+		t.Errorf("formatElapsed(45s) = %q, want %q", got, "45s")
+	}
+}
+
+func TestFormatElapsed_minutes(t *testing.T) {
+	t.Parallel()
+	got := formatElapsed(2*time.Minute + 30*time.Second)
+	if got != "2m 30s" {
+		t.Errorf("formatElapsed(2m30s) = %q, want %q", got, "2m 30s")
+	}
+}
+
+func TestFormatElapsed_hours(t *testing.T) {
+	t.Parallel()
+	got := formatElapsed(2*time.Hour + 15*time.Minute + 5*time.Second)
+	if got != "2h 15m 5s" {
+		t.Errorf("formatElapsed(2h15m5s) = %q, want %q", got, "2h 15m 5s")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ledger prompt tests
+// ---------------------------------------------------------------------------
+
+// TestHandleLedgerFailure_noLedger verifies that --no-ledger suppresses the
+// prompt and warning entirely.
+func TestHandleLedgerFailure_noLedger(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	cancelled, err := handleLedgerFailure(&out, "/src", os.ErrPermission, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cancelled {
+		t.Error("cancelled = true, want false")
+	}
+	if out.Len() > 0 {
+		t.Errorf("expected no output with --no-ledger, got: %q", out.String())
+	}
+}
+
+// TestHandleLedgerFailure_yes verifies that --yes auto-accepts and prints a warning.
+func TestHandleLedgerFailure_yes(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	cancelled, err := handleLedgerFailure(&out, "/src", os.ErrPermission, true, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cancelled {
+		t.Error("cancelled = true, want false")
+	}
+	if !strings.Contains(out.String(), "Warning:") {
+		t.Errorf("expected warning in output, got: %q", out.String())
+	}
+}
+
+// TestIsYesAnswer verifies the yes-answer detection.
+func TestIsYesAnswer(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"y", true},
+		{"Y", true},
+		{"yes", true},
+		{"YES", true},
+		{"Yes", true},
+		{"n", false},
+		{"no", false},
+		{"", false},
+		{"  y  ", true},
+	}
+	for _, tc := range cases {
+		got := isYesAnswer(tc.in)
+		if got != tc.want {
+			t.Errorf("isYesAnswer(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Inline sidecar annotation tests
+// ---------------------------------------------------------------------------
+
+// TestFormatSidecarAnnotation verifies the inline annotation format.
+func TestFormatSidecarAnnotation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		exts []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{}, ""},
+		{[]string{".xmp"}, " [+xmp]"},
+		{[]string{".aae"}, " [+aae]"},
+		{[]string{".xmp", ".aae"}, " [+xmp +aae]"},
+	}
+	for _, tc := range cases {
+		got := formatSidecarAnnotation(tc.exts)
+		if got != tc.want {
+			t.Errorf("formatSidecarAnnotation(%v) = %q, want %q", tc.exts, got, tc.want)
+		}
+	}
+}

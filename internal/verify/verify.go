@@ -89,21 +89,63 @@ func emitVerify(bus *progress.Bus, e progress.Event) {
 
 // verifyItem is sent from the coordinator to a worker.
 type verifyItem struct {
-	path     string // absolute path
-	relPath  string // relative to opts.Dir
-	name     string // filename (for parseChecksum)
-	fileSize int64  // from os.Stat; 0 if stat failed
+	path        string   // absolute path
+	relPath     string   // relative to opts.Dir
+	name        string   // filename (for parseChecksum)
+	fileSize    int64    // from os.Stat; 0 if stat failed
+	sidecarExts []string // extensions of associated sidecar files (e.g. [".xmp"])
 }
 
 // verifyResult is sent from a worker back to the coordinator.
 type verifyResult struct {
-	relPath  string
-	absPath  string
-	workerID int
-	status   string // "OK", "MISMATCH", "UNRECOGNISED", "ERROR"
-	expected string
-	actual   string
-	err      error
+	relPath     string
+	absPath     string
+	workerID    int
+	status      string // "OK", "MISMATCH", "UNRECOGNISED", "ERROR"
+	expected    string
+	actual      string
+	err         error
+	sidecarExts []string // extensions of associated sidecar files
+}
+
+// isSidecarFile reports whether the given filename is a sidecar file that
+// should be skipped during verification (not hashed, not counted as unrecognised).
+// Sidecar files are identified purely by extension.
+func isSidecarFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".xmp" || ext == ".aae"
+}
+
+// associateSidecars matches sidecar filenames to their parent media filenames
+// within the same directory. A sidecar is associated with a parent when the
+// sidecar filename starts with the parent's basename (e.g.
+// "20211225_062223-1-abc123.arw.xmp" → parent "20211225_062223-1-abc123.arw").
+//
+// Returns:
+//   - parentSidecars: map from media filename → list of sidecar extensions
+//   - orphans: sidecar filenames with no matching parent in mediaNames
+func associateSidecars(mediaNames []string, sidecarNames []string) (parentSidecars map[string][]string, orphans []string) {
+	parentSidecars = make(map[string][]string)
+	for _, sc := range sidecarNames {
+		matched := false
+		for _, media := range mediaNames {
+			// A sidecar matches if its name starts with the media filename
+			// (e.g. "photo.arw.xmp" starts with "photo.arw").
+			if strings.HasPrefix(sc, media) && len(sc) > len(media) {
+				ext := strings.ToLower(sc[len(media):])
+				// Verify the remainder is a known sidecar extension.
+				if ext == ".xmp" || ext == ".aae" {
+					parentSidecars[media] = append(parentSidecars[media], ext)
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			orphans = append(orphans, sc)
+		}
+	}
+	return parentSidecars, orphans
 }
 
 // Run walks dir, parses checksums from filenames, recomputes hashes, and
@@ -131,13 +173,18 @@ func runSequential(opts Options) (Result, error) {
 		ctx = context.Background()
 	}
 
-	// Pre-scan: count non-directory, non-dotfile entries so consumers can
-	// show a determinate progress bar. This is a lightweight walk that does
-	// not open any files.
-	total := 0
+	// Pre-scan: collect all items (media files and sidecars) and build the
+	// sidecar association map. Sidecars are grouped by directory so they can
+	// be matched to their parent media files.
+	//
+	// sidecarsByDir maps directory path → list of sidecar filenames in that dir.
+	// mediaByDir maps directory path → list of media filenames in that dir.
+	sidecarsByDir := make(map[string][]string)
+	mediaByDir := make(map[string][]string)
+
 	_ = filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // ignore errors in pre-scan
+			return nil
 		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") && path != opts.Dir {
@@ -145,11 +192,41 @@ func runSequential(opts Options) (Result, error) {
 			}
 			return nil
 		}
-		if !strings.HasPrefix(d.Name(), ".") {
-			total++
+		name := d.Name()
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		if isSidecarFile(name) {
+			sidecarsByDir[dir] = append(sidecarsByDir[dir], name)
+		} else {
+			mediaByDir[dir] = append(mediaByDir[dir], name)
 		}
 		return nil
 	})
+
+	// Build per-directory sidecar association maps.
+	// parentSidecarsByDir maps dir → (media filename → []sidecar extensions).
+	// orphansByDir maps dir → []orphan sidecar filenames.
+	type dirSidecars struct {
+		parentMap map[string][]string
+		orphans   []string
+	}
+	dirSidecarMap := make(map[string]dirSidecars)
+	for dir, sidecars := range sidecarsByDir {
+		pm, orphans := associateSidecars(mediaByDir[dir], sidecars)
+		dirSidecarMap[dir] = dirSidecars{parentMap: pm, orphans: orphans}
+	}
+
+	// Count total verifiable files (media only; sidecars are not counted).
+	total := 0
+	for _, names := range mediaByDir {
+		total += len(names)
+	}
+	// Orphaned sidecars also count toward total (they will be UNRECOGNISED).
+	for _, ds := range dirSidecarMap {
+		total += len(ds.orphans)
+	}
 
 	emitVerify(opts.EventBus, progress.Event{
 		Kind:  progress.EventVerifyStart,
@@ -161,6 +238,9 @@ func runSequential(opts Options) (Result, error) {
 	hasherCache := map[string]*hash.Hasher{
 		opts.Hasher.Algorithm(): opts.Hasher,
 	}
+
+	// Track which orphaned sidecars have been reported (to avoid double-reporting).
+	reportedOrphans := make(map[string]bool)
 
 	completed := 0
 	err := filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
@@ -187,8 +267,41 @@ func runSequential(opts Options) (Result, error) {
 			return nil
 		}
 
+		// Skip sidecar files — they are handled via inline annotation on the
+		// parent file's output line. Orphaned sidecars are reported below.
+		if isSidecarFile(name) {
+			dir := filepath.Dir(path)
+			relPath, _ := filepath.Rel(opts.Dir, path)
+			if ds, ok := dirSidecarMap[dir]; ok {
+				for _, orphan := range ds.orphans {
+					if orphan == name && !reportedOrphans[path] {
+						reportedOrphans[path] = true
+						_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", relPath)
+						result.Unrecognised++
+						completed++
+						emitVerify(opts.EventBus, progress.Event{
+							Kind:      progress.EventVerifyUnrecognised,
+							RelPath:   relPath,
+							AbsPath:   path,
+							WorkerID:  0,
+							Completed: completed,
+							Total:     total,
+						})
+					}
+				}
+			}
+			return nil
+		}
+
 		// Compute relative path for event reporting.
 		relPath, _ := filepath.Rel(opts.Dir, path)
+
+		// Look up associated sidecar extensions for this media file.
+		dir := filepath.Dir(path)
+		var scExts []string
+		if ds, ok := dirSidecarMap[dir]; ok {
+			scExts = ds.parentMap[name]
+		}
 
 		// Stat for file size (used in progress events).
 		var fileSize int64
@@ -208,7 +321,7 @@ func runSequential(opts Options) (Result, error) {
 		// Parse the expected checksum and algorithm from the filename.
 		expected, algo, ok := parseChecksum(name)
 		if !ok {
-			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
+			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", relPath)
 			result.Unrecognised++
 			completed++
 			emitVerify(opts.EventBus, progress.Event{
@@ -228,7 +341,7 @@ func runSequential(opts Options) (Result, error) {
 		// Detect the file type.
 		handler, err := opts.Registry.Detect(path)
 		if err != nil || handler == nil {
-			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", path)
+			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", relPath)
 			result.Unrecognised++
 			completed++
 			emitVerify(opts.EventBus, progress.Event{
@@ -245,7 +358,7 @@ func runSequential(opts Options) (Result, error) {
 		// Recompute the hash via the handler's HashableReader.
 		rc, err := handler.HashableReader(path)
 		if err != nil {
-			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", relPath, err)
 			result.Mismatches++
 			completed++
 			emitVerify(opts.EventBus, progress.Event{
@@ -266,7 +379,7 @@ func runSequential(opts Options) (Result, error) {
 		actual, err := fileHasher.Sum(hashReader)
 		_ = rc.Close()
 		if err != nil {
-			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", relPath, err)
 			result.Mismatches++
 			completed++
 			emitVerify(opts.EventBus, progress.Event{
@@ -284,21 +397,23 @@ func runSequential(opts Options) (Result, error) {
 		}
 
 		completed++
+		annotation := formatVerifySidecarAnnotation(scExts)
 		if actual == expected {
-			_, _ = fmt.Fprintf(opts.Output, "  OK            %s\n", path)
+			_, _ = fmt.Fprintf(opts.Output, "  OK            %s%s\n", relPath, annotation)
 			result.Verified++
 			emitVerify(opts.EventBus, progress.Event{
-				Kind:      progress.EventVerifyOK,
-				RelPath:   relPath,
-				AbsPath:   path,
-				Checksum:  actual,
-				WorkerID:  0,
-				Completed: completed,
-				Total:     total,
+				Kind:        progress.EventVerifyOK,
+				RelPath:     relPath,
+				AbsPath:     path,
+				Checksum:    actual,
+				SidecarExts: scExts,
+				WorkerID:    0,
+				Completed:   completed,
+				Total:       total,
 			})
 		} else {
-			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
-				path, expected, actual)
+			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s%s\n    expected: %s\n    actual:   %s\n",
+				relPath, annotation, expected, actual)
 			result.Mismatches++
 			emitVerify(opts.EventBus, progress.Event{
 				Kind:             progress.EventVerifyMismatch,
@@ -306,6 +421,7 @@ func runSequential(opts Options) (Result, error) {
 				AbsPath:          path,
 				ExpectedChecksum: expected,
 				ActualChecksum:   actual,
+				SidecarExts:      scExts,
 				WorkerID:         0,
 				Completed:        completed,
 				Total:            total,
@@ -330,6 +446,27 @@ func runSequential(opts Options) (Result, error) {
 	return result, err
 }
 
+// formatVerifySidecarAnnotation builds the inline sidecar annotation string
+// for verify output (e.g. []string{".xmp"} → " [+xmp]"). Returns "" when empty.
+func formatVerifySidecarAnnotation(exts []string) string {
+	if len(exts) == 0 {
+		return ""
+	}
+	result := " ["
+	for i, ext := range exts {
+		if i > 0 {
+			result += " "
+		}
+		if len(ext) > 1 && ext[0] == '.' {
+			result += "+" + ext[1:]
+		} else {
+			result += "+" + ext
+		}
+	}
+	result += "]"
+	return result
+}
+
 // runConcurrent verifies files using a worker pool. The coordinator goroutine
 // pre-scans the directory to collect all items and count the total, then feeds
 // items to workers; workers own I/O (read + hash) and send results back to the
@@ -343,8 +480,17 @@ func runConcurrent(opts Options) (Result, error) {
 
 	workers := opts.Workers
 
-	// Pre-scan: collect all items and count total for the progress bar.
-	var items []verifyItem
+	// Pre-scan: collect all items and build sidecar association maps.
+	// Sidecars are grouped by directory so they can be matched to parent media files.
+	sidecarsByDir := make(map[string][]string)
+	mediaByDir := make(map[string][]string)
+	var allPaths []struct {
+		path     string
+		relPath  string
+		name     string
+		fileSize int64
+	}
+
 	_ = filepath.WalkDir(opts.Dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -364,16 +510,64 @@ func runConcurrent(opts Options) (Result, error) {
 		if fi, statErr := os.Stat(path); statErr == nil {
 			fileSize = fi.Size()
 		}
-		items = append(items, verifyItem{
-			path:     path,
-			relPath:  relPath,
-			name:     name,
-			fileSize: fileSize,
-		})
+		dir := filepath.Dir(path)
+		if isSidecarFile(name) {
+			sidecarsByDir[dir] = append(sidecarsByDir[dir], name)
+		} else {
+			mediaByDir[dir] = append(mediaByDir[dir], name)
+			allPaths = append(allPaths, struct {
+				path     string
+				relPath  string
+				name     string
+				fileSize int64
+			}{path, relPath, name, fileSize})
+		}
 		return nil
 	})
 
-	total := len(items)
+	// Build per-directory sidecar association maps.
+	type dirSidecars struct {
+		parentMap map[string][]string
+		orphans   []string
+	}
+	dirSidecarMap := make(map[string]dirSidecars)
+	for dir, sidecars := range sidecarsByDir {
+		pm, orphans := associateSidecars(mediaByDir[dir], sidecars)
+		dirSidecarMap[dir] = dirSidecars{parentMap: pm, orphans: orphans}
+	}
+
+	// Build the items list with sidecar associations.
+	var items []verifyItem
+	for _, p := range allPaths {
+		dir := filepath.Dir(p.path)
+		var scExts []string
+		if ds, ok := dirSidecarMap[dir]; ok {
+			scExts = ds.parentMap[p.name]
+		}
+		items = append(items, verifyItem{
+			path:        p.path,
+			relPath:     p.relPath,
+			name:        p.name,
+			fileSize:    p.fileSize,
+			sidecarExts: scExts,
+		})
+	}
+
+	// Collect orphaned sidecars as UNRECOGNISED items.
+	var orphanItems []verifyItem
+	for dir, ds := range dirSidecarMap {
+		for _, orphan := range ds.orphans {
+			absPath := filepath.Join(dir, orphan)
+			relPath, _ := filepath.Rel(opts.Dir, absPath)
+			orphanItems = append(orphanItems, verifyItem{
+				path:    absPath,
+				relPath: relPath,
+				name:    orphan,
+			})
+		}
+	}
+
+	total := len(items) + len(orphanItems)
 	emitVerify(opts.EventBus, progress.Event{
 		Kind:  progress.EventVerifyStart,
 		Total: total,
@@ -413,24 +607,42 @@ func runConcurrent(opts Options) (Result, error) {
 	// Coordinator: aggregate results and emit events.
 	var result Result
 	completed := 0
+
+	// Report orphaned sidecars as UNRECOGNISED before processing media results.
+	for _, orphan := range orphanItems {
+		completed++
+		_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", orphan.relPath)
+		result.Unrecognised++
+		emitVerify(opts.EventBus, progress.Event{
+			Kind:      progress.EventVerifyUnrecognised,
+			RelPath:   orphan.relPath,
+			AbsPath:   orphan.path,
+			WorkerID:  0,
+			Completed: completed,
+			Total:     total,
+		})
+	}
+
 	for res := range resultCh {
 		completed++
+		annotation := formatVerifySidecarAnnotation(res.sidecarExts)
 		switch res.status {
 		case "OK":
-			_, _ = fmt.Fprintf(opts.Output, "  OK            %s\n", res.absPath)
+			_, _ = fmt.Fprintf(opts.Output, "  OK            %s%s\n", res.relPath, annotation)
 			result.Verified++
 			emitVerify(opts.EventBus, progress.Event{
-				Kind:      progress.EventVerifyOK,
-				RelPath:   res.relPath,
-				AbsPath:   res.absPath,
-				Checksum:  res.actual,
-				WorkerID:  res.workerID,
-				Completed: completed,
-				Total:     total,
+				Kind:        progress.EventVerifyOK,
+				RelPath:     res.relPath,
+				AbsPath:     res.absPath,
+				Checksum:    res.actual,
+				SidecarExts: res.sidecarExts,
+				WorkerID:    res.workerID,
+				Completed:   completed,
+				Total:       total,
 			})
 		case "MISMATCH":
-			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
-				res.absPath, res.expected, res.actual)
+			_, _ = fmt.Fprintf(opts.Output, "  MISMATCH      %s%s\n    expected: %s\n    actual:   %s\n",
+				res.relPath, annotation, res.expected, res.actual)
 			result.Mismatches++
 			emitVerify(opts.EventBus, progress.Event{
 				Kind:             progress.EventVerifyMismatch,
@@ -438,12 +650,13 @@ func runConcurrent(opts Options) (Result, error) {
 				AbsPath:          res.absPath,
 				ExpectedChecksum: res.expected,
 				ActualChecksum:   res.actual,
+				SidecarExts:      res.sidecarExts,
 				WorkerID:         res.workerID,
 				Completed:        completed,
 				Total:            total,
 			})
 		case "ERROR":
-			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", res.absPath, res.err)
+			_, _ = fmt.Fprintf(opts.Output, "  ERROR         %s: %v\n", res.relPath, res.err)
 			result.Mismatches++
 			emitVerify(opts.EventBus, progress.Event{
 				Kind:             progress.EventVerifyMismatch,
@@ -457,7 +670,7 @@ func runConcurrent(opts Options) (Result, error) {
 				Total:            total,
 			})
 		case "UNRECOGNISED":
-			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", res.absPath)
+			_, _ = fmt.Fprintf(opts.Output, "  UNRECOGNISED  %s\n", res.relPath)
 			result.Unrecognised++
 			emitVerify(opts.EventBus, progress.Event{
 				Kind:      progress.EventVerifyUnrecognised,
@@ -518,10 +731,11 @@ func runVerifyWorker(ctx context.Context, workerID int, opts Options, workCh <-c
 			expected, algo, ok := parseChecksum(item.name)
 			if !ok {
 				resultCh <- verifyResult{
-					relPath:  item.relPath,
-					absPath:  item.path,
-					workerID: workerID,
-					status:   "UNRECOGNISED",
+					relPath:     item.relPath,
+					absPath:     item.path,
+					workerID:    workerID,
+					status:      "UNRECOGNISED",
+					sidecarExts: item.sidecarExts,
 				}
 				continue
 			}
@@ -533,10 +747,11 @@ func runVerifyWorker(ctx context.Context, workerID int, opts Options, workCh <-c
 			handler, err := opts.Registry.Detect(item.path)
 			if err != nil || handler == nil {
 				resultCh <- verifyResult{
-					relPath:  item.relPath,
-					absPath:  item.path,
-					workerID: workerID,
-					status:   "UNRECOGNISED",
+					relPath:     item.relPath,
+					absPath:     item.path,
+					workerID:    workerID,
+					status:      "UNRECOGNISED",
+					sidecarExts: item.sidecarExts,
 				}
 				continue
 			}
@@ -545,12 +760,13 @@ func runVerifyWorker(ctx context.Context, workerID int, opts Options, workCh <-c
 			rc, err := handler.HashableReader(item.path)
 			if err != nil {
 				resultCh <- verifyResult{
-					relPath:  item.relPath,
-					absPath:  item.path,
-					workerID: workerID,
-					status:   "ERROR",
-					expected: expected,
-					err:      err,
+					relPath:     item.relPath,
+					absPath:     item.path,
+					workerID:    workerID,
+					status:      "ERROR",
+					expected:    expected,
+					err:         err,
+					sidecarExts: item.sidecarExts,
 				}
 				continue
 			}
@@ -560,33 +776,36 @@ func runVerifyWorker(ctx context.Context, workerID int, opts Options, workCh <-c
 			_ = rc.Close()
 			if err != nil {
 				resultCh <- verifyResult{
-					relPath:  item.relPath,
-					absPath:  item.path,
-					workerID: workerID,
-					status:   "ERROR",
-					expected: expected,
-					err:      err,
+					relPath:     item.relPath,
+					absPath:     item.path,
+					workerID:    workerID,
+					status:      "ERROR",
+					expected:    expected,
+					err:         err,
+					sidecarExts: item.sidecarExts,
 				}
 				continue
 			}
 
 			if actual == expected {
 				resultCh <- verifyResult{
-					relPath:  item.relPath,
-					absPath:  item.path,
-					workerID: workerID,
-					status:   "OK",
-					expected: expected,
-					actual:   actual,
+					relPath:     item.relPath,
+					absPath:     item.path,
+					workerID:    workerID,
+					status:      "OK",
+					expected:    expected,
+					actual:      actual,
+					sidecarExts: item.sidecarExts,
 				}
 			} else {
 				resultCh <- verifyResult{
-					relPath:  item.relPath,
-					absPath:  item.path,
-					workerID: workerID,
-					status:   "MISMATCH",
-					expected: expected,
-					actual:   actual,
+					relPath:     item.relPath,
+					absPath:     item.path,
+					workerID:    workerID,
+					status:      "MISMATCH",
+					expected:    expected,
+					actual:      actual,
+					sidecarExts: item.sidecarExts,
 				}
 			}
 		}

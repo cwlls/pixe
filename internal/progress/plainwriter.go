@@ -17,6 +17,7 @@ package progress
 import (
 	"fmt"
 	"io"
+	"time"
 )
 
 // PlainWriter consumes events from a Bus and writes the traditional
@@ -43,6 +44,48 @@ func displayDest(destLabel, dest string) string {
 	return destLabel + "/" + dest
 }
 
+// formatElapsedDuration formats a time.Duration as a compact human-readable
+// string for the sort summary line (e.g. "1m 23s", "45s", "0.8s").
+func formatElapsedDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	total := int(d.Seconds())
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
+// sidecarAnnotation builds the inline sidecar annotation string from a list
+// of sidecar extensions (e.g. []string{".xmp", ".aae"} → " [+xmp +aae]").
+// Returns "" when exts is empty.
+func sidecarAnnotation(exts []string) string {
+	if len(exts) == 0 {
+		return ""
+	}
+	result := " ["
+	for i, ext := range exts {
+		if i > 0 {
+			result += " "
+		}
+		if len(ext) > 1 && ext[0] == '.' {
+			result += "+" + ext[1:]
+		} else {
+			result += "+" + ext
+		}
+	}
+	result += "]"
+	return result
+}
+
 // NewPlainWriter creates a PlainWriter that writes to w.
 // destLabel is the display prefix for destination paths (e.g. "...Photos").
 // verbosity controls output detail: -1 = quiet (summary only),
@@ -62,15 +105,15 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 		switch e.Kind {
 		case EventFileComplete:
 			if pw.verbosity >= 0 {
-				_, _ = fmt.Fprintf(pw.w, "COPY %s -> %s\n", e.RelPath, displayDest(pw.destLabel, e.Destination))
+				_, _ = fmt.Fprintf(pw.w, "COPY %s -> %s%s\n", e.RelPath, displayDest(pw.destLabel, e.Destination), sidecarAnnotation(e.SidecarExts))
 			}
 
 		case EventFileDuplicate:
 			if pw.verbosity >= 0 {
 				if e.MatchesDest != "" {
-					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> matches %s\n", e.RelPath, displayDest(pw.destLabel, e.MatchesDest))
+					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> matches %s%s\n", e.RelPath, displayDest(pw.destLabel, e.MatchesDest), sidecarAnnotation(e.SidecarExts))
 				} else {
-					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> %s\n", e.RelPath, displayDest(pw.destLabel, e.Destination))
+					_, _ = fmt.Fprintf(pw.w, "DUPE %s -> %s%s\n", e.RelPath, displayDest(pw.destLabel, e.Destination), sidecarAnnotation(e.SidecarExts))
 				}
 			}
 
@@ -89,9 +132,9 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 			}
 
 		case EventSidecarCarried:
-			if pw.verbosity >= 0 {
-				_, _ = fmt.Fprintf(pw.w, "     +sidecar %s -> %s\n", e.SidecarRelPath, displayDest(pw.destLabel, e.Destination))
-			}
+			// Sidecar carry is now indicated via inline annotation on the parent
+			// file's COPY/DUPE line (SidecarExts on EventFileComplete/EventFileDuplicate).
+			// This event is kept for non-fatal warning purposes only.
 
 		case EventSidecarFailed:
 			if pw.verbosity >= 0 {
@@ -102,6 +145,9 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 			if s := e.Summary; s != nil {
 				_, _ = fmt.Fprintf(pw.w, "\nDone. processed=%d duplicates=%d skipped=%d errors=%d\n",
 					s.Processed, s.Duplicates, s.Skipped, s.Errors)
+				if s.Duration > 0 {
+					_, _ = fmt.Fprintf(pw.w, "(%s)\n", formatElapsedDuration(s.Duration))
+				}
 			}
 
 		// EventByteProgress is intentionally ignored — the plain writer is
@@ -118,7 +164,7 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 		// Verify events.
 		case EventVerifyOK:
 			if pw.verbosity >= 0 {
-				_, _ = fmt.Fprintf(pw.w, "  OK            %s\n", e.RelPath)
+				_, _ = fmt.Fprintf(pw.w, "  OK            %s%s\n", e.RelPath, sidecarAnnotation(e.SidecarExts))
 			}
 
 		case EventVerifyMismatch:
@@ -126,8 +172,8 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 				if e.Err != nil {
 					_, _ = fmt.Fprintf(pw.w, "  ERROR         %s: %v\n", e.RelPath, e.Err)
 				} else {
-					_, _ = fmt.Fprintf(pw.w, "  MISMATCH      %s\n    expected: %s\n    actual:   %s\n",
-						e.RelPath, e.ExpectedChecksum, e.ActualChecksum)
+					_, _ = fmt.Fprintf(pw.w, "  MISMATCH      %s%s\n    expected: %s\n    actual:   %s\n",
+						e.RelPath, sidecarAnnotation(e.SidecarExts), e.ExpectedChecksum, e.ActualChecksum)
 				}
 			}
 

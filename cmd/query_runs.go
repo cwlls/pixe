@@ -38,13 +38,14 @@ func runQueryRuns(_ *cobra.Command, _ []string) error {
 
 	if jsonOut {
 		type runJSON struct {
-			ID         string  `json:"id"`
-			Version    string  `json:"version"`
-			Source     string  `json:"source"`
-			Started    string  `json:"started"`
-			Status     string  `json:"status"`
-			FileCount  int     `json:"file_count"`
-			FinishedAt *string `json:"finished_at,omitempty"`
+			ID              string   `json:"id"`
+			Version         string   `json:"version"`
+			Source          string   `json:"source"`
+			Started         string   `json:"started"`
+			FinishedAt      *string  `json:"finished_at,omitempty"`
+			DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+			Status          string   `json:"status"`
+			FileCount       int      `json:"file_count"`
 		}
 		type summaryJSON struct {
 			TotalRuns  int `json:"total_runs"`
@@ -65,6 +66,7 @@ func runQueryRuns(_ *cobra.Command, _ []string) error {
 			if s.FinishedAt != nil {
 				ts := formatDateTime(*s.FinishedAt)
 				r.FinishedAt = &ts
+				r.DurationSeconds = formatDurationSeconds(s.StartedAt, s.FinishedAt)
 			}
 			results = append(results, r)
 			totalFiles += s.FileCount
@@ -78,7 +80,7 @@ func runQueryRuns(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	headers := []string{"RUN ID", "VERSION", "SOURCE", "STARTED", "STATUS", "FILES"}
+	headers := []string{"RUN ID", "VERSION", "SOURCE", "STARTED", "DURATION", "STATUS", "FILES"}
 	rows := make([][]string, 0, len(summaries))
 	totalFiles := 0
 	for _, s := range summaries {
@@ -87,6 +89,7 @@ func runQueryRuns(_ *cobra.Command, _ []string) error {
 			s.PixeVersion,
 			s.Source,
 			formatDateTime(s.StartedAt),
+			formatDuration(s.StartedAt, s.FinishedAt),
 			s.Status,
 			commaInt(s.FileCount),
 		})

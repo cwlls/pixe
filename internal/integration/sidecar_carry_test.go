@@ -418,10 +418,10 @@ func TestCarrySidecars_dryRun(t *testing.T) {
 		return nil
 	})
 
-	// Output must contain a +sidecar line.
+	// Output must contain an inline sidecar annotation on the DRY-RUN line.
 	output := buf.String()
-	if !strings.Contains(output, "+sidecar") {
-		t.Errorf("dry-run output missing +sidecar line; output:\n%s", output)
+	if !strings.Contains(output, "[+") {
+		t.Errorf("dry-run output missing inline sidecar annotation; output:\n%s", output)
 	}
 }
 
@@ -555,10 +555,8 @@ func TestCarrySidecars_outputContainsSidecarLine(t *testing.T) {
 	if !strings.Contains(output, "COPY") {
 		t.Errorf("output missing COPY line; output:\n%s", output)
 	}
-	if !strings.Contains(output, "+sidecar") {
-		t.Errorf("output missing +sidecar line; output:\n%s", output)
-	}
-	if !strings.Contains(output, ".aae") {
-		t.Errorf("output missing .aae reference; output:\n%s", output)
+	// Sidecar annotation is now inline on the COPY line: "[+aae]"
+	if !strings.Contains(output, "[+aae]") {
+		t.Errorf("output missing inline [+aae] annotation; output:\n%s", output)
 	}
 }
