@@ -29,3 +29,6 @@ dist/
 
 # private analysis
 analysis/
+
+# state file
+.state/PLAN.md
