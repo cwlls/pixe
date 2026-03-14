@@ -1,4 +1,5 @@
-[![CI](https://github.com/cwlls/pixe/actions/workflows/ci.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/ci.yml)[![Release](https://github.com/cwlls/pixe/actions/workflows/release.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/release.yml)
+[![CI](https://github.com/cwlls/pixe/actions/workflows/ci.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/ci.yml)[![GitHub Release](https://img.shields.io/github/v/release/cwlls/pixe)
+
 # Pixe
 
 A safe, deterministic photo and video sorting utility.
@@ -430,4 +431,3 @@ This project is under active development. Implementation progress is tracked in 
 ---
 
 Documentation: https://github.com/cwlls/pixe
-
