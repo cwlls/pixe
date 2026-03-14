@@ -1,4 +1,4 @@
-[![CI](https://github.com/cwlls/pixe/actions/workflows/ci.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/ci.yml)[![GitHub Release](https://img.shields.io/github/v/release/cwlls/pixe)
+[![CI](https://github.com/cwlls/pixe/actions/workflows/ci.yml/badge.svg)](https://github.com/cwlls/pixe/actions/workflows/ci.yml)![GitHub Release](https://img.shields.io/github/v/release/cwlls/pixe)
 
 # Pixe
 
