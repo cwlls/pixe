@@ -97,8 +97,11 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 	defer func() { _ = f.Close() }()
 
 	x, err := rwexif.Decode(f)
-	if err != nil {
-		// No EXIF data at all — use fallback.
+	if err != nil && rwexif.IsCriticalError(err) {
+		// Truly unreadable EXIF — use fallback.
+		return anselsAdams, nil
+	}
+	if x == nil {
 		return anselsAdams, nil
 	}
 

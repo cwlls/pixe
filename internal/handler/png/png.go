@@ -175,8 +175,11 @@ func (h *Handler) ExtractDate(filePath string) (time.Time, error) {
 // parseEXIFDate parses EXIF bytes and extracts DateTimeOriginal or DateTime.
 func parseEXIFDate(data []byte) (time.Time, error) {
 	x, err := rwexif.Decode(bytes.NewReader(data))
-	if err != nil {
+	if err != nil && rwexif.IsCriticalError(err) {
 		return time.Time{}, err
+	}
+	if x == nil {
+		return time.Time{}, fmt.Errorf("no EXIF data")
 	}
 
 	// Try DateTimeOriginal first.
