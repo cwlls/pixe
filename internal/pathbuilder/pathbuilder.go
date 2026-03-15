@@ -139,7 +139,7 @@ func MonthDir(month time.Month) string {
 //     template ("{year}/{month}-{monthname}"), which reproduces the pre-template
 //     hardcoded structure.
 //   - date:         capture date/time extracted from the file's metadata.
-//   - algoID:       numeric algorithm ID (see ARCHITECTURE.md Section 4.5.1).
+//   - algoID:       numeric algorithm ID (see OVERVIEW.md Section 4.5.1).
 //     0=md5, 1=sha1, 2=sha256, 3=blake3, 4=xxhash.
 //   - checksum:     hex-encoded media payload hash.
 //   - ext:          file extension including the leading dot (e.g. ".JPG").

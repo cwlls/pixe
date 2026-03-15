@@ -25,7 +25,7 @@
 //	3 — blake3   (64 hex chars)
 //	4 — xxhash   (16 hex chars)
 //
-// See ARCHITECTURE.md Section 4.5.1 for the full algorithm registry.
+// See OVERVIEW.md Section 4.5.1 for the full algorithm registry.
 package hash
 
 import (
@@ -87,7 +87,7 @@ func (h *Hasher) Sum(r io.Reader) (string, error) {
 func (h *Hasher) Algorithm() string { return h.name }
 
 // AlgorithmID returns the numeric algorithm identifier embedded in filenames.
-// See ARCHITECTURE.md Section 4.5.1 for the registry.
+// See OVERVIEW.md Section 4.5.1 for the registry.
 func (h *Hasher) AlgorithmID() int { return h.id }
 
 // AlgorithmNameByID returns the algorithm name for a numeric ID, or "" if unknown.

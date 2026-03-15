@@ -35,4 +35,4 @@ docs/_site/
 docs/.jekyll-cache/
 
 # state file
-.state/PLAN.md
+.state/
