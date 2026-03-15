@@ -329,7 +329,9 @@ Sort run elapsed time is tracked and displayed across all contexts where run inf
 
 ### 4.15 Destination Aliases
 
-`pixe sort --dest @nas` resolves the `@`-prefixed alias to a filesystem path configured in `.pixe.yaml` under the `aliases` map. This saves typing long or environment-specific paths on every invocation.
+`pixe sort --dest +nas` resolves the `+`-prefixed alias to a filesystem path configured in `.pixe.yaml` under the `aliases` map. This saves typing long or environment-specific paths on every invocation.
+
+**Sigil choice — `+` not `@`:** The alias prefix is `+` (plus sign). This character is inert in all three contexts where alias values appear: YAML files (`dest: +nas` — no quoting needed), CLI shells (`--dest +nas` — no escaping needed), and environment variables (`PIXE_DEST=+nas` — unambiguous). The `@` character was considered but rejected because it is a reserved indicator in the YAML specification (§5.1.2), which would require users to quote alias values in config files (`dest: "@nas"`) — a subtle requirement that produces silent, confusing failures when forgotten.
 
 **Configuration:**
 
@@ -339,17 +341,20 @@ aliases:
   nas: /Volumes/NAS/Photos
   backup: /Volumes/Backup/Archive
   local: ~/Pictures/Sorted
+
+# Use an alias as the default destination:
+dest: +nas
 ```
 
 **Resolution rules:**
 
-1. If the `--dest` value (from CLI flag, config file, or env var) starts with `@`, the remainder is looked up in the `aliases` map.
+1. If the `--dest` value (from CLI flag, config file, or env var) starts with `+`, the remainder is looked up in the `aliases` map.
 2. If the alias is not found, Pixe exits with a fatal error listing the available aliases.
-3. If the `--dest` value does not start with `@`, it is used as a literal path (existing behavior, unchanged).
+3. If the `--dest` value does not start with `+`, it is used as a literal path (existing behavior, unchanged).
 4. Alias resolution happens after config merging but before destination validation — the resolved path goes through the same existence/creation checks as any literal path.
-5. Aliases can be used anywhere `dest` is accepted: `--dest` CLI flag, `dest:` key in `.pixe.yaml`, or `PIXE_DEST` env var.
+5. Aliases can be used anywhere `dest` is accepted: `--dest +name` CLI flag, `dest: +name` in `.pixe.yaml`, or `PIXE_DEST=+name` env var.
 
-**Config layering:** Aliases follow the standard merge priority. A source-local `.pixe.yaml` can define aliases that augment (not replace) global aliases. On collision, source-local wins. This allows a camera-specific source directory to define `@default` pointing to its preferred archive.
+**Config layering:** Aliases follow the standard merge priority. A source-local `.pixe.yaml` can define aliases that augment (not replace) global aliases. On collision, source-local wins. This allows a camera-specific source directory to define `+default` pointing to its preferred archive.
 
 **Scope:** Alias resolution is implemented in the `cmd/` layer only — no packages below `cmd/` are aware of aliases. By the time `config.AppConfig.Destination` is populated, it contains the resolved filesystem path.
 
@@ -506,6 +511,49 @@ Key flags are defined in each command's source file under `cmd/`. See `cmd/helpe
 `.pixe.yaml` supports: `dest`, `algorithm`, `workers`, `copyright`, `camera_owner`, `recursive`, `skip_duplicates`, `carry_sidecars`, `overwrite_sidecar_tags`, `ignore` (list), `path_template` (string, see §4.5.1), `aliases` (map of name→path, see §4.15).
 
 **Required-flag validation:** Commands that require `--dest` (sort, verify, resume, clean, query, stats) must **not** use Cobra's `MarkFlagRequired`. Cobra's required-flag check runs before Viper config merging, so a `dest` value in `.pixe.yaml` is rejected because the CLI flag was not explicitly provided. Instead, these commands validate the resolved value after `resolveConfig()` (or equivalent Viper reads) and return a clear error if the value is empty. This allows `dest:` in the config file, `PIXE_DEST` env var, or source-local `.pixe.yaml` to satisfy the requirement without a CLI flag.
+
+**Bug fix — alias sigil change (`@` → `+`) and silent config parse error reporting.** The original alias prefix `@` is a reserved indicator in YAML 1.1 (§5.1.2). An unquoted `@` at the start of a scalar value — such as `dest: @duat` — causes the YAML parser to reject the **entire file** with `yaml: found character that cannot start any token`. Combined with `initConfig()` silently swallowing all `ReadInConfig()` errors, users received no feedback that their config was not loaded and saw only the misleading downstream symptom (`--dest is required`).
+
+**Resolution — two changes:**
+
+**Change 1 — Alias sigil `@` → `+`.** The alias prefix is changed from `@` to `+` throughout. The `+` character is inert in YAML, all major shells, and environment variables — no quoting or escaping is ever required in any context. See §4.15 for the full rationale. This is a breaking change for any config files or scripts using `@`-prefixed aliases. Implementation:
+
+- `cmd/helpers.go` `resolveAlias()`: change the prefix check from `"@"` to `"+"`. Update error messages accordingly (e.g., `"use +<name> to reference a configured alias"`).
+- `cmd/helpers.go` `mergeSourceConfig()`: no changes needed (aliases map keys are bare names without the sigil).
+- `docs/configuration.md`: update all examples from `@name` to `+name`.
+- `docs/commands.md`: update any alias references.
+- All tests referencing `@`-prefixed alias values.
+
+**Change 2 — Config file parse error reporting.** The `initConfig()` function in `cmd/root.go` currently swallows all errors from `viper.ReadInConfig()` — including YAML syntax errors, permission errors, and encoding errors. The only feedback is the absence of the `"Using config file:"` stderr message, which is easy to miss.
+
+**The fix:** `initConfig()` must distinguish between "no config file found" (expected, silent) and "config file found but failed to parse" (user error, must report). The implementation:
+
+1. After `viper.ReadInConfig()` returns an error, check whether it is a `viper.ConfigFileNotFoundError` (no file found in any search path — the expected "optional config" case, remains silent).
+2. For **all other errors** (YAML parse errors, permission denied, encoding errors, etc.), print a clear warning to stderr that includes the file path and the underlying error message, then continue execution. The program should **not** exit on a config parse error — config is optional, so the sort can still proceed with CLI flags and defaults. But the user must be told their file was not loaded.
+3. When `--config` is explicitly provided and the file fails to parse (or does not exist), this is a **fatal error** — the user explicitly asked for a specific config file. Return an error that halts execution with a clear message.
+
+**Stderr output format:**
+
+```
+# Case: auto-discovered config file has a parse error (non-fatal warning)
+Warning: config file /home/user/.pixe.yaml found but not loaded: yaml: line 5: did not find expected key
+
+# Case: --config explicitly provided and file has a parse error (fatal)
+Error: failed to load config file /home/user/.pixe.yaml: yaml: line 5: did not find expected key
+
+# Case: --config explicitly provided and file does not exist (fatal)
+Error: failed to load config file /home/user/.pixe.yaml: open /home/user/.pixe.yaml: no such file or directory
+```
+
+**Testing:** Add tests in `cmd/` that exercise:
+- Auto-discovery with valid YAML → stderr contains `"Using config file:"`.
+- Auto-discovery with malformed YAML (e.g., bad indentation) → stderr contains `"Warning:"` and the parse error.
+- Auto-discovery with no config file → stderr is silent (no warning, no "Using config file").
+- `--config` pointing to malformed YAML → returns a non-nil error.
+- `--config` pointing to a nonexistent path → returns a non-nil error.
+- Config file with `dest: +nas` (unquoted, using new sigil) loads successfully and `viper.GetString("dest")` returns `"+nas"`.
+- `resolveAlias()` recognizes `+` prefix and resolves correctly.
+- `resolveAlias()` ignores values not starting with `+` (literal paths unchanged).
 
 ### 7.3 Query Command
 
@@ -944,7 +992,7 @@ A new `docs/configuration.md` page is created to comprehensively document the co
 
    | Config Key | CLI Flag | Type | Default | Description |
    |---|---|---|---|---|
-   | `dest` | `-d, --dest` | string | (required) | Destination archive directory. Supports `@alias` syntax (see Aliases). |
+   | `dest` | `-d, --dest` | string | (required) | Destination archive directory. Supports `+alias` syntax (see Aliases). |
    | `algorithm` | `-a, --algorithm` | string | `sha1` | Hash algorithm: `md5`, `sha1`, `sha256`, `blake3`, `xxhash` |
    | `workers` | `-w, --workers` | int | CPU count | Concurrent worker count |
    | `recursive` | `-r, --recursive` | bool | `false` | Descend into source subdirectories |
@@ -977,7 +1025,7 @@ A new `docs/configuration.md` page is created to comprehensively document the co
 
 5. **Named profiles** — Explains `--profile <name>` loading from `~/.pixe/profiles/<name>.yaml` or `$XDG_CONFIG_HOME/pixe/profiles/<name>.yaml`. Same merge rules as source-local config. Use case: different settings for different cameras or archive destinations.
 
-6. **Destination aliases** — Explains the `aliases` map and `@name` syntax for `--dest`. Resolution rules, config layering (source-local aliases augment global aliases, collision = source-local wins), error on unknown alias. Full example.
+6. **Destination aliases** — Explains the `aliases` map and `+name` syntax for `--dest`. Resolution rules, config layering (source-local aliases augment global aliases, collision = source-local wins), error on unknown alias. Full example.
 
 7. **Environment variables** — Lists the `PIXE_` prefix convention. Viper's `AutomaticEnv()` means any config key can be set via `PIXE_<KEY>` (e.g., `PIXE_ALGORITHM`, `PIXE_WORKERS`, `PIXE_DEST`). Bool values accept `true`/`false`/`1`/`0`.
 

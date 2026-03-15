@@ -4,6 +4,31 @@
 
 ---
 
+## [Unreleased] -- Config File Bug Fix: Alias Sigil and Parse Error Reporting
+
+### Bug Fixes
+
+- **Fixed YAML parse failure with alias syntax** — The alias prefix was changed from `@` to `+`. The `@` character is reserved in YAML 1.1 (as a tag indicator), causing config files with unquoted alias values (e.g., `dest: @nas`) to silently fail to parse with `yaml: found character that cannot start any token`. The `+` character is inert in YAML, shells, and environment variables — no quoting or escaping required in any context. This is a **breaking change** for any existing config files or scripts using `@`-prefixed aliases; update them to use `+` instead.
+
+- **Fixed silent config file parse errors** — The `initConfig()` function previously swallowed all `viper.ReadInConfig()` errors silently, giving users no feedback when their config file failed to parse. Now:
+  - **Config not found** (expected case) — remains silent.
+  - **Auto-discovered config parse error** — prints a warning to stderr with the file path and error details, then continues (non-fatal).
+  - **Explicit `--config` failure** — prints an error to stderr and exits with a fatal error (the user explicitly requested this file).
+
+### Changed
+
+- **Alias prefix in all contexts** — Updated from `@` to `+` in:
+  - `cmd/helpers.go` — `resolveAlias()` function
+  - `cmd/helpers_test.go` — all 8 test functions
+  - `docs/configuration.md` — all 8 alias examples
+  - `.state/ARCHITECTURE.md` — §4.15 and §7.2
+
+### Added
+
+- **Config parse error tests** — New `cmd/root_test.go` with 6 test functions covering valid config, malformed YAML (auto-discovery and explicit), missing files, and `+` sigil in config values.
+
+---
+
 ## [Unreleased] -- Lint Fixes
 
 ### Chore

@@ -54,7 +54,7 @@ These keys can be set in `.pixe.yaml` (global, source-local, or profile):
 
 | Config key | CLI flag | Type | Default | Description |
 |:-----------|:---------|:-----|:--------|:------------|
-| `dest` | `-d, --dest` | string | (required) | Destination archive directory. Supports `@alias` syntax — see [Destination aliases](#destination-aliases). |
+| `dest` | `-d, --dest` | string | (required) | Destination archive directory. Supports `+alias` syntax — see [Destination aliases](#destination-aliases). |
 | `algorithm` | `-a, --algorithm` | string | `sha1` | Hash algorithm for checksums and filenames. Options: `md5`, `sha1`, `sha256`, `blake3`, `xxhash`. |
 | `workers` | `-w, --workers` | int | CPU count | Number of concurrent pipeline workers. `0` means auto-detect (`runtime.NumCPU()`). |
 | `recursive` | `-r, --recursive` | bool | `false` | Descend into subdirectories of the source directory. |
@@ -105,7 +105,7 @@ Example — a source directory with its own config:
 
 ```yaml
 # /Volumes/CameraSD/.pixe.yaml
-dest: @nas
+dest: +nas
 path_template: "{year}/{month}-{monthname}/{day}"
 ignore:
   - "MISC/"
@@ -159,25 +159,25 @@ aliases:
   local: ~/Pictures/Sorted
 ```
 
-**Use an alias** with the `@` prefix:
+**Use an alias** with the `+` prefix:
 
 ```bash
-pixe sort --dest @nas
-pixe sort --dest @backup --recursive
+pixe sort --dest +nas
+pixe sort --dest +backup --recursive
 ```
 
 **Tilde expansion** is applied to alias values — `~/Pictures/Sorted` is expanded to the full home directory path.
 
 **Resolution rules:**
 
-1. If `--dest` starts with `@`, the remainder is looked up in the `aliases` map.
+1. If `--dest` starts with `+`, the remainder is looked up in the `aliases` map.
 2. If the alias is not found, Pixe exits with an error listing available aliases.
-3. If `--dest` does not start with `@`, it is used as a literal path (unchanged behavior).
+3. If `--dest` does not start with `+`, it is used as a literal path (unchanged behavior).
 4. Alias resolution happens after config merging but before destination validation.
 
-**Config layering:** Aliases from a source-local `.pixe.yaml` are merged additively with global aliases. On collision, source-local wins. This lets a camera-specific source directory define `@default` pointing to its preferred archive.
+**Config layering:** Aliases from a source-local `.pixe.yaml` are merged additively with global aliases. On collision, source-local wins. This lets a camera-specific source directory define `+default` pointing to its preferred archive.
 
-**Aliases can be set anywhere `dest` is accepted:** `--dest @name` CLI flag, `dest: "@name"` in `.pixe.yaml`, or `PIXE_DEST=@name` environment variable.
+**Aliases can be set anywhere `dest` is accepted:** `--dest +name` CLI flag, `dest: +name` in `.pixe.yaml`, or `PIXE_DEST=+name` environment variable.
 
 ---
 
@@ -214,7 +214,7 @@ A complete `.pixe.yaml` showing every supported key:
 
 ```yaml
 # Destination archive directory (required unless passed via --dest).
-# Supports @alias syntax if aliases are defined below.
+# Supports +alias syntax if aliases are defined below.
 dest: /Volumes/NAS/Photos
 
 # Hash algorithm for checksums embedded in filenames.
@@ -268,7 +268,7 @@ ignore:
 # since: "2024-01-01"
 # before: "2024-12-31"
 
-# Destination aliases. Use @name with --dest to reference these paths.
+# Destination aliases. Use +name with --dest to reference these paths.
 # Tilde (~) is expanded to your home directory.
 aliases:
   nas: /Volumes/NAS/Photos

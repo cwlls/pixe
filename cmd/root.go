@@ -16,6 +16,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,11 @@ import (
 )
 
 var cfgFile string
+
+// configErr holds any fatal error encountered during initConfig. Because
+// cobra.OnInitialize callbacks cannot return errors, we stash the error here
+// and surface it via rootCmd.PersistentPreRunE before any subcommand runs.
+var configErr error
 
 // rootCmd is the base command. All subcommands are registered against it.
 var rootCmd = &cobra.Command{
@@ -37,6 +43,10 @@ Source files are never modified. Every copy is verified before being
 considered complete. Interrupted runs can always be resumed.
 
 Documentation: https://github.com/cwlls/pixe`,
+	// Surface any fatal config-load error before the subcommand runs.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return configErr
+	},
 }
 
 // Execute is the entry point called from main.go.
@@ -99,8 +109,20 @@ func initConfig() {
 	viper.SetEnvPrefix("PIXE")
 	viper.AutomaticEnv()
 
-	// Silently ignore "config file not found" — it's optional.
 	if err := viper.ReadInConfig(); err == nil {
+		// Config loaded successfully.
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+	} else if errors.As(err, &viper.ConfigFileNotFoundError{}) {
+		// No config file found in any search path — this is expected; config is optional.
+	} else if cfgFile != "" {
+		// The user explicitly provided --config but the file could not be loaded.
+		// Treat this as a fatal error: store it for PersistentPreRunE to surface.
+		configErr = fmt.Errorf("failed to load config file %s: %w", cfgFile, err)
+	} else {
+		// A config file was auto-discovered but failed to parse (YAML error,
+		// permission denied, etc.). Warn on stderr and continue — the sort can
+		// still proceed with CLI flags and defaults.
+		fmt.Fprintf(os.Stderr, "Warning: config file %s found but not loaded: %v\n",
+			viper.ConfigFileUsed(), err)
 	}
 }

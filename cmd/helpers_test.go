@@ -28,7 +28,7 @@ import (
 func TestResolveAlias_found(t *testing.T) {
 	t.Parallel()
 	aliases := map[string]string{"nas": "/Volumes/NAS/Photos"}
-	got, err := resolveAlias("@nas", aliases)
+	got, err := resolveAlias("+nas", aliases)
 	if err != nil {
 		t.Fatalf("resolveAlias: unexpected error: %v", err)
 	}
@@ -40,12 +40,12 @@ func TestResolveAlias_found(t *testing.T) {
 func TestResolveAlias_notFound(t *testing.T) {
 	t.Parallel()
 	aliases := map[string]string{"nas": "/Volumes/NAS/Photos"}
-	_, err := resolveAlias("@missing", aliases)
+	_, err := resolveAlias("+missing", aliases)
 	if err == nil {
-		t.Fatal("resolveAlias(@missing) expected error, got nil")
+		t.Fatal("resolveAlias(+missing) expected error, got nil")
 	}
 	// Error message should list the available alias.
-	if !strings.Contains(err.Error(), "@nas") {
+	if !strings.Contains(err.Error(), "+nas") {
 		t.Errorf("error message should list available aliases; got: %v", err)
 	}
 }
@@ -64,15 +64,15 @@ func TestResolveAlias_noPrefix(t *testing.T) {
 
 func TestResolveAlias_emptyName(t *testing.T) {
 	t.Parallel()
-	_, err := resolveAlias("@", map[string]string{"nas": "/Volumes/NAS"})
+	_, err := resolveAlias("+", map[string]string{"nas": "/Volumes/NAS"})
 	if err == nil {
-		t.Fatal("resolveAlias(@) expected error for empty alias name, got nil")
+		t.Fatal("resolveAlias(+) expected error for empty alias name, got nil")
 	}
 }
 
 func TestResolveAlias_noAliases(t *testing.T) {
 	t.Parallel()
-	_, err := resolveAlias("@nas", map[string]string{})
+	_, err := resolveAlias("+nas", map[string]string{})
 	if err == nil {
 		t.Fatal("resolveAlias with empty aliases map expected error, got nil")
 	}
@@ -83,7 +83,7 @@ func TestResolveAlias_noAliases(t *testing.T) {
 
 func TestResolveAlias_nilAliasMap(t *testing.T) {
 	t.Parallel()
-	_, err := resolveAlias("@nas", nil)
+	_, err := resolveAlias("+nas", nil)
 	if err == nil {
 		t.Fatal("resolveAlias with nil aliases map expected error, got nil")
 	}
@@ -96,9 +96,9 @@ func TestResolveAlias_tildeExpansion(t *testing.T) {
 		t.Skip("cannot determine home directory:", err)
 	}
 	aliases := map[string]string{"home": "~/Photos"}
-	got, err := resolveAlias("@home", aliases)
+	got, err := resolveAlias("+home", aliases)
 	if err != nil {
-		t.Fatalf("resolveAlias(@home): unexpected error: %v", err)
+		t.Fatalf("resolveAlias(+home): unexpected error: %v", err)
 	}
 	want := filepath.Join(home, "Photos")
 	if got != want {
@@ -125,12 +125,12 @@ func TestResolveAlias_multipleAliasesListedOnError(t *testing.T) {
 		"backup": "/Volumes/Backup",
 		"local":  "/tmp/local",
 	}
-	_, err := resolveAlias("@unknown", aliases)
+	_, err := resolveAlias("+unknown", aliases)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	// All three aliases should appear in the error message, sorted.
-	for _, name := range []string{"@backup", "@local", "@nas"} {
+	for _, name := range []string{"+backup", "+local", "+nas"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error message missing %q; got: %v", name, err)
 		}

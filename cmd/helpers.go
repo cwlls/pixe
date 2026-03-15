@@ -237,30 +237,33 @@ func mergeSourceConfig(local *viper.Viper, cmd *cobra.Command) {
 	}
 }
 
-// resolveAlias checks whether dest starts with "@" and, if so, resolves it
+// resolveAlias checks whether dest starts with "+" and, if so, resolves it
 // against the provided aliases map. Returns the resolved filesystem path, or
-// dest unchanged when it does not start with "@".
+// dest unchanged when it does not start with "+".
+//
+// The "+" sigil is chosen because it is inert in YAML, all major shells, and
+// environment variables — no quoting or escaping is ever required in any context.
 //
 // Tilde expansion is applied to the resolved path: a leading "~" is replaced
 // with the current user's home directory, since YAML values are not
 // shell-expanded.
 //
 // Returns an error when:
-//   - dest is "@" with no name following it.
+//   - dest is "+" with no name following it.
 //   - the alias name is not found in the map.
 func resolveAlias(dest string, aliases map[string]string) (string, error) {
-	if !strings.HasPrefix(dest, "@") {
+	if !strings.HasPrefix(dest, "+") {
 		return dest, nil
 	}
 	name := dest[1:]
 	if name == "" {
-		return "", fmt.Errorf("empty alias name in %q: use @<name> to reference a configured alias", dest)
+		return "", fmt.Errorf("empty alias name in %q: use +<name> to reference a configured alias", dest)
 	}
 	path, ok := aliases[name]
 	if !ok {
 		available := make([]string, 0, len(aliases))
 		for k := range aliases {
-			available = append(available, "@"+k)
+			available = append(available, "+"+k)
 		}
 		sort.Strings(available)
 		if len(available) == 0 {
