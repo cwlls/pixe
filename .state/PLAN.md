@@ -16,12 +16,12 @@ Reference: ARCHITECTURE.md §3 (Version Management)
 | 4 | Update `docs/changelog.md` — add version mapping header | medium | @developer | [x] complete | — | Add a note at the top explaining the old→new version mapping; keep old entries as historical record |
 | 5 | Update `CHANGELOG.md` — add version mapping header | medium | @developer | [x] complete | — | Mirror the same note added to `docs/changelog.md` |
 | 6 | Run `make check` — verify all tests and lint pass | high | @tester | [x] complete | 1, 2, 3, 4, 5 | `make check` (fmt-check + vet + unit tests + docs-check) |
-| 7 | Commit all file changes | medium | @committer | [~] in-process | 6 | Commit message: `build: migrate versioning to major.minor scheme with v0.x reset` |
-| 8 | Delete all local git tags | high | @developer | [ ] pending | 7 | `git tag -l \| xargs git tag -d` — must happen after commit so HEAD is clean |
-| 9 | Create 23 new `v0.x` tags per mapping table | high | @developer | [ ] pending | 8 | See tag mapping below; `v0.23` points at the commit from Task 7 |
-| 10 | Delete all remote git tags | high | @developer | [ ] pending | 9 | `git push origin --delete <tag>` for each of the 51 old tags |
-| 11 | Push new tags to remote | high | @developer | [ ] pending | 10 | `git push origin --tags` |
-| 12 | Verify tag state | medium | @tester | [ ] pending | 11 | `git tag --sort=v:refname` shows `v0.1`–`v0.23`; `make build` produces correct version |
+| 7 | Commit all file changes | medium | @committer | [x] complete | 6 | Commit: `dc8923d` (rebased from `a103ee4`) |
+| 8 | Delete all local git tags | high | @developer | [x] complete | 7 | All 52 old local tags deleted |
+| 9 | Create 23 new `v0.x` tags per mapping table | high | @developer | [x] complete | 8 | `v0.1`–`v0.23` created; `v0.23` → `dc8923d` |
+| 10 | Delete all remote git tags | high | @developer | [x] complete | 9 | All 52 old remote tags deleted in one push |
+| 11 | Push new tags to remote | high | @developer | [x] complete | 10 | All 23 new tags + 2 commits pushed; rebase resolved divergence |
+| 12 | Verify tag state | medium | @tester | [~] in-process | 11 | `git tag --sort=v:refname` shows `v0.1`–`v0.23`; `make build` produces correct version |
 | 13 | *(Manual)* Delete GitHub Releases via web UI | high | @developer | [ ] pending | 12 | Must be done by the user — `gh` CLI unavailable due to account policy |
 
 ---
