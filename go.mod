@@ -1,6 +1,6 @@
 module github.com/cwlls/pixe
 
-go 1.25.0
+go 1.24.2
 
 require (
 	github.com/abema/go-mp4 v1.4.1
