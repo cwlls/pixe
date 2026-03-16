@@ -61,8 +61,8 @@ func Version() string { return version }
 //
 // Examples:
 //
-//	Release build:  "pixe v0.10.0 (commit: abc1234, built: 2026-03-07T12:00:00Z)"
-//	Snapshot build: "pixe vdev-2159446 (commit: 2159446, built: 2026-03-07T12:00:00Z)"
+//	Release build:  "pixe v0.23 (commit: abc1234, built: 2026-03-16T12:00:00Z)"
+//	Snapshot build: "pixe vdev-2159446 (commit: 2159446, built: 2026-03-16T12:00:00Z)"
 //	Bare go build:  "pixe vdev (commit: unknown, built: unknown)"
 func fullVersion() string {
 	return fmt.Sprintf("pixe v%s (commit: %s, built: %s)", version, commit, buildDate)

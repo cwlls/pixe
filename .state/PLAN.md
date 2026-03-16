@@ -1,40 +1,54 @@
 # Implementation Plan
 
-## Feature: Config file bug fix — alias sigil change (`@` → `+`) and silent parse error reporting
+## Feature: Version scheme migration — semver → `major.minor` with `v0.x` reset
 
-Two bugs prevent `.pixe.yaml` config files from working reliably:
-1. The `@` alias prefix is a YAML reserved character, causing the entire config file to silently fail to parse when `dest: @name` is used unquoted.
-2. `initConfig()` silently swallows all config parse errors, giving users no feedback when their config is not loaded.
+Migrate from three-segment semver (`v2.7.3`) to two-segment `major.minor` (`v0.23`). Delete all 51 legacy tags, create 23 new `v0.x` tags at selected historical commits, update GoReleaser archive naming to use lowercase OS and consistent arch labels, and update all documentation that references old version numbers.
 
-Reference: ARCHITECTURE.md §4.15, §7.2
+Reference: ARCHITECTURE.md §3 (Version Management)
 
 ## Task Summary
 
 | # | Task | Priority | Agent | Status | Depends On | Notes |
 |:--|:-----|:---------|:------|:-------|:-----------|:------|
-| 1 | Change alias sigil from `@` to `+` in `resolveAlias()` | high | @developer | [x] complete | — | Core logic change |
-| 2 | Update `resolveAlias()` tests for `+` sigil | high | @developer | [x] complete | 1 | All 8 test functions in `helpers_test.go` |
-| 3 | Add config parse error reporting to `initConfig()` | high | @developer | [x] complete | — | `cmd/root.go` — distinguish not-found vs parse error |
-| 4 | Add `initConfig()` error reporting tests | high | @developer | [x] complete | 3 | New test file `cmd/root_test.go` or add to existing |
-| 5 | Update `docs/configuration.md` — sigil `@` → `+` | medium | @developer | [x] complete | 1 | 8 occurrences across the file |
-| 6 | Run full test suite and lint | high | @tester | [x] complete | 1, 2, 3, 4, 5 | `make check` must pass |
-| 7 | Commit | low | @committer | [x] complete | 6 | — |
+| 1 | Update `.goreleaser.yaml` archive `name_template` | high | @developer | [x] complete | — | Remove `title .Os`, `x86_64` alias; use raw `.Os`-`.Arch` with hyphens |
+| 2 | Update `cmd/version.go` example comments | low | @developer | [x] complete | — | Change `v0.10.0` → `v0.23` in doc comments |
+| 3 | Update `docs/commands.md` version example | low | @developer | [x] complete | — | Change `v2.0.0` → `v0.23` in `pixe version` output example |
+| 4 | Update `docs/changelog.md` — add version mapping header | medium | @developer | [x] complete | — | Add a note at the top explaining the old→new version mapping; keep old entries as historical record |
+| 5 | Update `CHANGELOG.md` — add version mapping header | medium | @developer | [x] complete | — | Mirror the same note added to `docs/changelog.md` |
+| 6 | Run `make check` — verify all tests and lint pass | high | @tester | [x] complete | 1, 2, 3, 4, 5 | `make check` (fmt-check + vet + unit tests + docs-check) |
+| 7 | Commit all file changes | medium | @committer | [~] in-process | 6 | Commit message: `build: migrate versioning to major.minor scheme with v0.x reset` |
+| 8 | Delete all local git tags | high | @developer | [ ] pending | 7 | `git tag -l \| xargs git tag -d` — must happen after commit so HEAD is clean |
+| 9 | Create 23 new `v0.x` tags per mapping table | high | @developer | [ ] pending | 8 | See tag mapping below; `v0.23` points at the commit from Task 7 |
+| 10 | Delete all remote git tags | high | @developer | [ ] pending | 9 | `git push origin --delete <tag>` for each of the 51 old tags |
+| 11 | Push new tags to remote | high | @developer | [ ] pending | 10 | `git push origin --tags` |
+| 12 | Verify tag state | medium | @tester | [ ] pending | 11 | `git tag --sort=v:refname` shows `v0.1`–`v0.23`; `make build` produces correct version |
+| 13 | *(Manual)* Delete GitHub Releases via web UI | high | @developer | [ ] pending | 12 | Must be done by the user — `gh` CLI unavailable due to account policy |
 
 ---
 
 ## Parallelization Strategy
 
 **Wave 1** (parallel — no dependencies between them):
-- Task 1: sigil change in `resolveAlias()`
-- Task 3: `initConfig()` error reporting
+- Task 1: `.goreleaser.yaml` name_template update
+- Task 2: `cmd/version.go` comment update
+- Task 3: `docs/commands.md` version example update
+- Task 4: `docs/changelog.md` mapping header
+- Task 5: `CHANGELOG.md` mapping header
 
-**Wave 2** (parallel — each depends only on its Wave 1 counterpart):
-- Task 2: `resolveAlias()` tests (depends on 1)
-- Task 4: `initConfig()` tests (depends on 3)
-- Task 5: docs update (depends on 1)
-
-**Wave 3** (sequential):
-- Task 6: full test suite + lint (depends on all above)
+**Wave 2** (sequential gate):
+- Task 6: `make check` (depends on all of Wave 1)
 - Task 7: commit (depends on 6)
+
+**Wave 3** (sequential — git tag surgery, strict ordering):
+- Task 8: delete local tags (depends on 7)
+- Task 9: create new tags (depends on 8)
+- Task 10: delete remote tags (depends on 9)
+- Task 11: push new tags (depends on 10)
+- Task 12: verify (depends on 11)
+
+**Wave 4** (manual):
+- Task 13: user deletes GitHub Releases via web UI
+
+---
 
 

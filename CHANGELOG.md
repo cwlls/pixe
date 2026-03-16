@@ -2,6 +2,11 @@
 
 *This file contains the high-level progress of the project for the user. Contents appear with the newest changes at the top.*
 
+> **Version scheme change (March 2026):** Pixe migrated from three-segment semver (`v2.7.3`) to
+> two-segment `major.minor` (`v0.23`). All releases were re-tagged within the `v0.x` range.
+> The changelog entries below retain their original version numbers for historical reference.
+> See `.state/ARCHITECTURE.md §3.2` for the complete old→new tag mapping.
+
 ---
 
 ## [Unreleased] -- Config File Bug Fix: Alias Sigil and Parse Error Reporting

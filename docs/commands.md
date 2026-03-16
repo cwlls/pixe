@@ -279,7 +279,7 @@ Print version, commit, and build date.
 
 ```bash
 $ pixe version
-pixe v2.0.0 (commit: abc1234, built: 2026-03-11T10:30:00Z)
+pixe v0.23 (commit: abc1234, built: 2026-03-16T10:30:00Z)
 ```
 
 No flags. Prints the version string and exits.

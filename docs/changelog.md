@@ -7,6 +7,12 @@ nav_order: 10
 
 *Newest changes at the top. Version numbers are derived directly from git tags.*
 
+> **Version scheme change (March 2026):** Pixe migrated from three-segment semver (`v2.7.3`) to
+> two-segment `major.minor` (`v0.23`). All releases were re-tagged within the `v0.x` range.
+> The changelog entries below retain their original version numbers for historical reference.
+> See [ARCHITECTURE.md §3.2](https://github.com/cwlls/pixe/blob/main/.state/ARCHITECTURE.md)
+> for the complete old→new tag mapping.
+
 <!-- pixe:begin:changelog -->
 
 ## [Unreleased] -- Config File Bug Fix: Alias Sigil and Parse Error Reporting

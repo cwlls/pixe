@@ -36,13 +36,7 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
-    name_template: >-
-      {{ .ProjectName }}-
-      {{- .Version }}-
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: 'checksums.txt'

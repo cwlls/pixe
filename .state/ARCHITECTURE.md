@@ -38,15 +38,137 @@ Media libraries accumulate across devices, cameras, and cloud exports with incon
 
 ## 3. Version Management
 
-Pixe follows the idiomatic Go convention: the **git tag is the single source of truth** for the version string. No version literals exist in Go source code.
+### 3.1 Versioning Scheme
+
+Pixe uses a **two-segment `major.minor`** version scheme (no patch segment).
+
+- **`major`** — Indicates a **scope of features**. A major version defines a feature set that the project commits to building and perfecting. `v1.x` will be the first milestone release signaling stability and a complete feature set. `v2.x` will expand the scope with new capabilities while preserving everything from `v1.x`.
+- **`minor`** — Incremented for **every release**, whether it introduces features, fixes bugs, or refactors internals. There is no distinction between "feature" and "patch" releases at the version level.
+- **`v0.x`** — The current era. Indicates the project is pre-stable: APIs, CLI flags, config format, and database schema may change between any two releases. Breakage is expected and accepted.
+
+The `v1.0` milestone will be a deliberate declaration that the core feature set is complete, stable, and ready for external users to depend on.
+
+### 3.2 Tag Mapping (Legacy → New)
+
+All 51 legacy semver tags (`v0.9.0` through `v2.7.3`) are deleted and replaced with new `v0.x` tags pointing at the same commits. The mapping compresses each old major-version era into a contiguous range within `0.x`, preserving chronological order while staying below `v1.0`.
+
+| New Tag | Old Tag | Commit | Summary |
+|---|---|---|---|
+| `v0.1` | `v0.9.0` | `9cf050d` | feat: centralized version management |
+| `v0.2` | `v0.10.0` | `add5edc` | feat: locale-aware month directories |
+| `v0.3` | `v1.0.0` | `55fdcd3` | test: SQLite migration suite |
+| `v0.4` | `v1.2.0` | `3031419` | docs: correct CHANGELOG versions |
+| `v0.5` | `v1.4.0` | `74acb04` | feat: pixe query command group |
+| `v0.6` | `v1.5.0` | `99ef454` | feat: atomic copy and --skip-duplicates |
+| `v0.7` | `v1.6.0` | `9ca5b9c` | feat: pixe status command |
+| `v0.8` | `v1.6.2` | `f427956` | refactor: RAW sensor data hashing |
+| `v0.9` | `v1.7.0` | `f904146` | feat: verify command |
+| `v0.10` | `v1.8.0` | `2c508b5` | feat: clean command |
+| `v0.11` | `v1.9.0` | `18b67fe` | feat: source sidecar carry |
+| `v0.12` | `v2.0.0` | `7fffb03` | feat: TUI progress bar |
+| `v0.13` | `v2.1.0` | `f37286d` | docs: comprehensive documentation |
+| `v0.14` | `v2.2.0` | `711b223` | feat: docgen tool |
+| `v0.15` | `v2.2.10` | `901c595` | chore: accumulated fixes (v2.2.1–v2.2.10) |
+| `v0.16` | `v2.3.0` | `f38700b` | feat: ignore system and path templates |
+| `v0.17` | `v2.4.0` | `7b93752` | refactor: remove TUI package |
+| `v0.18` | `v2.5.0` | `175fe5e` | refactor: full-file hashing, sidecar-only metadata |
+| `v0.19` | `v2.6.0` | `c29ebea` | feat: date filters and config profiles |
+| `v0.20` | `v2.6.2` | `fac5d87` | fix: signal handling and repo rename |
+| `v0.21` | `v2.7.0` | `e985757` | docs: documentation site overhaul |
+| `v0.22` | `v2.7.3` | `422988b` | fix: JPEG/PNG error handling |
+| `v0.23` | *(new)* | `826bbbf` | fix: alias sigil change and config error reporting |
+
+**Mapping rationale:**
+
+- Old `v0.9.x` (8 tags): Early build-system churn. Compressed to `v0.1`–`v0.2` (first and last meaningful commits; the intermediate tags were version-bump-only).
+- Old `v1.x` (14 tags): Feature build-out era. Compressed to `v0.3`–`v0.11`, keeping tags at feature-introducing minor releases and skipping patch-only releases.
+- Old `v2.x` (29 tags): Maturation era. Compressed to `v0.12`–`v0.22`, grouping the long `v2.2.x` bugfix run into a single tag at `v2.2.10`.
+- Current HEAD (1 unreleased commit): Tagged as `v0.23`.
+
+### 3.3 Migration Workflow
+
+**Step 1 — Delete all old tags locally and on remote:**
+
+```bash
+# Delete all local tags
+git tag -l | xargs git tag -d
+
+# Delete all remote tags
+git tag -l | xargs -I{} git push origin --delete {}
+```
+
+**Step 2 — Create new tags:**
+
+```bash
+git tag v0.1  9cf050d
+git tag v0.2  add5edc
+git tag v0.3  55fdcd3
+# ... (full list per mapping table above)
+git tag v0.23 826bbbf
+```
+
+**Step 3 — Push new tags:**
+
+```bash
+git push origin --tags
+```
+
+**Step 4 — Delete GitHub Releases (manual):**
+
+Because `gh` CLI is not available due to account policy constraints, all existing GitHub Releases must be deleted manually through the GitHub web UI before pushing new tags. GoReleaser will create new releases when the new tags are pushed (if desired) or on the next tagged release going forward.
+
+**Step 5 — Verify:**
+
+```bash
+git tag --sort=v:refname    # should show v0.1 through v0.23
+pixe version                # should show "dev" or "dev-<commit>" for local builds
+```
+
+### 3.4 Implementation Details
 
 - **Location:** `cmd/version.go` — unexported `version`, `commit`, `buildDate` vars injected via `-ldflags -X`.
 - **Build:** GoReleaser (`.goreleaser.yaml`) is the single authority for how binaries are built. The Makefile delegates to `goreleaser build`.
-- **Dev builds:** Plain `go build` → `"dev"`. `make build` → `"dev-<commit>"`. Tagged releases → `"0.10.0"`.
+- **Dev builds:** Plain `go build` → `"dev"`. `make build` → `"dev-<commit>"`. Tagged releases → `"0.23"`.
 - **Consumers:** `pixe version` CLI, pipeline manifest stamping, archive database `runs.pixe_version`.
 - **Version bump:** Tag + push. No source file changes needed.
+- **Release workflow:** `.github/workflows/release.yml` triggers on `v*` tags — no changes needed. The two-segment format (`v0.23`) matches the `v*` glob.
 
 See `cmd/version.go` for the full implementation including `fullVersion()` and the exported `Version()` getter.
+
+### 3.5 Release Archive Naming
+
+GoReleaser archive filenames use lowercase OS names, consistent architecture labels, and hyphens as the logical separator between fields.
+
+**Template:**
+
+```
+pixe-<version>-<os>-<arch>.<ext>
+```
+
+**Naming rules:**
+
+- **OS:** lowercase (`darwin`, `linux`, `windows`).
+- **Architecture:** Use Go's native `GOARCH` values consistently (`amd64`, `arm64`). No aliases like `x86_64` — the Go ecosystem universally uses `amd64`, and matching it avoids the visual inconsistency of `x86_64` (underscored) next to `arm64` (not underscored).
+- **Separator:** Hyphen (`-`) between all top-level fields. No underscores in the template — underscores only appear if they are part of a field value (which they are not, given the rules above).
+- **Extension:** `.tar.gz` for Unix, `.zip` for Windows.
+
+**Examples for `v0.23`:**
+
+```
+pixe-0.23-darwin-arm64.tar.gz
+pixe-0.23-darwin-amd64.tar.gz
+pixe-0.23-linux-arm64.tar.gz
+pixe-0.23-linux-amd64.tar.gz
+pixe-0.23-windows-amd64.zip
+```
+
+**GoReleaser `name_template` change:**
+
+```yaml
+name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+```
+
+This replaces the previous template that used `title .Os` (producing `Darwin`, `Linux`) and mapped `amd64` → `x86_64`. The new template uses GoReleaser's raw `.Os` and `.Arch` values directly, which are already lowercase and consistent.
 
 ---
 
