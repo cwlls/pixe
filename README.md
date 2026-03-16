@@ -188,7 +188,7 @@ pixe sort --source /photos --dest /archive
 Verify the integrity of a previously sorted archive:
 
 ```bash
-pixe verify --dir /path/to/archive [options]
+pixe verify --dest /path/to/archive [options]
 ```
 
 <!-- pixe:begin:verify-flags -->
@@ -214,7 +214,7 @@ Exit code `0` = all verified. Exit code `1` = one or more mismatches.
 Resume an interrupted sort operation:
 
 ```bash
-pixe resume --dir /path/to/archive
+pixe resume --dest /path/to/archive
 ```
 
 <!-- pixe:begin:resume-flags -->
@@ -239,7 +239,7 @@ Finds the most recent interrupted run in the archive database and re-sorts from 
 Query the archive database without modifying any files:
 
 ```bash
-pixe query <subcommand> --dir /path/to/archive [--json]
+pixe query <subcommand> --dest /path/to/archive [--json]
 ```
 
 <!-- pixe:begin:query-subs -->
@@ -344,7 +344,7 @@ Exit code `0` always on success (unsorted files are not an error condition).
 Perform maintenance on an archive: remove orphaned temp files, clean up orphaned XMP sidecars, and optionally compact the database.
 
 ```bash
-pixe clean --dir /path/to/archive [options]
+pixe clean --dest /path/to/archive [options]
 ```
 
 <!-- pixe:begin:clean-flags -->
@@ -374,7 +374,7 @@ Example `.pixe.yaml`:
 ```yaml
 algorithm: sha1
 workers: 8
-copyright: "Copyright {{.Year}} My Family, all rights reserved"
+copyright: "Copyright {year} My Family, all rights reserved"
 camera_owner: "Wells Family"
 ```
 

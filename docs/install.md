@@ -46,7 +46,7 @@ pixe status
 Verify archive integrity (re-hashes every file):
 
 ```bash
-pixe verify --dir ~/Archive
+pixe verify --dest ~/Archive
 ```
 
 > **Tip:** Run `pixe sort --dry-run` first to preview exactly what would happen — no files are copied.

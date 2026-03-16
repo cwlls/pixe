@@ -58,7 +58,7 @@ $ pixe sort --source ~/Photos --dest ~/Archive --recursive
 $ pixe sort --dest ~/Archive --dry-run
 
 # With copyright tagging and duplicate skipping
-$ pixe sort --dest ~/Archive --copyright "Copyright {{.Year}} My Family" --skip-duplicates
+$ pixe sort --dest ~/Archive --copyright "Copyright {year} My Family" --skip-duplicates
 
 # Ignore OS junk files
 $ pixe sort --dest ~/Archive --ignore ".DS_Store" --ignore "Thumbs.db"
@@ -107,7 +107,7 @@ Re-hash every file in the archive to confirm integrity.
 Walks a previously sorted archive, parses checksums from filenames, recomputes data-only hashes, and reports mismatches. Use this to confirm your archive is intact after a disk migration or NAS transfer.
 
 ```bash
-$ pixe verify --dir /path/to/archive [options]
+$ pixe verify --dest /path/to/archive [options]
 ```
 
 <!-- pixe:begin:verify-flags -->
@@ -137,7 +137,7 @@ Resume an interrupted sort operation.
 Finds the most recent interrupted run in the archive database and re-sorts from the original source directory. Files already marked complete are skipped automatically.
 
 ```bash
-$ pixe resume --dir /path/to/archive
+$ pixe resume --dest /path/to/archive
 ```
 
 <!-- pixe:begin:resume-flags -->
@@ -164,7 +164,7 @@ Read-only queries against the archive database.
 Read-only interrogation of the archive SQLite database. No files are modified. All subcommands accept `--json` for machine-readable output.
 
 ```bash
-$ pixe query <subcommand> --dir /path/to/archive [--json]
+$ pixe query <subcommand> --dest /path/to/archive [--json]
 ```
 
 <!-- pixe:begin:query-flags -->
@@ -196,11 +196,11 @@ $ pixe query <subcommand> --dir /path/to/archive [--json]
 ### Examples
 
 ```bash
-$ pixe query runs --dir ~/Archive
-$ pixe query run a1b2c3d4 --dir ~/Archive
-$ pixe query duplicates --dir ~/Archive --pairs
-$ pixe query files --dir ~/Archive --from 2024-01-01 --to 2024-12-31
-$ pixe query inventory --dir ~/Archive --json | jq '.results | length'
+$ pixe query runs --dest ~/Archive
+$ pixe query run a1b2c3d4 --dest ~/Archive
+$ pixe query duplicates --dest ~/Archive --pairs
+$ pixe query files --dest ~/Archive --from 2024-01-01 --to 2024-12-31
+$ pixe query inventory --dest ~/Archive --json | jq '.results | length'
 ```
 
 ---
@@ -212,7 +212,7 @@ Remove orphaned temp files and compact the archive database.
 Maintenance command for a destination archive. Removes `.pixe-tmp` files left by interrupted runs, removes orphaned XMP sidecars, and optionally runs `VACUUM` on the SQLite database to reclaim space.
 
 ```bash
-$ pixe clean --dir /path/to/archive [options]
+$ pixe clean --dest /path/to/archive [options]
 ```
 
 <!-- pixe:begin:clean-flags -->
@@ -236,7 +236,7 @@ Show archive statistics and summary dashboard.
 Displays totals, format breakdown, date range, error rate, and last import date for a destination archive. All data is read from the archive database — no files are modified.
 
 ```bash
-$ pixe stats --dir /path/to/archive [options]
+$ pixe stats --dest /path/to/archive [options]
 ```
 
 <!-- pixe:begin:stats-flags -->
