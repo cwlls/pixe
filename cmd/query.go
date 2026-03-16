@@ -57,9 +57,9 @@ Use --json to receive machine-readable output suitable for scripting.`,
 // openQueryDB is the PersistentPreRunE hook that resolves the database path
 // and opens it read-only. The resulting handle is stored in queryDB.
 func openQueryDB(cmd *cobra.Command, args []string) error {
-	dir := viper.GetString("query_dest")
-	if dir == "" {
-		return fmt.Errorf("--dest is required")
+	dir, err := resolveDest("query_dest")
+	if err != nil {
+		return err
 	}
 
 	// Resolve to absolute path and validate.

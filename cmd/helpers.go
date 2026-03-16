@@ -61,7 +61,6 @@ func resolveConfig() (*config.AppConfig, error) {
 
 	cfg := &config.AppConfig{
 		Source:               viper.GetString("source"),
-		Destination:          viper.GetString("dest"),
 		Workers:              viper.GetInt("workers"),
 		Algorithm:            viper.GetString("algorithm"),
 		Copyright:            viper.GetString("copyright"),
@@ -280,6 +279,30 @@ func resolveAlias(dest string, aliases map[string]string) (string, error) {
 		path = filepath.Join(home, path[2:])
 	}
 	return path, nil
+}
+
+// resolveDest resolves the destination directory from Viper configuration.
+// It checks the command-specific prefixed key first (e.g., "verify_dest"),
+// falls back to the global "dest" key (from config file / env var / PIXE_DEST),
+// then resolves any +alias prefix via resolveAlias.
+//
+// resolveDest does NOT validate that the path exists or is a directory —
+// that responsibility stays with each command (some create it, some require
+// it to exist, stats delegates to dblocator).
+func resolveDest(prefixedKey string) (string, error) {
+	dir := viper.GetString(prefixedKey)
+	if dir == "" {
+		dir = viper.GetString("dest")
+	}
+	if dir == "" {
+		return "", fmt.Errorf("--dest is required")
+	}
+	aliases := viper.GetStringMapString("aliases")
+	resolved, err := resolveAlias(dir, aliases)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 // loadProfile loads a named config profile and merges it into the global

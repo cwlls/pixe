@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 // ---------------------------------------------------------------------------
@@ -134,5 +136,119 @@ func TestResolveAlias_multipleAliasesListedOnError(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error message missing %q; got: %v", name, err)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveDest
+// ---------------------------------------------------------------------------
+
+func TestResolveDest_prefixedKeyTakesPrecedence(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("sort_dest", "/from/flag")
+	viper.Set("dest", "/from/config")
+	got, err := resolveDest("sort_dest")
+	if err != nil {
+		t.Fatalf("resolveDest: unexpected error: %v", err)
+	}
+	if got != "/from/flag" {
+		t.Errorf("resolveDest = %q, want %q", got, "/from/flag")
+	}
+}
+
+func TestResolveDest_fallbackToGlobalDest(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("dest", "/from/config")
+	got, err := resolveDest("sort_dest")
+	if err != nil {
+		t.Fatalf("resolveDest: unexpected error: %v", err)
+	}
+	if got != "/from/config" {
+		t.Errorf("resolveDest = %q, want %q", got, "/from/config")
+	}
+}
+
+func TestResolveDest_emptyBothReturnsError(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	_, err := resolveDest("sort_dest")
+	if err == nil {
+		t.Fatal("resolveDest: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--dest is required") {
+		t.Errorf("error should mention '--dest is required'; got: %v", err)
+	}
+}
+
+func TestResolveDest_aliasResolved(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("dest", "+nas")
+	viper.Set("aliases", map[string]string{"nas": "/Volumes/NAS/Photos"})
+	got, err := resolveDest("sort_dest")
+	if err != nil {
+		t.Fatalf("resolveDest: unexpected error: %v", err)
+	}
+	if got != "/Volumes/NAS/Photos" {
+		t.Errorf("resolveDest = %q, want %q", got, "/Volumes/NAS/Photos")
+	}
+}
+
+func TestResolveDest_aliasFromPrefixedKey(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("verify_dest", "+backup")
+	viper.Set("aliases", map[string]string{"backup": "/mnt/backup"})
+	got, err := resolveDest("verify_dest")
+	if err != nil {
+		t.Fatalf("resolveDest: unexpected error: %v", err)
+	}
+	if got != "/mnt/backup" {
+		t.Errorf("resolveDest = %q, want %q", got, "/mnt/backup")
+	}
+}
+
+func TestResolveDest_unknownAliasReturnsError(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("dest", "+unknown")
+	viper.Set("aliases", map[string]string{"nas": "/Volumes/NAS"})
+	_, err := resolveDest("sort_dest")
+	if err == nil {
+		t.Fatal("resolveDest: expected error for unknown alias, got nil")
+	}
+}
+
+func TestResolveDest_literalPathPassthrough(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("dest", "/literal/path")
+	got, err := resolveDest("sort_dest")
+	if err != nil {
+		t.Fatalf("resolveDest: unexpected error: %v", err)
+	}
+	if got != "/literal/path" {
+		t.Errorf("resolveDest = %q, want %q", got, "/literal/path")
+	}
+}
+
+func TestResolveDest_tildeExpandedInAlias(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory:", err)
+	}
+	viper.Set("dest", "+home")
+	viper.Set("aliases", map[string]string{"home": "~/Photos"})
+	got, err := resolveDest("sort_dest")
+	if err != nil {
+		t.Fatalf("resolveDest: unexpected error: %v", err)
+	}
+	want := filepath.Join(home, "Photos")
+	if got != want {
+		t.Errorf("resolveDest tilde expansion = %q, want %q", got, want)
 	}
 }

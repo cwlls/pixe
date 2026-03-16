@@ -54,9 +54,9 @@ re-enter the pipeline from the beginning.`,
 
 // runResume is the RunE handler for the resume subcommand.
 func runResume(cmd *cobra.Command, args []string) error {
-	dir := viper.GetString("resume_dest")
-	if dir == "" {
-		return fmt.Errorf("--dest is required")
+	dir, err := resolveDest("resume_dest")
+	if err != nil {
+		return err
 	}
 	dbPath := viper.GetString("db_path")
 

@@ -66,9 +66,9 @@ type cleanResult struct {
 
 // runClean is the RunE handler for the clean subcommand.
 func runClean(cmd *cobra.Command, _ []string) error {
-	dir := viper.GetString("clean_dest")
-	if dir == "" {
-		return fmt.Errorf("--dest is required")
+	dir, err := resolveDest("clean_dest")
+	if err != nil {
+		return err
 	}
 	dbPath := viper.GetString("clean_db_path")
 	dryRun := viper.GetBool("clean_dry_run")

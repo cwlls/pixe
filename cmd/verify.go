@@ -49,12 +49,11 @@ Exit code 1 means one or more mismatches were detected.`,
 
 // runVerify is the RunE handler for the verify subcommand.
 func runVerify(cmd *cobra.Command, args []string) error {
-	dir := viper.GetString("verify_dest")
-	algorithm := viper.GetString("algorithm")
-
-	if dir == "" {
-		return fmt.Errorf("--dest is required")
+	dir, err := resolveDest("verify_dest")
+	if err != nil {
+		return err
 	}
+	algorithm := viper.GetString("algorithm")
 
 	// Validate directory exists.
 	if info, err := os.Stat(dir); err != nil {

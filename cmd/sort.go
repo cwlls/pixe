@@ -98,9 +98,10 @@ func runSort(cmd *cobra.Command, args []string) error {
 	}
 
 	// ------------------------------------------------------------------
-	// 1d. Resolve destination alias (@name → filesystem path).
+	// 1d. Resolve destination: command-specific key → global "dest" key
+	//     → +alias expansion.
 	// ------------------------------------------------------------------
-	resolvedDest, err := resolveAlias(cfg.Destination, cfg.Aliases)
+	resolvedDest, err := resolveDest("sort_dest")
 	if err != nil {
 		return err
 	}
@@ -128,10 +129,6 @@ func runSort(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	// 2. Validate inputs.
 	// ------------------------------------------------------------------
-	if cfg.Destination == "" {
-		return fmt.Errorf("--dest is required")
-	}
-
 	// Source must exist and be a directory.
 	srcInfo, err := os.Stat(cfg.Source)
 	if err != nil {
@@ -287,7 +284,7 @@ func init() {
 
 	// Bind sort-specific flags to Viper.
 	_ = viper.BindPFlag("source", sortCmd.Flags().Lookup("source"))
-	_ = viper.BindPFlag("dest", sortCmd.Flags().Lookup("dest"))
+	_ = viper.BindPFlag("sort_dest", sortCmd.Flags().Lookup("dest"))
 	_ = viper.BindPFlag("copyright", sortCmd.Flags().Lookup("copyright"))
 	_ = viper.BindPFlag("camera_owner", sortCmd.Flags().Lookup("camera-owner"))
 	_ = viper.BindPFlag("dry_run", sortCmd.Flags().Lookup("dry-run"))

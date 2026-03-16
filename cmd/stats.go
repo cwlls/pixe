@@ -38,9 +38,9 @@ and last import date. All data is read from the archive database.`,
 }
 
 func runStats(cmd *cobra.Command, _ []string) error {
-	dir := viper.GetString("stats_dest")
-	if dir == "" {
-		return fmt.Errorf("--dest is required")
+	dir, err := resolveDest("stats_dest")
+	if err != nil {
+		return err
 	}
 
 	dbPath := viper.GetString("stats_db_path")
