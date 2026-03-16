@@ -21,8 +21,8 @@ Reference: ARCHITECTURE.md §3 (Version Management)
 | 9 | Create 23 new `v0.x` tags per mapping table | high | @developer | [x] complete | 8 | `v0.1`–`v0.23` created; `v0.23` → `dc8923d` |
 | 10 | Delete all remote git tags | high | @developer | [x] complete | 9 | All 52 old remote tags deleted in one push |
 | 11 | Push new tags to remote | high | @developer | [x] complete | 10 | All 23 new tags + 2 commits pushed; rebase resolved divergence |
-| 12 | Verify tag state | medium | @tester | [~] in-process | 11 | `git tag --sort=v:refname` shows `v0.1`–`v0.23`; `make build` produces correct version |
-| 13 | *(Manual)* Delete GitHub Releases via web UI | high | @developer | [ ] pending | 12 | Must be done by the user — `gh` CLI unavailable due to account policy |
+| 12 | Verify tag state | medium | @tester | [x] complete | 11 | `git tag --sort=v:refname` shows `v0.1`–`v0.23`; `make build` produces correct version |
+| 13 | *(Manual)* Delete GitHub Releases via web UI | high | @developer | [ ] pending | 12 | **User action required.** Cannot be automated. Visit https://github.com/cwlls/pixe/releases and delete all 52 legacy releases (v2.0.0–v2.7.3). Keep only the 23 new v0.x releases. |
 
 ---
 
@@ -50,5 +50,24 @@ Reference: ARCHITECTURE.md §3 (Version Management)
 - Task 13: user deletes GitHub Releases via web UI
 
 ---
+
+## Completion Summary
+
+**Status:** 12 of 13 tasks complete. Task 13 is a manual user action.
+
+**What was accomplished:**
+- ✅ Migrated version scheme from three-segment semver (`v2.7.3`) to two-segment `major.minor` (`v0.23`)
+- ✅ Updated GoReleaser archive naming to use lowercase OS and consistent architecture labels
+- ✅ Updated all documentation (code comments, `docs/commands.md`, `docs/changelog.md`, `CHANGELOG.md`) to reflect the new scheme
+- ✅ Deleted all 52 legacy git tags from local and remote repositories
+- ✅ Created 23 new `v0.x` tags at selected historical commits (v0.1 through v0.23)
+- ✅ Pushed all changes and new tags to remote
+- ✅ Verified tag state and build output
+
+**Remaining:**
+- Task 13: User must manually delete the 52 legacy GitHub Releases via the web UI (https://github.com/cwlls/pixe/releases). The `gh` CLI is unavailable due to account policy, so this step cannot be automated.
+
+**Documentation:**
+- ARCHITECTURE.md §3 (Version Management) is fully up to date and documents the new scheme.
 
 
