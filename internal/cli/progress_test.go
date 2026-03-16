@@ -17,6 +17,7 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -394,5 +395,76 @@ func TestProgressModel_ViewDiscoverySpinner(t *testing.T) {
 	view = m.View()
 	if strings.Contains(view, "Discovering") {
 		t.Errorf("View() still contains 'Discovering' after EventDiscoverDone\ngot:\n%s", view)
+	}
+}
+
+// TestProgressModel_DurationStoredOnRunComplete verifies that the duration from
+// RunSummary is stored on the model when EventRunComplete is received.
+func TestProgressModel_DurationStoredOnRunComplete(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	const wantDuration = 83 * time.Second
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind: pixeprogress.EventRunComplete,
+		Summary: &pixeprogress.RunSummary{
+			Processed: 5,
+			Duration:  wantDuration,
+		},
+	})
+
+	if m.duration != wantDuration {
+		t.Errorf("duration = %v, want %v", m.duration, wantDuration)
+	}
+	if !m.done {
+		t.Error("done = false, want true after EventRunComplete")
+	}
+}
+
+// TestProgressModel_ViewShowsElapsedOnDone verifies that View() appends the
+// formatted elapsed time to the status counter line once the run is complete.
+func TestProgressModel_ViewShowsElapsedOnDone(t *testing.T) {
+	m, bus := newTestModel("sort")
+	defer bus.Close()
+
+	// Before completion, elapsed time must not appear.
+	viewBefore := m.View()
+	if strings.Contains(viewBefore, "(1m 23s)") {
+		t.Errorf("View() contains elapsed time before run complete\ngot:\n%s", viewBefore)
+	}
+
+	// 83 seconds → "1m 23s"
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind: pixeprogress.EventRunComplete,
+		Summary: &pixeprogress.RunSummary{
+			Processed: 10,
+			Duration:  83 * time.Second,
+		},
+	})
+
+	viewAfter := m.View()
+	if !strings.Contains(viewAfter, "(1m 23s)") {
+		t.Errorf("View() missing elapsed time '(1m 23s)' after run complete\ngot:\n%s", viewAfter)
+	}
+}
+
+// TestProgressModel_VerifyViewShowsElapsedOnDone verifies that verify mode also
+// appends the formatted elapsed time after EventVerifyDone.
+func TestProgressModel_VerifyViewShowsElapsedOnDone(t *testing.T) {
+	m, bus := newTestModel("verify")
+	defer bus.Close()
+
+	// 45 seconds → "45s"
+	m = sendEvent(t, m, pixeprogress.Event{
+		Kind: pixeprogress.EventVerifyDone,
+		Summary: &pixeprogress.RunSummary{
+			Verified: 48,
+			Duration: 45 * time.Second,
+		},
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "(45s)") {
+		t.Errorf("View() missing elapsed time '(45s)' after verify done\ngot:\n%s", view)
 	}
 }

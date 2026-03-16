@@ -116,6 +116,7 @@ type ProgressModel struct {
 	startedAt time.Time
 	width     int
 	done      bool
+	duration  time.Duration // total run duration, set on EventRunComplete / EventVerifyDone
 }
 
 // NewProgressModel creates a ProgressModel for the given bus, source/dest
@@ -261,6 +262,7 @@ func (m *ProgressModel) handleEvent(e pixeprogress.Event) {
 	case pixeprogress.EventRunComplete, pixeprogress.EventVerifyDone:
 		m.done = true
 		if e.Summary != nil {
+			m.duration = e.Summary.Duration
 			if m.mode == "sort" {
 				m.copied = e.Summary.Processed - e.Summary.Duplicates
 				m.duplicates = e.Summary.Duplicates
@@ -362,6 +364,10 @@ func (m ProgressModel) View() string {
 		sb.WriteString("  │  ")
 		sb.WriteString(labelStyle.Render("unrecognised: "))
 		sb.WriteString(counterStyle.Render(fmt.Sprintf("%d", m.skipped)))
+	}
+	if m.done && m.duration > 0 {
+		sb.WriteString("  ")
+		sb.WriteString(elapsedStyle.Render("(" + pixeprogress.FormatElapsedDuration(m.duration) + ")"))
 	}
 	sb.WriteString("\n")
 

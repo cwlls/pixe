@@ -57,11 +57,12 @@
 - **Inline sidecar annotations in verify output** — The verify command now recognizes sidecar files (`.xmp`, `.aae`) as expected artifacts and does not report them as unrecognised. Associated sidecars are shown as inline annotations on the parent file's verification line (same format as sort). Orphaned sidecars (no matching parent) are still reported as unrecognised.
 
 - **Run duration tracking and display** — Sort run elapsed time is now tracked and displayed across all contexts:
-  - Sort summary includes a second line with elapsed time: `(1m 23s)`
-  - `query run <id>` header includes a `Duration:` line
-  - `query runs` table includes a `DURATION` column
-  - JSON output includes `duration_seconds` field (float64)
-  - Duration is computed on the fly from `started_at` and `finished_at` — no schema change
+   - Sort summary includes a second line with elapsed time: `(1m 23s)`
+   - `query run <id>` header includes a `Duration:` line
+   - `query runs` table includes a `DURATION` column
+   - JSON output includes `duration_seconds` field (float64)
+   - Duration is computed on the fly from `started_at` and `finished_at` — no schema change
+   - TUI progress bar (`--progress` mode) shows total elapsed time in the final status counter line for both `sort` and `verify` commands (e.g., `copied: 38  │  dupes: 2  │  skipped: 1  │  errors: 0  (1m 23s)`)
 
 - **Truncation ellipsis in query output** — Truncated checksums and run IDs in table display now show a trailing ellipsis (`…`) to visually indicate the value is not complete. Example: `7d97e98f…` instead of `7d97e98f`. Full values are always available in `--json` output.
 

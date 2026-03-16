@@ -44,9 +44,9 @@ func displayDest(destLabel, dest string) string {
 	return destLabel + "/" + dest
 }
 
-// formatElapsedDuration formats a time.Duration as a compact human-readable
+// FormatElapsedDuration formats a time.Duration as a compact human-readable
 // string for the sort summary line (e.g. "1m 23s", "45s", "0.8s").
-func formatElapsedDuration(d time.Duration) string {
+func FormatElapsedDuration(d time.Duration) string {
 	if d < time.Second {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
@@ -146,7 +146,7 @@ func (pw *PlainWriter) Run(events <-chan Event) {
 				_, _ = fmt.Fprintf(pw.w, "\nDone. processed=%d duplicates=%d skipped=%d errors=%d\n",
 					s.Processed, s.Duplicates, s.Skipped, s.Errors)
 				if s.Duration > 0 {
-					_, _ = fmt.Fprintf(pw.w, "(%s)\n", formatElapsedDuration(s.Duration))
+					_, _ = fmt.Fprintf(pw.w, "(%s)\n", FormatElapsedDuration(s.Duration))
 				}
 			}
 

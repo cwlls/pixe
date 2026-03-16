@@ -63,3 +63,7 @@ var workerETAStyle = lipgloss.NewStyle().
 var discoveryStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#555555", Dark: "#aaaaaa"}).
 	Italic(true)
+
+// elapsedStyle renders the total elapsed time on completion (dim).
+var elapsedStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#777777", Dark: "#888888"})
