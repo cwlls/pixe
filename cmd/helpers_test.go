@@ -17,6 +17,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -250,5 +251,97 @@ func TestResolveDest_tildeExpandedInAlias(t *testing.T) {
 	want := filepath.Join(home, "Photos")
 	if got != want {
 		t.Errorf("resolveDest tilde expansion = %q, want %q", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveWorkers
+// ---------------------------------------------------------------------------
+
+func TestResolveWorkers_prefixedKeyTakesPrecedence(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("sort_workers", 4)
+	viper.Set("workers", 8)
+	got := resolveWorkers("sort_workers")
+	if got != 4 {
+		t.Errorf("resolveWorkers = %d, want 4", got)
+	}
+}
+
+func TestResolveWorkers_fallbackToGlobalWorkers(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("workers", 8)
+	got := resolveWorkers("sort_workers")
+	if got != 8 {
+		t.Errorf("resolveWorkers = %d, want 8", got)
+	}
+}
+
+func TestResolveWorkers_defaultToNumCPU(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	// Neither key set — should default to runtime.NumCPU().
+	got := resolveWorkers("sort_workers")
+	want := runtime.NumCPU()
+	if got != want {
+		t.Errorf("resolveWorkers = %d, want runtime.NumCPU() = %d", got, want)
+	}
+}
+
+func TestResolveWorkers_negativeDefaultsToNumCPU(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("sort_workers", -1)
+	got := resolveWorkers("sort_workers")
+	want := runtime.NumCPU()
+	if got != want {
+		t.Errorf("resolveWorkers(-1) = %d, want runtime.NumCPU() = %d", got, want)
+	}
+}
+
+func TestResolveWorkers_zeroGlobalDefaultsToNumCPU(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("workers", 0)
+	got := resolveWorkers("sort_workers")
+	want := runtime.NumCPU()
+	if got != want {
+		t.Errorf("resolveWorkers(global=0) = %d, want runtime.NumCPU() = %d", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveDBPath
+// ---------------------------------------------------------------------------
+
+func TestResolveDBPath_prefixedKeyTakesPrecedence(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("clean_db_path", "/a/db.sqlite")
+	viper.Set("db_path", "/b/db.sqlite")
+	got := resolveDBPath("clean_db_path")
+	if got != "/a/db.sqlite" {
+		t.Errorf("resolveDBPath = %q, want %q", got, "/a/db.sqlite")
+	}
+}
+
+func TestResolveDBPath_fallbackToGlobalDBPath(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("db_path", "/b/db.sqlite")
+	got := resolveDBPath("clean_db_path")
+	if got != "/b/db.sqlite" {
+		t.Errorf("resolveDBPath = %q, want %q", got, "/b/db.sqlite")
+	}
+}
+
+func TestResolveDBPath_emptyBothReturnsEmpty(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	got := resolveDBPath("clean_db_path")
+	if got != "" {
+		t.Errorf("resolveDBPath = %q, want empty string", got)
 	}
 }

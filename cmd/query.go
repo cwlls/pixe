@@ -34,9 +34,6 @@ var (
 
 	// queryDir is the resolved absolute path to the archive directory (dirB).
 	queryDir string
-
-	// jsonOut controls whether subcommands emit JSON instead of table output.
-	jsonOut bool
 )
 
 // queryCmd is the "pixe query" parent command.
@@ -76,7 +73,7 @@ func openQueryDB(cmd *cobra.Command, args []string) error {
 	}
 	queryDir = abs
 
-	dbPath := viper.GetString("query_db_path")
+	dbPath := resolveDBPath("query_db_path")
 
 	loc, err := dblocator.Resolve(queryDir, dbPath)
 	if err != nil {
@@ -113,8 +110,9 @@ func init() {
 
 	queryCmd.PersistentFlags().StringP("dest", "d", "", "archive directory containing the database (required)")
 	queryCmd.PersistentFlags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
-	queryCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit JSON output instead of a table")
+	queryCmd.PersistentFlags().Bool("json", false, "emit JSON output instead of a table")
 
 	_ = viper.BindPFlag("query_dest", queryCmd.PersistentFlags().Lookup("dest"))
 	_ = viper.BindPFlag("query_db_path", queryCmd.PersistentFlags().Lookup("db-path"))
+	_ = viper.BindPFlag("query_json", queryCmd.PersistentFlags().Lookup("json"))
 }

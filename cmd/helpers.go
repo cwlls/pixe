@@ -51,7 +51,7 @@ import (
 
 // resolveConfig reads Viper values and returns a populated *config.AppConfig.
 // Source defaults to the current working directory when not set.
-// Workers defaults to runtime.NumCPU() when <= 0.
+// Workers and DBPath are resolved via resolveWorkers/resolveDBPath helpers.
 // Used by runSort and runGUI.
 func resolveConfig() (*config.AppConfig, error) {
 	pathTemplate := viper.GetString("path_template")
@@ -61,12 +61,12 @@ func resolveConfig() (*config.AppConfig, error) {
 
 	cfg := &config.AppConfig{
 		Source:               viper.GetString("source"),
-		Workers:              viper.GetInt("workers"),
+		Workers:              resolveWorkers("sort_workers"),
 		Algorithm:            viper.GetString("algorithm"),
 		Copyright:            viper.GetString("copyright"),
 		CameraOwner:          viper.GetString("camera_owner"),
 		DryRun:               viper.GetBool("dry_run"),
-		DBPath:               viper.GetString("db_path"),
+		DBPath:               resolveDBPath("sort_db_path"),
 		Recursive:            viper.GetBool("recursive"),
 		SkipDuplicates:       viper.GetBool("skip_duplicates"),
 		Ignore:               viper.GetStringSlice("ignore"),
@@ -110,10 +110,6 @@ func resolveConfig() (*config.AppConfig, error) {
 			return nil, fmt.Errorf("resolve current directory: %w", err)
 		}
 		cfg.Source = cwd
-	}
-
-	if cfg.Workers <= 0 {
-		cfg.Workers = runtime.NumCPU()
 	}
 
 	return cfg, nil
@@ -303,6 +299,33 @@ func resolveDest(prefixedKey string) (string, error) {
 		return "", err
 	}
 	return resolved, nil
+}
+
+// resolveWorkers resolves the worker count from Viper configuration.
+// It checks the command-specific prefixed key first (e.g., "verify_workers"),
+// falls back to the global "workers" key (from config file / env var / PIXE_WORKERS),
+// then defaults to runtime.NumCPU() if still zero or negative.
+func resolveWorkers(prefixedKey string) int {
+	w := viper.GetInt(prefixedKey)
+	if w <= 0 {
+		w = viper.GetInt("workers")
+	}
+	if w <= 0 {
+		w = runtime.NumCPU()
+	}
+	return w
+}
+
+// resolveDBPath resolves the database path from Viper configuration.
+// It checks the command-specific prefixed key first (e.g., "clean_db_path"),
+// falls back to the global "db_path" key (from config file / env var / PIXE_DB_PATH).
+// An empty return value means "auto-resolve" (dblocator will determine the path).
+func resolveDBPath(prefixedKey string) string {
+	p := viper.GetString(prefixedKey)
+	if p == "" {
+		p = viper.GetString("db_path")
+	}
+	return p
 }
 
 // loadProfile loads a named config profile and merges it into the global

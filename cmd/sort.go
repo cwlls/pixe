@@ -262,6 +262,7 @@ func init() {
 	// Sort-specific flags.
 	sortCmd.Flags().StringP("source", "s", "", "source directory containing media files to sort (default: current directory)")
 	sortCmd.Flags().StringP("dest", "d", "", "destination directory for the organized archive (required)")
+	sortCmd.Flags().IntP("workers", "w", 0, "number of concurrent workers (0 = auto: runtime.NumCPU())")
 	sortCmd.Flags().String("copyright", "", `copyright template injected into destination files, e.g. "Copyright {year} My Family" (tokens: {year}, {month}, {monthname}, {day})`)
 	sortCmd.Flags().String("camera-owner", "", "camera owner string injected into destination files")
 	sortCmd.Flags().Bool("dry-run", false, "preview operations without copying any files")
@@ -285,10 +286,11 @@ func init() {
 	// Bind sort-specific flags to Viper.
 	_ = viper.BindPFlag("source", sortCmd.Flags().Lookup("source"))
 	_ = viper.BindPFlag("sort_dest", sortCmd.Flags().Lookup("dest"))
+	_ = viper.BindPFlag("sort_workers", sortCmd.Flags().Lookup("workers"))
 	_ = viper.BindPFlag("copyright", sortCmd.Flags().Lookup("copyright"))
 	_ = viper.BindPFlag("camera_owner", sortCmd.Flags().Lookup("camera-owner"))
 	_ = viper.BindPFlag("dry_run", sortCmd.Flags().Lookup("dry-run"))
-	_ = viper.BindPFlag("db_path", sortCmd.Flags().Lookup("db-path"))
+	_ = viper.BindPFlag("sort_db_path", sortCmd.Flags().Lookup("db-path"))
 	_ = viper.BindPFlag("recursive", sortCmd.Flags().Lookup("recursive"))
 	_ = viper.BindPFlag("skip_duplicates", sortCmd.Flags().Lookup("skip-duplicates"))
 	_ = viper.BindPFlag("ignore", sortCmd.Flags().Lookup("ignore"))

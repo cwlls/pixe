@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // queryInventoryCmd is the "pixe query inventory" subcommand.
@@ -37,7 +38,7 @@ func runQueryInventory(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("archive inventory: %w", err)
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		type entryJSON struct {
 			Destination string  `json:"destination"`
 			Checksum    string  `json:"checksum"`

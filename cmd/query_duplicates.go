@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // queryDuplicatesCmd is the "pixe query duplicates" subcommand.
@@ -49,7 +50,7 @@ func runQueryDuplicateList() error {
 		return fmt.Errorf("list duplicates: %w", err)
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		type dupJSON struct {
 			SourcePath  string  `json:"source_path"`
 			Destination *string `json:"destination,omitempty"`
@@ -111,7 +112,7 @@ func runQueryDuplicatePairs() error {
 		return fmt.Errorf("list duplicate pairs: %w", err)
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		type pairJSON struct {
 			DuplicateSource string `json:"duplicate_source"`
 			DuplicateDest   string `json:"duplicate_dest"`

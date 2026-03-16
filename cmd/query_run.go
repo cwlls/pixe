@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/cwlls/pixe/internal/archivedb"
 )
@@ -66,7 +67,7 @@ func runQueryRun(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("get files for run: %w", err)
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		return printRunJSON(run, files)
 	}
 

@@ -20,13 +20,13 @@ $ pixe sort --dest /path/to/archive [options]
 | Flag                     | Default | Description                                                                                                                         |
 | ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | --config                 |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                                                                             |
-| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                                                           |
 | -a, --algorithm          | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash                                                                         |
 | -q, --quiet              | false   | suppress per-file output; show only the final summary                                                                               |
 | -v, --verbose            | false   | show per-stage timing and debug information                                                                                         |
 | --profile                |         | load a named config profile from ~/.pixe/profiles/<name>.yaml                                                                       |
 | -s, --source             |         | source directory containing media files to sort (default: current directory)                                                        |
 | -d, --dest               |         | destination directory for the organized archive (required)                                                                          |
+| -w, --workers            | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                                                                           |
 | --copyright              |         | copyright template injected into destination files, e.g. "Copyright {year} My Family" (tokens: {year}, {month}, {monthname}, {day}) |
 | --camera-owner           |         | camera owner string injected into destination files                                                                                 |
 | --dry-run                | false   | preview operations without copying any files                                                                                        |
@@ -84,7 +84,6 @@ $ pixe status [options]
 | Flag            | Default | Description                                                          |
 | --------------- | ------- | -------------------------------------------------------------------- |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)              |
-| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())            |
 | -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash          |
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                |
 | -v, --verbose   | false   | show per-stage timing and debug information                          |
@@ -115,7 +114,6 @@ $ pixe verify --dest /path/to/archive [options]
 | Flag            | Default | Description                                                               |
 | --------------- | ------- | ------------------------------------------------------------------------- |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                   |
-| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                 |
 | -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash               |
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                     |
 | -v, --verbose   | false   | show per-stage timing and debug information                               |
@@ -145,13 +143,13 @@ $ pixe resume --dest /path/to/archive
 | Flag            | Default | Description                                                              |
 | --------------- | ------- | ------------------------------------------------------------------------ |
 | --config        |         | config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)                  |
-| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                |
 | -a, --algorithm | sha1    | hash algorithm: md5, sha1 (default), sha256, blake3, xxhash              |
 | -q, --quiet     | false   | suppress per-file output; show only the final summary                    |
 | -v, --verbose   | false   | show per-stage timing and debug information                              |
 | --profile       |         | load a named config profile from ~/.pixe/profiles/<name>.yaml            |
 | -d, --dest      |         | destination directory containing the archive database (required)         |
 | --db-path       |         | explicit path to the SQLite archive database (overrides auto-resolution) |
+| -w, --workers   | 0       | number of concurrent workers (0 = auto: runtime.NumCPU())                |
 
 <!-- pixe:end:resume-flags -->
 

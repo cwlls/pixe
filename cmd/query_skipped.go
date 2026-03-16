@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // querySkippedCmd is the "pixe query skipped" subcommand.
@@ -37,7 +38,7 @@ func runQuerySkipped(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("list skipped: %w", err)
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		type skippedJSON struct {
 			SourcePath string  `json:"source_path"`
 			Reason     *string `json:"reason,omitempty"`

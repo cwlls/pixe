@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // queryRunsCmd is the "pixe query runs" subcommand.
@@ -36,7 +37,7 @@ func runQueryRuns(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("list runs: %w", err)
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		type runJSON struct {
 			ID              string   `json:"id"`
 			Version         string   `json:"version"`

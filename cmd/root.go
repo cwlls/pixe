@@ -65,8 +65,6 @@ func init() {
 		"config file (default: $HOME/.pixe.yaml or ./.pixe.yaml)")
 
 	// Persistent flags inherited by all subcommands.
-	rootCmd.PersistentFlags().IntP("workers", "w", 0,
-		"number of concurrent workers (0 = auto: runtime.NumCPU())")
 	rootCmd.PersistentFlags().StringP("algorithm", "a", "sha1",
 		"hash algorithm: md5, sha1 (default), sha256, blake3, xxhash")
 
@@ -78,7 +76,6 @@ func init() {
 		"load a named config profile from ~/.pixe/profiles/<name>.yaml")
 
 	// Bind persistent flags to Viper so config file values are also respected.
-	_ = viper.BindPFlag("workers", rootCmd.PersistentFlags().Lookup("workers"))
 	_ = viper.BindPFlag("algorithm", rootCmd.PersistentFlags().Lookup("algorithm"))
 	_ = viper.BindPFlag("quiet", rootCmd.PersistentFlags().Lookup("quiet"))
 	_ = viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))

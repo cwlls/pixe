@@ -20,7 +20,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,10 +71,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	useProgress := viper.GetBool("verify_progress") && isatty.IsTerminal(os.Stdout.Fd())
 
 	// Resolve worker count: explicit flag > config > CPU count.
-	workers := viper.GetInt("verify_workers")
-	if workers <= 0 {
-		workers = runtime.NumCPU()
-	}
+	workers := resolveWorkers("verify_workers")
 
 	opts := verify.Options{
 		Dir:      dir,

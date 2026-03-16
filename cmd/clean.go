@@ -70,7 +70,7 @@ func runClean(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	dbPath := viper.GetString("clean_db_path")
+	dbPath := resolveDBPath("clean_db_path")
 	dryRun := viper.GetBool("clean_dry_run")
 	tempOnly := viper.GetBool("clean_temp_only")
 	vacuumOnly := viper.GetBool("clean_vacuum_only")

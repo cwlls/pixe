@@ -43,7 +43,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	dbPath := viper.GetString("stats_db_path")
+	dbPath := resolveDBPath("stats_db_path")
 	loc, err := dblocator.Resolve(dir, dbPath)
 	if err != nil {
 		return fmt.Errorf("resolve database location: %w", err)

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/cwlls/pixe/internal/archivedb"
 )
@@ -104,7 +105,7 @@ func runQueryFiles(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	if jsonOut {
+	if viper.GetBool("query_json") {
 		return printFilesJSON(files)
 	}
 	return printFilesTable(files)

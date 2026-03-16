@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -58,7 +57,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	dbPath := viper.GetString("db_path")
+	dbPath := resolveDBPath("resume_db_path")
 
 	// Validate destination directory exists.
 	if info, err := os.Stat(dir); err != nil {
@@ -112,10 +111,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------
 	// 4. Resolve workers.
 	// ------------------------------------------------------------------
-	workers := viper.GetInt("workers")
-	if workers <= 0 {
-		workers = runtime.NumCPU()
-	}
+	workers := resolveWorkers("resume_workers")
 
 	// ------------------------------------------------------------------
 	// 5. Build hasher using the algorithm recorded in the interrupted run.
@@ -224,7 +220,9 @@ func init() {
 
 	resumeCmd.Flags().StringP("dest", "d", "", "destination directory containing the archive database (required)")
 	resumeCmd.Flags().String("db-path", "", "explicit path to the SQLite archive database (overrides auto-resolution)")
+	resumeCmd.Flags().IntP("workers", "w", 0, "number of concurrent workers (0 = auto: runtime.NumCPU())")
 
 	_ = viper.BindPFlag("resume_dest", resumeCmd.Flags().Lookup("dest"))
-	_ = viper.BindPFlag("db_path", resumeCmd.Flags().Lookup("db-path"))
+	_ = viper.BindPFlag("resume_db_path", resumeCmd.Flags().Lookup("db-path"))
+	_ = viper.BindPFlag("resume_workers", resumeCmd.Flags().Lookup("workers"))
 }
