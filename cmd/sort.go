@@ -248,12 +248,34 @@ func runSort(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Print contextual next-step hints when running interactively.
+	// Suppressed in quiet mode (Verbosity < 0), progress mode (has its own
+	// UI), and when stdout is not a TTY (piped output should be machine-parseable).
+	if cfg.Verbosity >= 0 && !useProgress && isatty.IsTerminal(os.Stdout.Fd()) {
+		printSortHints(os.Stdout, result, cfg.Destination)
+	}
+
 	// Non-zero errors → exit code 1 (Cobra propagates the returned error).
 	if result.Errors > 0 {
 		return fmt.Errorf("%d file(s) failed to process — check output above", result.Errors)
 	}
 
 	return nil
+}
+
+// printSortHints writes contextual next-step suggestions after a sort run.
+// It is a no-op when there are no errors and no skips.
+func printSortHints(w io.Writer, result pipeline.SortResult, dest string) {
+	if result.Errors == 0 && result.Skipped == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(w)
+	if result.Errors > 0 {
+		_, _ = fmt.Fprintf(w, "  %d file(s) had errors. Run pixe doctor for a summary, or pixe doctor --advice for help.\n", result.Errors)
+		_, _ = fmt.Fprintf(w, "  To retry just the errors: pixe retry -d %s\n", dest)
+	} else {
+		_, _ = fmt.Fprintf(w, "  %d file(s) skipped. Run pixe doctor for a summary.\n", result.Skipped)
+	}
 }
 
 func init() {

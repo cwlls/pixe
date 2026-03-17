@@ -358,3 +358,27 @@ func loadProfile(name string, cmd *cobra.Command) error {
 	}
 	return fmt.Errorf("profile %q not found (searched: %v)", name, profilePaths)
 }
+
+// resolveQueryRunFilter reads the --run flag from cmd and resolves the prefix
+// to a full run UUID using the shared queryDB handle. Returns the full UUID,
+// or an empty string if --run was not provided (meaning no filter).
+//
+// Returns an error if the prefix matches zero runs (not found) or more than
+// one run (ambiguous).
+func resolveQueryRunFilter(cmd *cobra.Command) (string, error) {
+	prefix, _ := cmd.Flags().GetString("run")
+	if prefix == "" {
+		return "", nil
+	}
+	runs, err := queryDB.GetRunByPrefix(prefix)
+	if err != nil {
+		return "", fmt.Errorf("resolve run %q: %w", prefix, err)
+	}
+	if len(runs) == 0 {
+		return "", fmt.Errorf("no run matching %q", prefix)
+	}
+	if len(runs) > 1 {
+		return "", fmt.Errorf("ambiguous run prefix %q matches %d runs", prefix, len(runs))
+	}
+	return runs[0].ID, nil
+}

@@ -32,10 +32,27 @@ var querySkippedCmd = &cobra.Command{
 }
 
 // runQuerySkipped is the RunE handler for the "query skipped" subcommand.
-func runQuerySkipped(_ *cobra.Command, _ []string) error {
-	files, err := queryDB.AllSkipped()
+func runQuerySkipped(cmd *cobra.Command, _ []string) error {
+	listMode, _ := cmd.Flags().GetBool("list")
+	if listMode && viper.GetBool("query_json") {
+		return fmt.Errorf("--list and --json are mutually exclusive")
+	}
+
+	runID, err := resolveQueryRunFilter(cmd)
+	if err != nil {
+		return err
+	}
+
+	files, err := queryDB.AllSkippedByRun(runID)
 	if err != nil {
 		return fmt.Errorf("list skipped: %w", err)
+	}
+
+	if listMode {
+		for _, f := range files {
+			_, _ = fmt.Fprintln(os.Stdout, f.SourcePath)
+		}
+		return nil
 	}
 
 	if viper.GetBool("query_json") {
@@ -101,10 +118,15 @@ func runQuerySkipped(_ *cobra.Command, _ []string) error {
 		commaInt(unsupported),
 		commaInt(previously),
 	)
+	if runID != "" {
+		summary += " (run " + truncID(runID) + ")"
+	}
 	printQueryTable(os.Stdout, headers, rows, summary)
 	return nil
 }
 
 func init() {
 	queryCmd.AddCommand(querySkippedCmd)
+	querySkippedCmd.Flags().String("run", "", "filter to a specific run (prefix match)")
+	querySkippedCmd.Flags().Bool("list", false, "output one source file path per line (mutually exclusive with --json)")
 }

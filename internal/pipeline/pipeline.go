@@ -96,6 +96,12 @@ type SortOptions struct {
 	// NoLedger, when true, explicitly opts out of ledger creation without
 	// prompting or warning. Equivalent to the --no-ledger CLI flag.
 	NoLedger bool
+
+	// RetryFiles, when non-nil, bypasses discovery.Walk and processes only
+	// these files. Used by the retry command to re-process errored files
+	// without re-walking the source directory. When nil, the normal discovery
+	// walk is performed.
+	RetryFiles []discovery.DiscoveredFile
 }
 
 // emit sends an event to the bus if one is configured. It is a no-op when
@@ -187,17 +193,25 @@ func Run(opts SortOptions) (SortResult, error) {
 	}
 
 	// ------------------------------------------------------------------
-	// 2. Walk dirA.
+	// 2. Walk dirA (or use pre-built file list for retry mode).
 	// ------------------------------------------------------------------
 	emit(opts.EventBus, progress.Event{Kind: progress.EventDiscoverStart})
-	walkOpts := discovery.WalkOptions{
-		Recursive:     cfg.Recursive,
-		Ignore:        ignore.New(cfg.Ignore),
-		CarrySidecars: cfg.CarrySidecars,
-	}
-	discovered, skipped, err := discovery.Walk(dirA, opts.Registry, walkOpts)
-	if err != nil {
-		return SortResult{}, fmt.Errorf("pipeline: walk source: %w", err)
+	var discovered []discovery.DiscoveredFile
+	var skipped []discovery.SkippedFile
+	if opts.RetryFiles != nil {
+		// Retry mode: skip discovery walk, use the caller-supplied file list.
+		discovered = opts.RetryFiles
+	} else {
+		walkOpts := discovery.WalkOptions{
+			Recursive:     cfg.Recursive,
+			Ignore:        ignore.New(cfg.Ignore),
+			CarrySidecars: cfg.CarrySidecars,
+		}
+		var err error
+		discovered, skipped, err = discovery.Walk(dirA, opts.Registry, walkOpts)
+		if err != nil {
+			return SortResult{}, fmt.Errorf("pipeline: walk source: %w", err)
+		}
 	}
 	emit(opts.EventBus, progress.Event{
 		Kind:    progress.EventDiscoverDone,

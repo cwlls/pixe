@@ -15,6 +15,42 @@ nav_order: 10
 
 <!-- pixe:begin:changelog -->
 
+## [Unreleased] -- Post-Sort Remediation: Doctor, Retry, and Query Enhancements
+
+### Added
+
+- **`pixe doctor` command** — Diagnose problems from the most recent sort run. Reads the ledger by default (no database required) and categorizes errors, skips, and duplicates into 14 human-readable categories (e.g., "Corrupted metadata", "Disk/permission error", "Previously imported"). Supports three modes:
+  - **Ledger mode** (default) — Reads `.pixe_ledger.json` from the source directory. Requires no archive database.
+  - **DB mode** (`--dest`) — Queries the archive database for richer categorization. Supports `--run` (specific run) and `--source` (most recent run for that source) scoping.
+  - **Advice mode** (`--advice`) — Shows plain-language explanations for each problem category and suggested actions (e.g., "Run pixe retry to re-process errored files").
+  - JSON output via `--json` for machine-readable integration.
+
+- **`pixe retry` command** — Re-process only the files that failed, had mismatches, or had tag failures in a specific run. Queries the archive database for errored files, validates that source files still exist, and feeds them directly to the sort pipeline without re-walking the source directory. Creates a new run for auditability. Supports `--run` (specific run), `--source` (most recent run for that source), `--dry-run`, and `--workers` flags.
+
+- **`--run` flag on query subcommands** — `pixe query errors`, `pixe query skipped`, and `pixe query duplicates` now accept `--run <prefix>` to filter results to a specific sort run. Prefix matching is supported for convenience. Useful for investigating problems from a particular run without seeing all historical data.
+
+- **`--list` flag on query subcommands** — `pixe query errors`, `pixe query skipped`, and `pixe query duplicates` now accept `--list` to output one source file path per line (no headers, no summary). Designed for piping to other tools or feeding to `pixe retry`. Mutually exclusive with `--json`.
+
+- **Inline post-sort hints** — After a sort completes, if there are errors or skips, the output now includes contextual hints suggesting next steps (e.g., "Run pixe doctor for a summary, or pixe doctor --advice for help" and "To retry just the errors: pixe retry -d <dest>"). Hints are suppressed in `--quiet` mode, `--progress` mode, and when output is piped.
+
+- **New archivedb query methods** — Added 6 new methods to `internal/archivedb/queries.go`:
+  - `MostRecentRunBySource(sourceDir)` — Find the most recent completed/interrupted run for a specific source directory.
+  - `MostRecentRun()` — Find the most recent completed/interrupted run across all sources.
+  - `FilesWithErrorsByRun(runID)` — Query errored files scoped to a specific run.
+  - `AllSkippedByRun(runID)` — Query skipped files scoped to a specific run.
+  - `AllDuplicatesByRun(runID)` — Query duplicate files scoped to a specific run.
+  - `DuplicatePairsByRun(runID)` — Query duplicate pairs scoped to a specific run.
+
+- **New `internal/doctor/` package** — Pure-logic diagnosis engine that categorizes pipeline errors and skips into 14 human-readable categories. No dependency on archivedb or manifest packages. Exports `Classify()` (map status+reason to category) and `Summarize()` (produce a categorized report from a list of entries).
+
+- **Pipeline retry support** — `SortOptions` now accepts an optional `RetryFiles` field. When set, the pipeline bypasses the discovery walk and processes only the provided files. Used by `pixe retry` to re-process errored files without re-walking the source directory.
+
+### Changed
+
+- **Query subcommand summary lines** — When `--run` is used, the summary line now indicates the run scope (e.g., "5 errors (run a1b2c3d4)").
+
+---
+
 ## [Unreleased] -- Config File Bug Fix: Alias Sigil and Parse Error Reporting
 
 ### Bug Fixes

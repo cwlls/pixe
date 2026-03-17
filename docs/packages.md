@@ -79,6 +79,8 @@ This page is generated from the Go package doc comments in the source tree. Each
 
 **`internal/docgen`** — Package main implements the docgen tool that injects generated content into documentation files using marker-based replacement.
 
+**`internal/doctor`** — Package doctor provides a diagnosis engine that categorizes pipeline errors and skips into human-readable categories with plain-language explanations.
+
 **`internal/fileutil`** — Package fileutil provides shared file-path utilities used across handler and discovery packages.
 
 **`internal/handler/avif`** — Package avif implements the FileTypeHandler contract for AVIF images.

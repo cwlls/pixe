@@ -323,6 +323,180 @@ func (db *DB) AllSkipped() ([]*FileRecord, error) {
 	return scanFileRows(rows)
 }
 
+// MostRecentRunBySource returns the most recently started completed or
+// interrupted run whose source directory matches sourceDir. Returns (nil, nil)
+// if no matching run is found.
+func (db *DB) MostRecentRunBySource(sourceDir string) (*Run, error) {
+	const q = `
+		SELECT id, pixe_version, source, destination, algorithm, workers,
+		       recursive, started_at, finished_at, status
+		FROM runs
+		WHERE source = ?
+		  AND status IN ('completed', 'interrupted')
+		ORDER BY started_at DESC
+		LIMIT 1`
+
+	row := db.conn.QueryRow(q, sourceDir)
+	r, err := scanRun(row)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: most recent run by source: %w", err)
+	}
+	return r, nil
+}
+
+// MostRecentRun returns the most recently started completed or interrupted run
+// across all source directories. Returns (nil, nil) if no runs exist.
+func (db *DB) MostRecentRun() (*Run, error) {
+	const q = `
+		SELECT id, pixe_version, source, destination, algorithm, workers,
+		       recursive, started_at, finished_at, status
+		FROM runs
+		WHERE status IN ('completed', 'interrupted')
+		ORDER BY started_at DESC
+		LIMIT 1`
+
+	row := db.conn.QueryRow(q)
+	r, err := scanRun(row)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: most recent run: %w", err)
+	}
+	return r, nil
+}
+
+// FilesWithErrorsByRun returns files in error states for the given run.
+// When runID is empty, returns errors across all runs (same as FilesWithErrors).
+// Error states: "failed", "mismatch", "tag_failed".
+func (db *DB) FilesWithErrorsByRun(runID string) ([]*FileWithSource, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if runID == "" {
+		return db.FilesWithErrors()
+	}
+	const q = `
+		SELECT f.id, f.run_id, f.source_path, f.dest_path, f.dest_rel, f.checksum, f.algorithm,
+		       f.status, f.is_duplicate, f.capture_date, f.file_size,
+		       f.extracted_at, f.hashed_at, f.copied_at, f.verified_at, f.tagged_at, f.error,
+		       f.skip_reason, f.carried_sidecars,
+		       r.source AS run_source
+		FROM files f
+		JOIN runs r ON r.id = f.run_id
+		WHERE f.status IN ('failed', 'mismatch', 'tag_failed')
+		  AND f.run_id = ?
+		ORDER BY f.id`
+
+	rows, err = db.conn.Query(q, runID)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: files with errors by run: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var results []*FileWithSource
+	for rows.Next() {
+		fws, err := scanFileWithSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, fws)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("archivedb: files with errors by run iterate: %w", err)
+	}
+	return results, nil
+}
+
+// AllSkippedByRun returns skipped files for the given run.
+// When runID is empty, returns all skipped files across all runs (same as AllSkipped).
+func (db *DB) AllSkippedByRun(runID string) ([]*FileRecord, error) {
+	if runID == "" {
+		return db.AllSkipped()
+	}
+	const q = `
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
+		       status, is_duplicate, capture_date, file_size,
+		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
+		       skip_reason, carried_sidecars
+		FROM files
+		WHERE status = 'skipped'
+		  AND run_id = ?
+		ORDER BY id`
+
+	rows, err := db.conn.Query(q, runID)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: all skipped by run: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanFileRows(rows)
+}
+
+// AllDuplicatesByRun returns duplicate files for the given run.
+// When runID is empty, returns all duplicates across all runs (same as AllDuplicates).
+func (db *DB) AllDuplicatesByRun(runID string) ([]*FileRecord, error) {
+	if runID == "" {
+		return db.AllDuplicates()
+	}
+	const q = `
+		SELECT id, run_id, source_path, dest_path, dest_rel, checksum, algorithm,
+		       status, is_duplicate, capture_date, file_size,
+		       extracted_at, hashed_at, copied_at, verified_at, tagged_at, error,
+		       skip_reason, carried_sidecars
+		FROM files
+		WHERE is_duplicate = 1
+		  AND run_id = ?
+		ORDER BY id`
+
+	rows, err := db.conn.Query(q, runID)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: all duplicates by run: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanFileRows(rows)
+}
+
+// DuplicatePairsByRun returns duplicate pairs for the given run.
+// When runID is empty, returns all pairs across all runs (same as DuplicatePairs).
+func (db *DB) DuplicatePairsByRun(runID string) ([]*DuplicatePair, error) {
+	if runID == "" {
+		return db.DuplicatePairs()
+	}
+	const q = `
+		SELECT dup.source_path, dup.dest_rel, orig.dest_rel
+		FROM files dup
+		JOIN files orig
+		  ON orig.checksum = dup.checksum
+		 AND orig.is_duplicate = 0
+		 AND orig.status = 'complete'
+		WHERE dup.is_duplicate = 1
+		  AND dup.checksum IS NOT NULL
+		  AND dup.run_id = ?
+		ORDER BY dup.id`
+
+	rows, err := db.conn.Query(q, runID)
+	if err != nil {
+		return nil, fmt.Errorf("archivedb: duplicate pairs by run: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var pairs []*DuplicatePair
+	for rows.Next() {
+		var p DuplicatePair
+		var dupDest, origDest sql.NullString
+		if err := rows.Scan(&p.DuplicateSource, &dupDest, &origDest); err != nil {
+			return nil, fmt.Errorf("archivedb: scan duplicate pair by run: %w", err)
+		}
+		p.DuplicateDest = dupDest.String
+		p.OriginalDest = origDest.String
+		pairs = append(pairs, &p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("archivedb: duplicate pairs by run iterate: %w", err)
+	}
+	return pairs, nil
+}
+
 // GetRunByPrefix returns all runs whose ID starts with the given prefix,
 // ordered by started_at descending. The caller is responsible for handling
 // the ambiguous-prefix case (len > 1) and the not-found case (len == 0).

@@ -36,18 +36,35 @@ Use --pairs to show each duplicate alongside the original file it duplicates.`,
 var duplicatePairs bool
 
 // runQueryDuplicates is the RunE handler for the "query duplicates" subcommand.
-func runQueryDuplicates(_ *cobra.Command, _ []string) error {
-	if duplicatePairs {
-		return runQueryDuplicatePairs()
+func runQueryDuplicates(cmd *cobra.Command, _ []string) error {
+	listMode, _ := cmd.Flags().GetBool("list")
+	if listMode && viper.GetBool("query_json") {
+		return fmt.Errorf("--list and --json are mutually exclusive")
 	}
-	return runQueryDuplicateList()
+
+	runID, err := resolveQueryRunFilter(cmd)
+	if err != nil {
+		return err
+	}
+
+	if duplicatePairs && !listMode {
+		return runQueryDuplicatePairs(runID)
+	}
+	return runQueryDuplicateList(runID, listMode)
 }
 
 // runQueryDuplicateList lists all duplicate files without pairing.
-func runQueryDuplicateList() error {
-	files, err := queryDB.AllDuplicates()
+func runQueryDuplicateList(runID string, listMode bool) error {
+	files, err := queryDB.AllDuplicatesByRun(runID)
 	if err != nil {
 		return fmt.Errorf("list duplicates: %w", err)
+	}
+
+	if listMode {
+		for _, f := range files {
+			_, _ = fmt.Fprintln(os.Stdout, f.SourcePath)
+		}
+		return nil
 	}
 
 	if viper.GetBool("query_json") {
@@ -101,13 +118,17 @@ func runQueryDuplicateList() error {
 		})
 	}
 
-	printQueryTable(os.Stdout, headers, rows, fmt.Sprintf("%s duplicates", commaInt(len(files))))
+	summary := fmt.Sprintf("%s duplicates", commaInt(len(files)))
+	if runID != "" {
+		summary += " (run " + truncID(runID) + ")"
+	}
+	printQueryTable(os.Stdout, headers, rows, summary)
 	return nil
 }
 
 // runQueryDuplicatePairs lists each duplicate alongside its original.
-func runQueryDuplicatePairs() error {
-	pairs, err := queryDB.DuplicatePairs()
+func runQueryDuplicatePairs(runID string) error {
+	pairs, err := queryDB.DuplicatePairsByRun(runID)
 	if err != nil {
 		return fmt.Errorf("list duplicate pairs: %w", err)
 	}
@@ -144,11 +165,17 @@ func runQueryDuplicatePairs() error {
 		rows = append(rows, []string{p.DuplicateSource, p.DuplicateDest, p.OriginalDest})
 	}
 
-	printQueryTable(os.Stdout, headers, rows, fmt.Sprintf("%s duplicate pairs", commaInt(len(pairs))))
+	summary := fmt.Sprintf("%s duplicate pairs", commaInt(len(pairs)))
+	if runID != "" {
+		summary += " (run " + truncID(runID) + ")"
+	}
+	printQueryTable(os.Stdout, headers, rows, summary)
 	return nil
 }
 
 func init() {
 	queryCmd.AddCommand(queryDuplicatesCmd)
 	queryDuplicatesCmd.Flags().BoolVar(&duplicatePairs, "pairs", false, "show each duplicate paired with its original")
+	queryDuplicatesCmd.Flags().String("run", "", "filter to a specific run (prefix match)")
+	queryDuplicatesCmd.Flags().Bool("list", false, "output one source file path per line (mutually exclusive with --json)")
 }
