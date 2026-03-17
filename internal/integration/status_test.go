@@ -54,10 +54,8 @@ func classifySource(t *testing.T, dirA string, recursive bool) (
 	}
 
 	ledgerMap := make(map[string]domain.LedgerEntry)
-	if lc != nil {
-		for _, e := range lc.Entries {
-			ledgerMap[e.Path] = e
-		}
+	for _, e := range lc.AllEntries() {
+		ledgerMap[e.Path] = e
 	}
 
 	for _, df := range discovered {
@@ -124,8 +122,8 @@ func TestStatus_SortThenStatus(t *testing.T) {
 	if lc == nil {
 		t.Fatal("expected ledger to exist after sort run")
 	}
-	if len(lc.Entries) != 1 {
-		t.Fatalf("expected 1 ledger entry, got %d", len(lc.Entries))
+	if len(lc.AllEntries()) != 1 {
+		t.Fatalf("expected 1 ledger entry, got %d", len(lc.AllEntries()))
 	}
 
 	// Add a second file that has NOT been sorted yet.

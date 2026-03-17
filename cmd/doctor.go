@@ -102,27 +102,37 @@ func runDoctorLedger(sourceDir string, advice, jsonOut bool) error {
 		return nil
 	}
 
+	// Default to the most recent run's entries for diagnosis.
+	latestRun := lc.LatestRun()
+	if latestRun == nil {
+		_, _ = fmt.Fprintf(os.Stdout,
+			"No ledger found in %s.\nRun pixe sort from this directory first, or use -s to specify a source directory.\n",
+			sourceDir)
+		return nil
+	}
+
 	// Convert ledger entries to doctor.Entry values.
-	entries := ledgerEntriesToDoctorEntries(lc.Entries)
+	entries := ledgerEntriesToDoctorEntries(latestRun.Entries)
 	report := doctor.Summarize(entries)
 
 	// Render header.
-	header := formatDoctorHeader(lc.Header.PixeRun, lc.Header.Destination)
+	h := latestRun.Header
+	header := formatDoctorHeader(h.PixeRun, h.Destination)
 
 	if jsonOut {
-		return renderDoctorJSON(os.Stdout, report, header, lc.Header.Destination, "ledger")
+		return renderDoctorJSON(os.Stdout, report, header, h.Destination, "ledger")
 	}
 
 	_, _ = fmt.Fprintln(os.Stdout, header)
 
 	if !report.HasProblems() {
-		successful := countSuccessful(lc.Entries)
+		successful := countSuccessful(latestRun.Entries)
 		_, _ = fmt.Fprintf(os.Stdout, "\n  No problems found. %d file(s) sorted successfully.\n", successful)
 		return nil
 	}
 
 	if advice {
-		renderDoctorAdvice(os.Stdout, report, lc.Header.Destination)
+		renderDoctorAdvice(os.Stdout, report, h.Destination)
 	} else {
 		renderDoctorSummary(os.Stdout, report)
 		_, _ = fmt.Fprintln(os.Stdout, "\nRun pixe doctor --advice for details and suggested actions.")

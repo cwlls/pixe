@@ -111,15 +111,10 @@ func classify(t *testing.T, dirA string, recursive bool) *statusResult {
 		t.Fatalf("classify: load ledger: %v", err)
 	}
 
-	var ledgerEntryCount int
-	if lc != nil {
-		ledgerEntryCount = len(lc.Entries)
-	}
-	ledgerMap := make(map[string]domain.LedgerEntry, ledgerEntryCount)
-	if lc != nil {
-		for _, e := range lc.Entries {
-			ledgerMap[e.Path] = e
-		}
+	allEntries := lc.AllEntries()
+	ledgerMap := make(map[string]domain.LedgerEntry, len(allEntries))
+	for _, e := range allEntries {
+		ledgerMap[e.Path] = e
 	}
 
 	var sorted, duplicates, errored, unsorted []statusFile
@@ -524,11 +519,15 @@ func TestPrintStatusJSON_structure(t *testing.T) {
 	r := &statusResult{
 		Source: "/photos",
 		Ledger: &manifest.LedgerContents{
-			Header: domain.LedgerHeader{
-				RunID:       "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				PixeVersion: "0.10.0",
-				PixeRun:     "2026-03-06T10:30:00Z",
-				Recursive:   false,
+			Runs: []manifest.LedgerRun{
+				{
+					Header: domain.LedgerHeader{
+						RunID:       "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+						PixeVersion: "0.10.0",
+						PixeRun:     "2026-03-06T10:30:00Z",
+						Recursive:   false,
+					},
+				},
 			},
 		},
 		Sorted:       []statusFile{{Path: "a.jpg", Destination: "2021/12-Dec/a.jpg"}},
@@ -704,10 +703,14 @@ func TestPrintStatusTable_ledgerHeader(t *testing.T) {
 	r := &statusResult{
 		Source: "/photos",
 		Ledger: &manifest.LedgerContents{
-			Header: domain.LedgerHeader{
-				RunID:     "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				PixeRun:   "2026-03-06T10:30:00Z",
-				Recursive: true,
+			Runs: []manifest.LedgerRun{
+				{
+					Header: domain.LedgerHeader{
+						RunID:     "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+						PixeRun:   "2026-03-06T10:30:00Z",
+						Recursive: true,
+					},
+				},
 			},
 		},
 	}

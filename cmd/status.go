@@ -132,17 +132,25 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 
 	// ------------------------------------------------------------------
-	// 6. Build ledger lookup map: relPath → LedgerEntry.
+	// 6. Build ledger lookup map: relPath → most-recent LedgerEntry.
 	// ------------------------------------------------------------------
-	var ledgerEntryCount int
-	if lc != nil {
-		ledgerEntryCount = len(lc.Entries)
-	}
-	ledgerMap := make(map[string]domain.LedgerEntry, ledgerEntryCount)
-	if lc != nil {
-		for _, entry := range lc.Entries {
-			ledgerMap[entry.Path] = entry
+	// AllEntries returns entries in file order (oldest run first). Iterating
+	// and overwriting gives "last write wins" — the most recent outcome per
+	// path. Exception: a "copy" or "duplicate" outcome is never downgraded to
+	// a "skip" (previously-imported skips from a later run should not hide the
+	// fact that the file was successfully sorted in an earlier run).
+	allEntries := lc.AllEntries()
+	ledgerMap := make(map[string]domain.LedgerEntry, len(allEntries))
+	for _, entry := range allEntries {
+		existing, found := ledgerMap[entry.Path]
+		if found {
+			// Don't downgrade a successful outcome to a skip.
+			if (existing.Status == domain.LedgerStatusCopy || existing.Status == domain.LedgerStatusDuplicate) &&
+				entry.Status == domain.LedgerStatusSkip {
+				continue
+			}
 		}
+		ledgerMap[entry.Path] = entry
 	}
 
 	// ------------------------------------------------------------------
@@ -236,20 +244,26 @@ func printStatusTable(w io.Writer, r *statusResult) {
 	if r.Ledger == nil {
 		_, _ = fmt.Fprintln(w, "Ledger: none found — no prior sort runs recorded for this directory.")
 	} else {
-		h := r.Ledger.Header
+		h := r.Ledger.LatestHeader()
 		runID := truncID(h.RunID)
 		recursive := "no"
 		if h.Recursive {
 			recursive = "yes"
 		}
-		_, _ = fmt.Fprintf(w, "Ledger: run %s, %s (recursive: %s)\n",
-			runID, h.PixeRun, recursive)
+		runCount := len(r.Ledger.Runs)
+		if runCount > 1 {
+			_, _ = fmt.Fprintf(w, "Ledger: %d runs, latest %s, %s (recursive: %s)\n",
+				runCount, runID, h.PixeRun, recursive)
+		} else {
+			_, _ = fmt.Fprintf(w, "Ledger: run %s, %s (recursive: %s)\n",
+				runID, h.PixeRun, recursive)
+		}
 	}
 
 	// Sections — only printed when non-empty.
 	var destLabel string
-	if r.Ledger != nil && r.Ledger.Header.Destination != "" {
-		destLabel = "..." + filepath.Base(r.Ledger.Header.Destination)
+	if r.Ledger != nil && r.Ledger.LatestHeader().Destination != "" {
+		destLabel = "..." + filepath.Base(r.Ledger.LatestHeader().Destination)
 	}
 	printSection(w, "SORTED", r.Sorted, func(f statusFile) string {
 		if f.Destination != "" {
@@ -394,7 +408,7 @@ func printStatusJSON(w io.Writer, r *statusResult) error {
 	}
 
 	if r.Ledger != nil {
-		h := r.Ledger.Header
+		h := r.Ledger.LatestHeader()
 		out.Ledger = &ledgerInfo{
 			RunID:       h.RunID,
 			PixeVersion: h.PixeVersion,

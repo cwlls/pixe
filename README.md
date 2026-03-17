@@ -84,7 +84,7 @@ Use the `--skip-duplicates` flag to skip copying duplicate files entirely instea
 ### Archive Database & Ledger
 
 - **Archive DB** (`<dest>/.pixe/pixe.db`): SQLite database tracking all files ever processed across all runs. Enables duplicate detection, skip-on-resume, and queryable history. Automatically migrated from legacy JSON manifest if present.
-- **Ledger** (`<source>/.pixe_ledger.json`): Streaming JSONL receipt written during each run. Line 1 is a header with run metadata; subsequent lines are one entry per file. Human-readable and crash-safe (partial writes are valid JSONL).
+- **Ledger** (`<source>/.pixe_ledger.json`): Cumulative JSONL receipt appended on each run (never overwritten). Each run begins with a header line containing run metadata; subsequent lines are one entry per file. Each entry carries a `run_id` for multi-run grouping. Human-readable and crash-safe (partial writes are valid JSONL).
 
 ## Installation
 

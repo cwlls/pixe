@@ -74,10 +74,11 @@ type destAssignment struct {
 	isDuplicate           bool
 	existingDestForLedger string // non-empty when isDuplicate is true
 	skipCopy              bool   // true when --skip-duplicates is set and file is a duplicate
+	skip                  bool   // true when the coordinator decided to skip this file (previously imported)
 }
 
 // workerFinalResult is sent from a worker to the coordinator after
-// copy+verify+tag completes (or after a skip-copy no-op).
+// copy+verify+tag completes (or after a skip-copy/skip no-op).
 type workerFinalResult struct {
 	df                    discovery.DiscoveredFile
 	fileID                int64
@@ -88,6 +89,7 @@ type workerFinalResult struct {
 	verifiedAt            time.Time
 	captureDate           time.Time // used by coordinator to resolve copyright year in sidecar lines
 	skipCopy              bool      // true when the worker skipped I/O due to --skip-duplicates
+	skipped               bool      // true when the coordinator directed a skip (previously imported or error after hash)
 	carriedSidecarRels    []string  // dest_rel paths of successfully carried sidecars
 	err                   error
 	dbErr                 error // non-nil when a terminal DB status update failed in the worker
@@ -149,6 +151,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", sf.Path, sf.Reason))
 		}
 		lw.WriteEntry(domain.LedgerEntry{
+			RunID:  opts.RunID,
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
 			Reason: sf.Reason,
@@ -173,56 +176,6 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			WorkerID:  -1,
 			Completed: result.Skipped + result.Errors,
 		})
-	}
-
-	// --- Filter out previously-imported files before feeding workers ---
-	// actualDiscovered holds files that need real processing.
-	actualDiscovered := make([]discovery.DiscoveredFile, 0, len(discovered))
-	for _, df := range discovered {
-		if db != nil {
-			processed, checkErr := db.CheckSourceProcessed(df.Path)
-			if checkErr != nil {
-				if opts.Config.Verbosity >= 0 {
-					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", df.RelPath, checkErr.Error()))
-				}
-				result.Errors++
-				emit(opts.EventBus, progress.Event{
-					Kind:      progress.EventFileError,
-					RelPath:   df.RelPath,
-					Reason:    checkErr.Error(),
-					Err:       checkErr,
-					WorkerID:  -1,
-					Completed: result.Skipped + result.Processed + result.Errors,
-				})
-				continue
-			}
-			if processed {
-				const reason = "previously imported"
-				if opts.Config.Verbosity >= 0 {
-					_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", df.RelPath, reason))
-				}
-				lw.WriteEntry(domain.LedgerEntry{
-					Path:   df.RelPath,
-					Status: domain.LedgerStatusSkip,
-					Reason: reason,
-				})
-				fileID := fileIDs[df.Path]
-				if dbErr := db.UpdateFileStatus(fileID, "skipped",
-					archivedb.WithSkipReason(reason)); dbErr != nil {
-					_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", df.RelPath, dbErr)))
-				}
-				result.Skipped++
-				emit(opts.EventBus, progress.Event{
-					Kind:      progress.EventFileSkipped,
-					RelPath:   df.RelPath,
-					Reason:    reason,
-					WorkerID:  -1,
-					Completed: result.Skipped + result.Processed + result.Errors,
-				})
-				continue
-			}
-		}
-		actualDiscovered = append(actualDiscovered, df)
 	}
 
 	// Channel buffer sizing — deadlock safety analysis:
@@ -269,7 +222,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 
 	// Feed work items.
 	go func() {
-		for _, df := range actualDiscovered {
+		for _, df := range discovered {
 			select {
 			case <-ctx.Done():
 				close(workCh)
@@ -280,7 +233,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 		close(workCh)
 	}()
 
-	pendingCount := len(actualDiscovered)
+	pendingCount := len(discovered)
 	completed := 0
 	// memSeen is an in-memory dedup fallback used when no DB is available (e.g. tests).
 	// The coordinator is single-threaded, so no mutex is needed.
@@ -303,6 +256,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", wr.df.RelPath, dfs.reason))
 					}
 					lw.WriteEntry(domain.LedgerEntry{
+						RunID:  opts.RunID,
 						Path:   wr.df.RelPath,
 						Status: domain.LedgerStatusSkip,
 						Reason: dfs.reason,
@@ -322,6 +276,8 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						WorkerID:  wr.workerID,
 						Completed: result.Skipped + result.Processed + result.Errors,
 					})
+					// Tell the worker to skip (it is waiting on assignCh).
+					assignChs[wr.workerID] <- destAssignment{skip: true}
 					completed++
 					continue
 				}
@@ -336,6 +292,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", wr.df.RelPath, wr.err.Error()))
 				}
 				lw.WriteEntry(domain.LedgerEntry{
+					RunID:  opts.RunID,
 					Path:   wr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: wr.err.Error(),
@@ -348,8 +305,73 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					WorkerID:  wr.workerID,
 					Completed: result.Skipped + result.Processed + result.Errors,
 				})
+				// Tell the worker to skip (it is waiting on assignCh).
+				assignChs[wr.workerID] <- destAssignment{skip: true}
 				completed++
 				continue
+			}
+
+			// --- Previously-imported check (hash-verified) ---
+			// Now that the worker has computed the checksum, check whether this
+			// exact (source_path, checksum) pair was already successfully imported.
+			// Both must match — this prevents silently skipping a file whose
+			// content has changed since the last run.
+			if db != nil {
+				alreadyImported, checkErr := db.CheckSourceProcessed(wr.df.Path, wr.checksum)
+				if checkErr != nil {
+					if dbErr := db.UpdateFileStatus(wr.fileID, "failed", archivedb.WithError(checkErr.Error())); dbErr != nil {
+						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", wr.df.RelPath, dbErr)))
+					}
+					result.Errors++
+					if opts.Config.Verbosity >= 0 {
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", wr.df.RelPath, checkErr.Error()))
+					}
+					lw.WriteEntry(domain.LedgerEntry{
+						RunID:  opts.RunID,
+						Path:   wr.df.RelPath,
+						Status: domain.LedgerStatusError,
+						Reason: checkErr.Error(),
+					})
+					emit(opts.EventBus, progress.Event{
+						Kind:      progress.EventFileError,
+						RelPath:   wr.df.RelPath,
+						Reason:    checkErr.Error(),
+						Err:       checkErr,
+						WorkerID:  wr.workerID,
+						Completed: result.Skipped + result.Processed + result.Errors,
+					})
+					assignChs[wr.workerID] <- destAssignment{skip: true}
+					completed++
+					continue
+				}
+				if alreadyImported {
+					const reason = "previously imported"
+					if opts.Config.Verbosity >= 0 {
+						_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", wr.df.RelPath, reason))
+					}
+					lw.WriteEntry(domain.LedgerEntry{
+						RunID:    opts.RunID,
+						Path:     wr.df.RelPath,
+						Status:   domain.LedgerStatusSkip,
+						Checksum: wr.checksum,
+						Reason:   reason,
+					})
+					if dbErr := db.UpdateFileStatus(wr.fileID, "skipped",
+						archivedb.WithSkipReason(reason)); dbErr != nil {
+						_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", wr.df.RelPath, dbErr)))
+					}
+					result.Skipped++
+					emit(opts.EventBus, progress.Event{
+						Kind:      progress.EventFileSkipped,
+						RelPath:   wr.df.RelPath,
+						Reason:    reason,
+						WorkerID:  wr.workerID,
+						Completed: result.Skipped + result.Processed + result.Errors,
+					})
+					assignChs[wr.workerID] <- destAssignment{skip: true}
+					completed++
+					continue
+				}
 			}
 
 			// Dedup check — single-writer on the DB (or memSeen when DB is nil).
@@ -366,10 +388,13 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", wr.df.RelPath, err.Error()))
 					}
 					lw.WriteEntry(domain.LedgerEntry{
+						RunID:  opts.RunID,
 						Path:   wr.df.RelPath,
 						Status: domain.LedgerStatusError,
 						Reason: err.Error(),
 					})
+					// Tell the worker to skip (it is waiting on assignCh).
+					assignChs[wr.workerID] <- destAssignment{skip: true}
 					completed++
 					continue
 				}
@@ -405,6 +430,11 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 			if !ok {
 				goto done
 			}
+			// Coordinator-directed skip: already counted and ledger-written above.
+			if fr.skipped {
+				completed++
+				continue
+			}
 			// Warn if a terminal DB status update failed inside the worker.
 			if fr.dbErr != nil {
 				_, _ = fmt.Fprint(out, fmtr.FormatWarning(fmt.Sprintf("DB status update failed for %q: %v", fr.df.RelPath, fr.dbErr)))
@@ -415,6 +445,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", fr.df.RelPath, fr.err.Error()))
 				}
 				lw.WriteEntry(domain.LedgerEntry{
+					RunID:  opts.RunID,
 					Path:   fr.df.RelPath,
 					Status: domain.LedgerStatusError,
 					Reason: fr.err.Error(),
@@ -445,6 +476,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						fmt.Sprintf("matches %s", matchDetail)))
 				}
 				lw.WriteEntry(domain.LedgerEntry{
+					RunID:    opts.RunID,
 					Path:     fr.df.RelPath,
 					Status:   domain.LedgerStatusDuplicate,
 					Checksum: fr.checksum,
@@ -484,6 +516,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 								_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", fr.df.RelPath, errMsg))
 							}
 							lw.WriteEntry(domain.LedgerEntry{
+								RunID:  opts.RunID,
 								Path:   fr.df.RelPath,
 								Status: domain.LedgerStatusError,
 								Reason: errMsg,
@@ -508,6 +541,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 									_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", fr.df.RelPath, errMsg))
 								}
 								lw.WriteEntry(domain.LedgerEntry{
+									RunID:  opts.RunID,
 									Path:   fr.df.RelPath,
 									Status: domain.LedgerStatusError,
 									Reason: errMsg,
@@ -555,6 +589,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 							fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail)), annotation))
 					}
 					lw.WriteEntry(domain.LedgerEntry{
+						RunID:       opts.RunID,
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusDuplicate,
 						Checksum:    fr.checksum,
@@ -579,6 +614,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						_, _ = fmt.Fprint(out, fmtr.FormatOutputWithAnnotation("COPY", fr.df.RelPath, displayDest(destLabel, finalRelDest), annotation))
 					}
 					lw.WriteEntry(domain.LedgerEntry{
+						RunID:       opts.RunID,
 						Path:        fr.df.RelPath,
 						Status:      domain.LedgerStatusCopy,
 						Checksum:    fr.checksum,
@@ -732,6 +768,19 @@ func runWorker(ctx context.Context, id int,
 			case <-ctx.Done():
 				return
 			case assign = <-assignCh:
+			}
+
+			// --- Coordinator-directed skip (previously imported or error after hash) ---
+			// The coordinator has already written the ledger entry and updated the DB.
+			// The worker just needs to send a no-op final result so the coordinator's
+			// completed counter advances correctly.
+			if assign.skip {
+				doneCh <- workerFinalResult{
+					df:      item.df,
+					fileID:  item.fileID,
+					skipped: true,
+				}
+				continue
 			}
 
 			// --- Skip-duplicates: no I/O, coordinator handles DB + ledger ---

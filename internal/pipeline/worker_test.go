@@ -95,10 +95,11 @@ func TestRun_multipleWorkers(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written to dirA")
 	}
-	if len(l.Entries) != 4 {
-		t.Errorf("ledger.Entries len = %d, want 4\nOutput:\n%s", len(l.Entries), out.String())
+	allEntries := l.AllEntries()
+	if len(allEntries) != 4 {
+		t.Errorf("ledger entries len = %d, want 4\nOutput:\n%s", len(allEntries), out.String())
 	}
-	for _, e := range l.Entries {
+	for _, e := range allEntries {
 		if e.Checksum == "" {
 			t.Errorf("ledger entry %q has empty checksum", e.Path)
 		}
@@ -178,13 +179,14 @@ func TestRunConcurrent_skipDuplicates(t *testing.T) {
 	if l == nil {
 		t.Fatal("ledger not written")
 	}
-	if len(l.Entries) != 4 {
-		t.Errorf("ledger.Entries len = %d, want 4", len(l.Entries))
+	allEntries2 := l.AllEntries()
+	if len(allEntries2) != 4 {
+		t.Errorf("ledger entries len = %d, want 4", len(allEntries2))
 	}
 
 	// Count duplicate entries.
 	dupCount := 0
-	for _, e := range l.Entries {
+	for _, e := range allEntries2 {
 		if e.Status == "duplicate" {
 			dupCount++
 			// Duplicate entries should have no Destination.

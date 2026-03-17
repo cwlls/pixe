@@ -247,7 +247,7 @@ func Run(opts SortOptions) (SortResult, error) {
 	var slw *manifest.SafeLedgerWriter
 	if !cfg.DryRun {
 		header := domain.LedgerHeader{
-			Version:     5,
+			Version:     6,
 			RunID:       opts.RunID,
 			PixeVersion: opts.PixeVersion,
 			PixeRun:     startedAt.UTC().Format(time.RFC3339),
@@ -333,6 +333,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 			_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", sf.Path, sf.Reason))
 		}
 		lw.WriteEntry(domain.LedgerEntry{
+			RunID:  opts.RunID,
 			Path:   sf.Path,
 			Status: domain.LedgerStatusSkip,
 			Reason: sf.Reason,
@@ -370,50 +371,6 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 
 		fileID := fileIDs[df.Path]
 
-		// --- Check if previously imported ---
-		if db != nil {
-			processed, checkErr := db.CheckSourceProcessed(df.Path)
-			if checkErr != nil {
-				if cfg.Verbosity >= 0 {
-					_, _ = fmt.Fprint(out, fmtr.FormatOutput("ERR ", df.RelPath, checkErr.Error()))
-				}
-				result.Errors++
-				emit(opts.EventBus, progress.Event{
-					Kind:      progress.EventFileError,
-					RelPath:   df.RelPath,
-					Reason:    checkErr.Error(),
-					Err:       checkErr,
-					WorkerID:  -1,
-					Completed: result.Skipped + result.Processed + result.Errors,
-				})
-				continue
-			}
-			if processed {
-				const reason = "previously imported"
-				if cfg.Verbosity >= 0 {
-					_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", df.RelPath, reason))
-				}
-				lw.WriteEntry(domain.LedgerEntry{
-					Path:   df.RelPath,
-					Status: domain.LedgerStatusSkip,
-					Reason: reason,
-				})
-				if dbErr := db.UpdateFileStatus(fileID, "skipped",
-					archivedb.WithSkipReason(reason)); dbErr != nil {
-					_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
-				}
-				result.Skipped++
-				emit(opts.EventBus, progress.Event{
-					Kind:      progress.EventFileSkipped,
-					RelPath:   df.RelPath,
-					Reason:    reason,
-					WorkerID:  -1,
-					Completed: result.Skipped + result.Processed + result.Errors,
-				})
-				continue
-			}
-		}
-
 		var fileSize int64
 		if fi, statErr := os.Stat(df.Path); statErr == nil {
 			fileSize = fi.Size()
@@ -426,7 +383,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 		})
 
 		fileStart := time.Now()
-		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, memSeen, fmtr, destLabel, fileSize)
+		le, isDup, err := processFile(df, fileID, opts, dirA, dirB, out, opts.RunID, memSeen, fmtr, destLabel, fileSize)
 		if err != nil {
 			var dfs *dateFilterSkip
 			if errors.As(err, &dfs) {
@@ -438,6 +395,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 					}
 				}
 				lw.WriteEntry(domain.LedgerEntry{
+					RunID:  opts.RunID,
 					Path:   df.RelPath,
 					Status: domain.LedgerStatusSkip,
 					Reason: dfs.reason,
@@ -472,6 +430,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 				}
 			}
 			lw.WriteEntry(domain.LedgerEntry{
+				RunID:  opts.RunID,
 				Path:   df.RelPath,
 				Status: domain.LedgerStatusError,
 				Reason: err.Error(),
@@ -481,6 +440,24 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 				RelPath:   df.RelPath,
 				Reason:    err.Error(),
 				Err:       err,
+				WorkerID:  -1,
+				Completed: result.Skipped + result.Processed + result.Errors,
+			})
+			continue
+		}
+
+		// processFile returns a skip entry (status="skip") for previously-imported files.
+		// Handle it here: emit SKIP output, write ledger, count as skipped.
+		if le != nil && le.Status == domain.LedgerStatusSkip {
+			if cfg.Verbosity >= 0 {
+				_, _ = fmt.Fprint(out, fmtr.FormatOutput("SKIP", df.RelPath, le.Reason))
+			}
+			lw.WriteEntry(*le)
+			result.Skipped++
+			emit(opts.EventBus, progress.Event{
+				Kind:      progress.EventFileSkipped,
+				RelPath:   df.RelPath,
+				Reason:    le.Reason,
 				WorkerID:  -1,
 				Completed: result.Skipped + result.Processed + result.Errors,
 			})
@@ -534,6 +511,7 @@ func runSequential(ctx context.Context, opts SortOptions, discovered []discovery
 // processFile runs the full pipeline for a single file and returns a
 // LedgerEntry on success (nil on dry-run or duplicate without copy).
 // isDuplicate is true when the file was routed to the duplicates directory.
+// runID is the UUID of the current sort run, stamped on every LedgerEntry.
 // memSeen is an in-memory dedup map used when db is nil; it maps checksum → relDest.
 // destLabel is the display prefix for destination paths (e.g. "...Photos"); see displayDest.
 // fileSize is the source file size in bytes (from os.Stat), used for byte-level progress events.
@@ -543,6 +521,7 @@ func processFile(
 	opts SortOptions,
 	dirA, dirB string,
 	out io.Writer,
+	runID string,
 	memSeen map[string]string,
 	fmtr *Formatter,
 	destLabel string,
@@ -608,6 +587,33 @@ func processFile(
 		WorkerID: workerID,
 	})
 
+	// --- Previously-imported check (hash-verified) ---
+	// A file is only skipped if both its source path AND its content hash
+	// match a prior completed import. This prevents silently skipping a file
+	// whose content has changed since the last run (e.g. SD card reused with
+	// the same filename but different photo).
+	if db != nil {
+		alreadyImported, checkErr := db.CheckSourceProcessed(df.Path, checksum)
+		if checkErr != nil {
+			return nil, false, fmt.Errorf("check source processed: %w", checkErr)
+		}
+		if alreadyImported {
+			const reason = "previously imported"
+			if dbErr := db.UpdateFileStatus(fileID, "skipped",
+				archivedb.WithSkipReason(reason)); dbErr != nil {
+				_, _ = fmt.Fprintf(out, "WARNING: DB status update failed for %q: %v\n", df.RelPath, dbErr)
+			}
+			le := &domain.LedgerEntry{
+				RunID:    runID,
+				Path:     df.RelPath,
+				Status:   domain.LedgerStatusSkip,
+				Checksum: checksum,
+				Reason:   reason,
+			}
+			return le, false, nil
+		}
+	}
+
 	// --- Dedup check ---
 	var isDuplicate bool
 	var existingDestForLedger string
@@ -639,6 +645,7 @@ func processFile(
 				fmt.Sprintf("matches %s", displayDest(destLabel, matchDetail))))
 		}
 		le := &domain.LedgerEntry{
+			RunID:    runID,
 			Path:     df.RelPath,
 			Status:   domain.LedgerStatusDuplicate,
 			Checksum: checksum,
@@ -675,6 +682,7 @@ func processFile(
 		}
 		if isDuplicate {
 			le := &domain.LedgerEntry{
+				RunID:       runID,
 				Path:        df.RelPath,
 				Status:      domain.LedgerStatusDuplicate,
 				Checksum:    checksum,
@@ -880,6 +888,7 @@ func processFile(
 	// Build ledger entry.
 	if isDuplicate {
 		le := &domain.LedgerEntry{
+			RunID:       runID,
 			Path:        df.RelPath,
 			Status:      domain.LedgerStatusDuplicate,
 			Checksum:    checksum,
@@ -891,6 +900,7 @@ func processFile(
 	}
 
 	le := &domain.LedgerEntry{
+		RunID:       runID,
 		Path:        df.RelPath,
 		Status:      domain.LedgerStatusCopy,
 		Checksum:    checksum,

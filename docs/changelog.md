@@ -15,6 +15,28 @@ nav_order: 10
 
 <!-- pixe:begin:changelog -->
 
+## [Unreleased] -- Cumulative Ledger and Hash-Verified Skip Logic
+
+### Added
+
+- **Cumulative JSONL ledger** — The ledger (`<source>/.pixe_ledger.json`) now appends across runs instead of overwriting. Each entry carries a `run_id` field for multi-run grouping. Ledger version bumped from 5 → 6. Enables tracking which files were processed in which run, and supports resuming from partial ledgers after interruptions.
+
+- **Hash-verified skip logic** — `CheckSourceProcessed` now requires both source path AND content hash to match before skipping a file. Files at the same path with different content are imported as new. This prevents silent data loss when source files are replaced with different content between runs.
+
+### Changed
+
+- **Ledger structure** — `LedgerContents` now contains `Runs []LedgerRun` instead of flat `Header`/`Entries`. Each `LedgerRun` groups a header with its entries. Convenience methods `LatestRun()`, `LatestHeader()`, and `AllEntries()` provide backward-compatible access patterns.
+
+- **`pixe status` multi-run resolution** — When displaying status from a cumulative ledger, the most recent outcome per file path is shown (last write wins). Files that errored in run 1 but succeeded in run 2 are correctly classified as Sorted. Copy/duplicate statuses are never downgraded to skip.
+
+- **`pixe doctor` default mode** — Now diagnoses only the most recent run by default (matching the "what happened in my last sort?" mental model). Use `--run` to inspect a specific run.
+
+### Fixed
+
+- **Skip decision correctness** — Previously, a file at the same source path with different content would be skipped if the path had been processed before, even if the content was new. Now the skip check verifies both path and hash, ensuring only truly identical files are skipped.
+
+---
+
 ## [Unreleased] -- Post-Sort Remediation: Doctor, Retry, and Query Enhancements
 
 ### Added

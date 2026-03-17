@@ -135,10 +135,14 @@ const (
 
 // LedgerEntry records the outcome of a single file discovered in dirA.
 // Every discovered file (except ignored files) gets one entry.
+// RunID links the entry to its sort run (matches LedgerHeader.RunID for that run).
+// The omitempty tag on RunID ensures pre-v6 ledgers without the field round-trip
+// cleanly — missing RunID deserialises as "" and is not re-serialised as "run_id":"".
 type LedgerEntry struct {
+	RunID       string     `json:"run_id,omitempty"`      // UUID of the run that produced this entry (v6+)
 	Path        string     `json:"path"`                  // relative path from dirA
 	Status      string     `json:"status"`                // "copy", "skip", "duplicate", "error"
-	Checksum    string     `json:"checksum,omitempty"`    // hex hash (copy, duplicate)
+	Checksum    string     `json:"checksum,omitempty"`    // hex hash (copy, duplicate, skip-previously-imported)
 	Destination string     `json:"destination,omitempty"` // relative path in dirB (copy, duplicate)
 	VerifiedAt  *time.Time `json:"verified_at,omitempty"` // ISO 8601 UTC (copy only)
 	Sidecars    []string   `json:"sidecars,omitempty"`    // carried sidecar dest_rel paths (copy only)
@@ -146,11 +150,12 @@ type LedgerEntry struct {
 	Reason      string     `json:"reason,omitempty"`      // explanation (skip, error)
 }
 
-// LedgerHeader is the first line of the JSONL ledger file (v5+).
-// It contains run-level metadata; all subsequent lines are LedgerEntry objects.
-// The header is written once at the start of the run, before any files are processed.
+// LedgerHeader is written as a separator line at the start of each run in the
+// cumulative JSONL ledger file. Since v6 the ledger appends across runs, so
+// multiple headers may appear in a single file — one per run.
+// Consumers distinguish headers from entries by the presence of the "version" key.
 type LedgerHeader struct {
-	Version     int    `json:"version"`      // always 5
+	Version     int    `json:"version"`      // 5 for legacy single-run ledgers; 6 for cumulative append ledgers
 	RunID       string `json:"run_id"`       // UUID linking to archive DB runs table
 	PixeVersion string `json:"pixe_version"` // Pixe binary version that produced this ledger
 	PixeRun     string `json:"pixe_run"`     // ISO 8601 UTC timestamp of run start

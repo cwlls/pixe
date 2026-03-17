@@ -609,6 +609,186 @@ func TestCheckDuplicate_ignoresNonComplete(t *testing.T) {
 	}
 }
 
+// TestCheckSourceProcessed_samePathSameHash verifies that a complete file
+// with matching path and checksum is recognised as previously imported.
+func TestCheckSourceProcessed_samePathSameHash(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-csp-1")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "run-csp-1", SourcePath: "/src/IMG_0001.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	const checksum = "abc123"
+	if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "copied", WithDestination("/dst/2025/06-Jun/photo.jpg", "2025/06-Jun/photo.jpg")); err != nil {
+		t.Fatalf("UpdateFileStatus copied: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "complete"); err != nil {
+		t.Fatalf("UpdateFileStatus complete: %v", err)
+	}
+
+	got, err := db.CheckSourceProcessed("/src/IMG_0001.jpg", checksum)
+	if err != nil {
+		t.Fatalf("CheckSourceProcessed: %v", err)
+	}
+	if !got {
+		t.Error("CheckSourceProcessed = false, want true (same path and hash should be recognised)")
+	}
+}
+
+// TestCheckSourceProcessed_samePathDifferentHash verifies that a file at the
+// same source path but with different content is NOT considered previously
+// imported. This is the key correctness test — the same filename on a
+// reformatted SD card must not be silently skipped.
+func TestCheckSourceProcessed_samePathDifferentHash(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-csp-2")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "run-csp-2", SourcePath: "/src/IMG_0001.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	const originalChecksum = "abc123"
+	if err := db.UpdateFileStatus(id, "hashed", WithChecksum(originalChecksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "copied", WithDestination("/dst/2025/06-Jun/photo.jpg", "2025/06-Jun/photo.jpg")); err != nil {
+		t.Fatalf("UpdateFileStatus copied: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "complete"); err != nil {
+		t.Fatalf("UpdateFileStatus complete: %v", err)
+	}
+
+	// Same path, but the file content has changed (different checksum).
+	got, err := db.CheckSourceProcessed("/src/IMG_0001.jpg", "def456")
+	if err != nil {
+		t.Fatalf("CheckSourceProcessed: %v", err)
+	}
+	if got {
+		t.Error("CheckSourceProcessed = true, want false (different hash must not be skipped)")
+	}
+}
+
+// TestCheckSourceProcessed_differentPathSameHash verifies that a matching
+// checksum at a different source path does not trigger a skip. The path must
+// also match — content-hash dedup is handled separately by CheckDuplicate.
+func TestCheckSourceProcessed_differentPathSameHash(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-csp-3")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "run-csp-3", SourcePath: "/src/IMG_0001.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	const checksum = "abc123"
+	if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "copied", WithDestination("/dst/2025/06-Jun/photo.jpg", "2025/06-Jun/photo.jpg")); err != nil {
+		t.Fatalf("UpdateFileStatus copied: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "complete"); err != nil {
+		t.Fatalf("UpdateFileStatus complete: %v", err)
+	}
+
+	// Different path, same checksum — should NOT be considered previously imported.
+	got, err := db.CheckSourceProcessed("/src/IMG_0002.jpg", checksum)
+	if err != nil {
+		t.Fatalf("CheckSourceProcessed: %v", err)
+	}
+	if got {
+		t.Error("CheckSourceProcessed = true, want false (different path must not match)")
+	}
+}
+
+// TestCheckSourceProcessed_noMatch verifies that an empty DB returns false.
+func TestCheckSourceProcessed_noMatch(t *testing.T) {
+	db := openTestDB(t)
+
+	got, err := db.CheckSourceProcessed("/src/IMG_0001.jpg", "abc123")
+	if err != nil {
+		t.Fatalf("CheckSourceProcessed: %v", err)
+	}
+	if got {
+		t.Error("CheckSourceProcessed = true, want false (empty DB)")
+	}
+}
+
+// TestCheckSourceProcessed_ignoredStatuses verifies that non-terminal or
+// error statuses do not cause a file to be skipped on re-import.
+func TestCheckSourceProcessed_ignoredStatuses(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-csp-5")
+
+	const (
+		srcPath  = "/src/IMG_0001.jpg"
+		checksum = "abc123"
+	)
+
+	for _, status := range []string{"pending", "extracted", "hashed", "copied", "verified", "failed", "mismatch", "tag_failed", "skipped"} {
+		id, err := db.InsertFile(&FileRecord{RunID: "run-csp-5", SourcePath: srcPath})
+		if err != nil {
+			t.Fatalf("InsertFile (status=%s): %v", status, err)
+		}
+		// Advance to hashed so checksum is set, then set the target status.
+		if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+			t.Fatalf("UpdateFileStatus hashed (status=%s): %v", status, err)
+		}
+		switch status {
+		case "copied", "verified", "failed", "mismatch", "tag_failed":
+			if err := db.UpdateFileStatus(id, "copied", WithDestination("/dst/photo.jpg", "photo.jpg")); err != nil {
+				t.Fatalf("UpdateFileStatus copied (status=%s): %v", status, err)
+			}
+		}
+		if status != "hashed" {
+			if err := db.UpdateFileStatus(id, status); err != nil {
+				t.Fatalf("UpdateFileStatus %s: %v", status, err)
+			}
+		}
+
+		got, err := db.CheckSourceProcessed(srcPath, checksum)
+		if err != nil {
+			t.Fatalf("CheckSourceProcessed (status=%s): %v", status, err)
+		}
+		if got {
+			t.Errorf("CheckSourceProcessed = true for status=%q, want false", status)
+		}
+	}
+}
+
+// TestCheckSourceProcessed_duplicateStatus verifies that a file with
+// status='duplicate' is also recognised as previously imported.
+func TestCheckSourceProcessed_duplicateStatus(t *testing.T) {
+	db := openTestDB(t)
+	insertTestRun(t, db, "run-csp-6")
+
+	id, err := db.InsertFile(&FileRecord{RunID: "run-csp-6", SourcePath: "/src/IMG_0001.jpg"})
+	if err != nil {
+		t.Fatalf("InsertFile: %v", err)
+	}
+	const checksum = "abc123"
+	if err := db.UpdateFileStatus(id, "hashed", WithChecksum(checksum)); err != nil {
+		t.Fatalf("UpdateFileStatus hashed: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "copied", WithDestination("/dst/duplicates/photo.jpg", "duplicates/photo.jpg")); err != nil {
+		t.Fatalf("UpdateFileStatus copied: %v", err)
+	}
+	if err := db.UpdateFileStatus(id, "duplicate"); err != nil {
+		t.Fatalf("UpdateFileStatus duplicate: %v", err)
+	}
+
+	got, err := db.CheckSourceProcessed("/src/IMG_0001.jpg", checksum)
+	if err != nil {
+		t.Fatalf("CheckSourceProcessed: %v", err)
+	}
+	if !got {
+		t.Error("CheckSourceProcessed = false, want true (duplicate status should be recognised)")
+	}
+}
+
 // TestGetIncompleteFiles verifies only non-terminal files are returned.
 func TestGetIncompleteFiles(t *testing.T) {
 	db := openTestDB(t)

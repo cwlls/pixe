@@ -140,7 +140,7 @@ When a file's checksum matches an already-archived file, the behavior depends on
 A SQLite database at `<dest>/.pixe/<slug>.db` tracks every file across every run. It enables:
 
 - **Duplicate detection** — Indexed checksum lookups without loading all checksums into memory
-- **Skip-on-resume** — Files already processed in prior runs are skipped automatically
+- **Skip-on-resume** — Files already processed in prior runs are skipped automatically. Skip decisions are hash-verified: a file is only skipped if both its source path and content hash match a prior completed import. Files at the same path with different content are imported as new.
 - **Queryable history** — `pixe query` exposes the full run history, duplicates, errors, and inventory
 
 The database uses WAL mode for concurrent-process safety. Multiple `pixe sort` processes can target the same archive simultaneously without corruption.

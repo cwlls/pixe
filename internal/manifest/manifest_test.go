@@ -216,20 +216,24 @@ func TestLedger_v4_roundtrip(t *testing.T) {
 	if got == nil {
 		t.Fatal("LoadLedger returned nil")
 	}
-	if got.Header.Version != header.Version {
-		t.Errorf("Header.Version: got %d, want %d", got.Header.Version, header.Version)
+	if len(got.Runs) != 1 {
+		t.Fatalf("Runs len: got %d, want 1", len(got.Runs))
 	}
-	if got.Header.PixeVersion != header.PixeVersion {
-		t.Errorf("Header.PixeVersion: got %q, want %q", got.Header.PixeVersion, header.PixeVersion)
+	run := got.Runs[0]
+	if run.Header.Version != header.Version {
+		t.Errorf("Header.Version: got %d, want %d", run.Header.Version, header.Version)
 	}
-	if got.Header.Algorithm != header.Algorithm {
-		t.Errorf("Header.Algorithm: got %q, want %q", got.Header.Algorithm, header.Algorithm)
+	if run.Header.PixeVersion != header.PixeVersion {
+		t.Errorf("Header.PixeVersion: got %q, want %q", run.Header.PixeVersion, header.PixeVersion)
 	}
-	if len(got.Entries) != 1 {
-		t.Fatalf("Entries len: got %d, want 1", len(got.Entries))
+	if run.Header.Algorithm != header.Algorithm {
+		t.Errorf("Header.Algorithm: got %q, want %q", run.Header.Algorithm, header.Algorithm)
 	}
-	if got.Entries[0].Path != entry.Path {
-		t.Errorf("Entries[0].Path: got %q, want %q", got.Entries[0].Path, entry.Path)
+	if len(run.Entries) != 1 {
+		t.Fatalf("Entries len: got %d, want 1", len(run.Entries))
+	}
+	if run.Entries[0].Path != entry.Path {
+		t.Errorf("Entries[0].Path: got %q, want %q", run.Entries[0].Path, entry.Path)
 	}
 }
 
@@ -318,29 +322,33 @@ func TestLedger_v4_fullRoundtrip(t *testing.T) {
 		t.Fatal("LoadLedger returned nil")
 	}
 
-	if got.Header.Version != 4 {
-		t.Errorf("Header.Version = %d, want 4", got.Header.Version)
+	if len(got.Runs) != 1 {
+		t.Fatalf("Runs len = %d, want 1", len(got.Runs))
 	}
-	if got.Header.PixeVersion != header.PixeVersion {
-		t.Errorf("Header.PixeVersion = %q, want %q", got.Header.PixeVersion, header.PixeVersion)
+	gotRun := got.Runs[0]
+	if gotRun.Header.Version != 4 {
+		t.Errorf("Header.Version = %d, want 4", gotRun.Header.Version)
 	}
-	if got.Header.RunID != header.RunID {
-		t.Errorf("Header.RunID = %q, want %q", got.Header.RunID, header.RunID)
+	if gotRun.Header.PixeVersion != header.PixeVersion {
+		t.Errorf("Header.PixeVersion = %q, want %q", gotRun.Header.PixeVersion, header.PixeVersion)
 	}
-	if got.Header.PixeRun != header.PixeRun {
-		t.Errorf("Header.PixeRun = %q, want %q", got.Header.PixeRun, header.PixeRun)
+	if gotRun.Header.RunID != header.RunID {
+		t.Errorf("Header.RunID = %q, want %q", gotRun.Header.RunID, header.RunID)
 	}
-	if got.Header.Algorithm != header.Algorithm {
-		t.Errorf("Header.Algorithm = %q, want %q", got.Header.Algorithm, header.Algorithm)
+	if gotRun.Header.PixeRun != header.PixeRun {
+		t.Errorf("Header.PixeRun = %q, want %q", gotRun.Header.PixeRun, header.PixeRun)
 	}
-	if got.Header.Destination != header.Destination {
-		t.Errorf("Header.Destination = %q, want %q", got.Header.Destination, header.Destination)
+	if gotRun.Header.Algorithm != header.Algorithm {
+		t.Errorf("Header.Algorithm = %q, want %q", gotRun.Header.Algorithm, header.Algorithm)
 	}
-	if !got.Header.Recursive {
+	if gotRun.Header.Destination != header.Destination {
+		t.Errorf("Header.Destination = %q, want %q", gotRun.Header.Destination, header.Destination)
+	}
+	if !gotRun.Header.Recursive {
 		t.Error("Header.Recursive = false, want true")
 	}
-	if len(got.Entries) != len(entries) {
-		t.Fatalf("Entries len = %d, want %d", len(got.Entries), len(entries))
+	if len(gotRun.Entries) != len(entries) {
+		t.Fatalf("Entries len = %d, want %d", len(gotRun.Entries), len(entries))
 	}
 }
 
@@ -354,10 +362,11 @@ func TestLedger_v4_copyEntry(t *testing.T) {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
+	allEntries := got.AllEntries()
 	var copyEntry *domain.LedgerEntry
-	for i := range got.Entries {
-		if got.Entries[i].Status == domain.LedgerStatusCopy {
-			copyEntry = &got.Entries[i]
+	for i := range allEntries {
+		if allEntries[i].Status == domain.LedgerStatusCopy {
+			copyEntry = &allEntries[i]
 			break
 		}
 	}
@@ -399,10 +408,11 @@ func TestLedger_v4_skipEntry(t *testing.T) {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
+	allEntries := got.AllEntries()
 	var skipEntry *domain.LedgerEntry
-	for i := range got.Entries {
-		if got.Entries[i].Status == domain.LedgerStatusSkip {
-			skipEntry = &got.Entries[i]
+	for i := range allEntries {
+		if allEntries[i].Status == domain.LedgerStatusSkip {
+			skipEntry = &allEntries[i]
 			break
 		}
 	}
@@ -435,10 +445,11 @@ func TestLedger_v4_duplicateEntry(t *testing.T) {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
+	allEntries := got.AllEntries()
 	var dupEntry *domain.LedgerEntry
-	for i := range got.Entries {
-		if got.Entries[i].Status == domain.LedgerStatusDuplicate {
-			dupEntry = &got.Entries[i]
+	for i := range allEntries {
+		if allEntries[i].Status == domain.LedgerStatusDuplicate {
+			dupEntry = &allEntries[i]
 			break
 		}
 	}
@@ -474,10 +485,11 @@ func TestLedger_v4_errorEntry(t *testing.T) {
 		t.Fatalf("LoadLedger: %v", err)
 	}
 
+	allEntries := got.AllEntries()
 	var errEntry *domain.LedgerEntry
-	for i := range got.Entries {
-		if got.Entries[i].Status == domain.LedgerStatusError {
-			errEntry = &got.Entries[i]
+	for i := range allEntries {
+		if allEntries[i].Status == domain.LedgerStatusError {
+			errEntry = &allEntries[i]
 			break
 		}
 	}
@@ -524,7 +536,7 @@ func TestLedger_v4_recursive_false(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLedger: %v", err)
 	}
-	if got.Header.Recursive {
+	if got.LatestHeader().Recursive {
 		t.Error("Header.Recursive = true, want false")
 	}
 }

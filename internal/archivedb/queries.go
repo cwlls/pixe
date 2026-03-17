@@ -642,23 +642,26 @@ func (db *DB) LastRunDate() (*time.Time, error) {
 }
 
 // CheckSourceProcessed returns true if a file with the given absolute source
-// path has already been successfully processed (status 'complete' or
-// 'duplicate') in any prior run. Used by the pipeline to decide whether to
-// emit a SKIP line instead of re-processing the file.
+// path AND content checksum has already been successfully processed (status
+// 'complete' or 'duplicate') in any prior run. Both path and checksum must
+// match — this prevents silently skipping a file whose content has changed
+// since the last import (e.g. an SD card reformatted and reused with a new
+// photo at the same filename).
 //
 // Note: 'skipped' and 'failed' statuses are intentionally excluded — a
 // previously-skipped file (e.g. unsupported format) should be re-evaluated
 // in case a new handler has been registered, and a previously-failed file
 // should be retried.
-func (db *DB) CheckSourceProcessed(sourcePath string) (bool, error) {
+func (db *DB) CheckSourceProcessed(sourcePath, checksum string) (bool, error) {
 	const q = `
 		SELECT 1 FROM files
 		WHERE source_path = ?
+		  AND checksum = ?
 		  AND status IN ('complete', 'duplicate')
 		LIMIT 1`
 
 	var exists int
-	err := db.conn.QueryRow(q, sourcePath).Scan(&exists)
+	err := db.conn.QueryRow(q, sourcePath, checksum).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

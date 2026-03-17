@@ -19,18 +19,19 @@
 // only; new runs use the SQLite archive database instead.
 //
 // Ledger — written to <dirA>/.pixe_ledger.json — is the source-side receipt
-// of every file Pixe processed during a run. It uses the JSONL format (v4):
-// line 1 is a header object containing run metadata; each subsequent line is
-// an independent LedgerEntry JSON object appended as the coordinator
-// finalises each file result. This streaming approach keeps memory usage O(1)
-// regardless of file count and leaves a partial-but-valid receipt if the run
-// is interrupted.
+// of every file Pixe processed. It uses a cumulative JSONL format (v6):
+// each run appends a header line followed by per-file LedgerEntry lines.
+// Multiple runs therefore produce a single growing file with interleaved
+// headers and entries. LoadLedger parses all runs and returns them grouped
+// by run. This streaming approach keeps memory usage O(1) regardless of file
+// count and leaves a partial-but-valid receipt if a run is interrupted.
 //
 // The LedgerWriter type owns the file handle and json.Encoder. The pipeline
 // coordinator is the sole caller — no mutex is needed.
 package manifest
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,16 +94,63 @@ func Load(dirB string) (*domain.Manifest, error) {
 	return &m, nil
 }
 
-// LedgerContents holds the parsed contents of a JSONL ledger file.
-// Used by tests to verify ledger output after a sort run.
-type LedgerContents struct {
-	Header  domain.LedgerHeader  // Header is the run-level metadata from the first line of the JSONL ledger.
-	Entries []domain.LedgerEntry // Entries is the list of per-file outcome records from the ledger.
+// LedgerRun groups a single run's header with its per-file entries.
+type LedgerRun struct {
+	Header  domain.LedgerHeader  // Header is the run-level metadata written at the start of the run.
+	Entries []domain.LedgerEntry // Entries is the list of per-file outcome records for this run.
 }
 
-// LoadLedger reads a JSONL ledger file and returns its parsed contents.
-// Line 1 is decoded as the LedgerHeader; all subsequent lines are decoded
-// as LedgerEntry objects.
+// LedgerContents holds all runs parsed from a cumulative JSONL ledger file.
+// Since v6 the ledger appends across runs, so a single file may contain
+// multiple runs. Pre-v6 (single-run) ledgers are returned as one LedgerRun.
+type LedgerContents struct {
+	Runs []LedgerRun
+}
+
+// LatestRun returns the most recent run (last in file order), or nil if the
+// ledger is empty.
+func (lc *LedgerContents) LatestRun() *LedgerRun {
+	if lc == nil || len(lc.Runs) == 0 {
+		return nil
+	}
+	return &lc.Runs[len(lc.Runs)-1]
+}
+
+// LatestHeader returns the header of the most recent run, or a zero-value
+// header if the ledger is empty.
+func (lc *LedgerContents) LatestHeader() domain.LedgerHeader {
+	if r := lc.LatestRun(); r != nil {
+		return r.Header
+	}
+	return domain.LedgerHeader{}
+}
+
+// AllEntries returns all entries across all runs in file order (oldest first).
+// A file that appears in multiple runs will have multiple entries — callers
+// that want the most recent outcome per path should iterate in order and let
+// later entries overwrite earlier ones in a map.
+func (lc *LedgerContents) AllEntries() []domain.LedgerEntry {
+	if lc == nil {
+		return nil
+	}
+	var total int
+	for i := range lc.Runs {
+		total += len(lc.Runs[i].Entries)
+	}
+	out := make([]domain.LedgerEntry, 0, total)
+	for i := range lc.Runs {
+		out = append(out, lc.Runs[i].Entries...)
+	}
+	return out
+}
+
+// LoadLedger reads a cumulative JSONL ledger file and returns all runs it
+// contains. Each run starts with a header line (identified by the presence
+// of the "version" key) followed by zero or more entry lines.
+//
+// Malformed lines (e.g. from an interrupted write) are silently skipped so
+// that a partial run does not prevent reading subsequent complete runs.
+//
 // Returns (nil, nil) if the ledger file does not exist.
 func LoadLedger(dirA string) (*LedgerContents, error) {
 	path := ledgerPath(dirA)
@@ -117,20 +165,55 @@ func LoadLedger(dirA string) (*LedgerContents, error) {
 		_ = f.Close()
 	}()
 
-	dec := json.NewDecoder(f)
+	lc := &LedgerContents{}
+	scanner := bufio.NewScanner(f)
+	// Increase the scanner buffer for very long lines (large sidecar lists etc.).
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
-	var lc LedgerContents
-	if err := dec.Decode(&lc.Header); err != nil {
-		return nil, fmt.Errorf("manifest: decode ledger header %q: %w", path, err)
-	}
-	for dec.More() {
-		var entry domain.LedgerEntry
-		if err := dec.Decode(&entry); err != nil {
-			return nil, fmt.Errorf("manifest: decode ledger entry %q: %w", path, err)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
 		}
-		lc.Entries = append(lc.Entries, entry)
+
+		// Probe for the "version" key to distinguish headers from entries.
+		// We use a minimal struct rather than json.RawMessage + map to avoid
+		// allocating a full map for every line.
+		var probe struct {
+			Version int `json:"version"`
+		}
+		if err := json.Unmarshal(line, &probe); err != nil {
+			// Malformed JSON — skip (e.g. truncated line from interrupted run).
+			continue
+		}
+
+		if probe.Version > 0 {
+			// Header line — start a new run.
+			var h domain.LedgerHeader
+			if err := json.Unmarshal(line, &h); err != nil {
+				// Malformed header — skip.
+				continue
+			}
+			lc.Runs = append(lc.Runs, LedgerRun{Header: h})
+		} else {
+			// Entry line — append to the current run.
+			var e domain.LedgerEntry
+			if err := json.Unmarshal(line, &e); err != nil {
+				// Malformed entry — skip.
+				continue
+			}
+			if len(lc.Runs) == 0 {
+				// Entry before any header (should not happen in well-formed
+				// files, but handle gracefully by creating an implicit run).
+				lc.Runs = append(lc.Runs, LedgerRun{})
+			}
+			lc.Runs[len(lc.Runs)-1].Entries = append(lc.Runs[len(lc.Runs)-1].Entries, e)
+		}
 	}
-	return &lc, nil
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("manifest: read ledger %q: %w", path, err)
+	}
+	return lc, nil
 }
 
 // LedgerWriter streams ledger entries to a JSONL file.
@@ -142,14 +225,17 @@ type LedgerWriter struct {
 	enc *json.Encoder
 }
 
-// NewLedgerWriter opens <dirA>/.pixe_ledger.json for writing (truncating any
-// existing content), writes header as the first JSON line, and returns the
-// writer. The caller must call Close when the run completes.
+// NewLedgerWriter opens <dirA>/.pixe_ledger.json for appending (creating it
+// if it does not exist), writes header as a JSON separator line, and returns
+// the writer. The caller must call Close when the run completes.
 //
-// Returns an error if the file cannot be created or the header cannot be
+// Append semantics mean each run adds its header and entries after the
+// previous run's content, producing a cumulative multi-run ledger.
+//
+// Returns an error if the file cannot be opened or the header cannot be
 // written. In either case the file is closed before returning.
 func NewLedgerWriter(dirA string, header domain.LedgerHeader) (*LedgerWriter, error) {
-	f, err := os.Create(ledgerPath(dirA))
+	f, err := os.OpenFile(ledgerPath(dirA), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("manifest: open ledger: %w", err)
 	}

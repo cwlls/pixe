@@ -877,13 +877,13 @@ func TestIntegration_SQLite_FullSort(t *testing.T) {
 		}
 	}
 
-	// Verify ledger has version 5 and run_id.
+	// Verify ledger has version 6 and run_id.
 	ledger := loadLedger(t, dirA)
-	if ledger.Header.Version != 5 {
-		t.Errorf("ledger Version = %d, want 5", ledger.Header.Version)
+	if ledger.LatestHeader().Version != 6 {
+		t.Errorf("ledger Version = %d, want 6", ledger.LatestHeader().Version)
 	}
-	if ledger.Header.RunID != opts.RunID {
-		t.Errorf("ledger RunID = %q, want %q", ledger.Header.RunID, opts.RunID)
+	if ledger.LatestHeader().RunID != opts.RunID {
+		t.Errorf("ledger RunID = %q, want %q", ledger.LatestHeader().RunID, opts.RunID)
 	}
 }
 

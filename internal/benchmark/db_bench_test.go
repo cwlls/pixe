@@ -87,10 +87,11 @@ func BenchmarkDBSkipCheck(b *testing.B) {
 		b.Run(fmt.Sprintf("rows=%d/hit", n), func(b *testing.B) {
 			db := prepopulateDB(b, n)
 			knownPath := getSourcePath(n / 2)
+			knownChecksum := getChecksum(n / 2)
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				if _, err := db.CheckSourceProcessed(knownPath); err != nil {
+				if _, err := db.CheckSourceProcessed(knownPath, knownChecksum); err != nil {
 					b.Fatalf("CheckSourceProcessed: %v", err)
 				}
 			}
@@ -101,7 +102,7 @@ func BenchmarkDBSkipCheck(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				if _, err := db.CheckSourceProcessed("/bench/source/nonexistent_file.jpg"); err != nil {
+				if _, err := db.CheckSourceProcessed("/bench/source/nonexistent_file.jpg", "nonexistent_checksum"); err != nil {
 					b.Fatalf("CheckSourceProcessed miss: %v", err)
 				}
 			}
