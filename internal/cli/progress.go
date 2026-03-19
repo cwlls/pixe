@@ -61,6 +61,7 @@ type WorkerState struct {
 	Stage        string // current pipeline stage label
 	FileSize     int64  // total file size in bytes
 	BytesWritten int64  // bytes processed so far (for delta tracking)
+	BarTotal     int64  // total value the bar was created with (fileSize * stages)
 	Bar          *mpb.Bar
 	mu           sync.Mutex // protects Stage and RelPath for decor.Any reads
 }
@@ -138,20 +139,24 @@ type counters struct {
 //
 // mode must be "sort" or "verify".
 func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode string) *mpb.Progress {
+	// PopCompletedMode is intentionally omitted: it causes completed bars to
+	// "pop" above the active rendering area, inverting the intended layout.
+	// BarRemoveOnComplete() on individual worker bars handles cleanup instead.
 	p := mpb.NewWithContext(ctx,
 		mpb.WithRefreshRate(150*time.Millisecond),
-		mpb.PopCompletedMode(),
 	)
 
 	cnt := &counters{}
 
-	// Header bar — static NopStyle line at the top.
+	// Header bar — static NopStyle line, anchored near the bottom.
+	// Priority 950: renders below worker bars (100+) and total bar (900),
+	// above status bar (1000).
 	header := fmt.Sprintf("pixe %s  %s", mode, source)
 	if dest != "" {
 		header += " → " + dest
 	}
 	headerBar := p.New(0, mpb.NopStyle(),
-		mpb.BarPriority(0),
+		mpb.BarPriority(950),
 		mpb.BarFillerTrim(),
 		mpb.PrependDecorators(
 			decor.Any(func(decor.Statistics) string {
@@ -161,8 +166,10 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 	)
 
 	// Discovery spinner — shown until EventDiscoverDone / EventVerifyStart.
+	// Priority 899: renders just above the total bar (900) during discovery,
+	// then is removed when the total bar takes over.
 	spinnerBar := p.AddSpinner(0,
-		mpb.BarPriority(1),
+		mpb.BarPriority(899),
 		mpb.BarFillerTrim(),
 		mpb.PrependDecorators(
 			decor.Any(func(decor.Statistics) string {
@@ -172,8 +179,9 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 	)
 
 	// Overall progress bar — total set when discovery completes.
+	// Priority 900: anchored below worker bars (100+), above header (950).
 	totalBar := p.AddBar(0,
-		mpb.BarPriority(2),
+		mpb.BarPriority(900),
 		mpb.PrependDecorators(
 			decor.CountersNoUnit(" %d / %d ", decor.WCSyncSpace),
 		),
@@ -185,7 +193,8 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 		),
 	)
 
-	// Status counter bar — NopStyle line at the bottom.
+	// Status counter bar — NopStyle line at the very bottom.
+	// Priority 1000: always the last line rendered.
 	statusBar := p.New(0, mpb.NopStyle(),
 		mpb.BarPriority(1000),
 		mpb.BarFillerTrim(),
@@ -223,6 +232,7 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 					RelPath:  filepath.Base(e.RelPath),
 					Stage:    "HASH",
 					FileSize: e.FileSize,
+					BarTotal: fileTotal,
 				}
 
 				bar := p.AddBar(fileTotal,
@@ -286,49 +296,49 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 				cnt.mu.Lock()
 				cnt.copied++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "DONE")
 				totalBar.Increment()
 
 			case pixeprogress.EventFileDuplicate:
 				cnt.mu.Lock()
 				cnt.dupes++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "DUPE")
 				totalBar.Increment()
 
 			case pixeprogress.EventFileSkipped:
 				cnt.mu.Lock()
 				cnt.skipped++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "SKIP")
 				totalBar.Increment()
 
 			case pixeprogress.EventFileError:
 				cnt.mu.Lock()
 				cnt.errors++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "ERR")
 				totalBar.Increment()
 
 			case pixeprogress.EventVerifyOK:
 				cnt.mu.Lock()
 				cnt.verified++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "DONE")
 				totalBar.Increment()
 
 			case pixeprogress.EventVerifyMismatch:
 				cnt.mu.Lock()
 				cnt.mismatches++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "FAIL")
 				totalBar.Increment()
 
 			case pixeprogress.EventVerifyUnrecognised:
 				cnt.mu.Lock()
 				cnt.unrecognised++
 				cnt.mu.Unlock()
-				finishWorker(workers, e.WorkerID)
+				completeWorker(workers, e.WorkerID, "UNK")
 				totalBar.Increment()
 
 			case pixeprogress.EventRunComplete, pixeprogress.EventVerifyDone:
@@ -348,23 +358,25 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 					}
 					cnt.mu.Unlock()
 				}
-				// Drain any remaining worker bars.
+				// Gracefully complete any remaining worker bars.
 				for id := range workers {
-					finishWorker(workers, id)
+					completeWorker(workers, id, "DONE")
 				}
-				// Complete the overall progress bar; abort display-only bars.
+				// Complete the overall progress bar (persists — no BarRemoveOnComplete).
 				cur := totalBar.Current()
 				totalBar.SetTotal(cur, true)
+				// Mark display-only bars as done so p.Wait() returns.
+				// Abort(false) = mark done without removing from display.
 				headerBar.Abort(false)
 				statusBar.Abort(false)
-				spinnerBar.Abort(true)
+				spinnerBar.Abort(true) // remove spinner if still visible (edge case)
 			}
 		}
 
 		// Bus closed without EventRunComplete (e.g. interrupted).
-		// Abort all bars so p.Wait() returns.
+		// Gracefully complete all bars so p.Wait() returns.
 		for id := range workers {
-			finishWorker(workers, id)
+			completeWorker(workers, id, "DONE")
 		}
 		cur := totalBar.Current()
 		totalBar.SetTotal(cur, true)
@@ -376,13 +388,19 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 	return p
 }
 
-// finishWorker aborts the worker's bar (removing it from the display) and
-// deletes it from the workers map.
-func finishWorker(workers map[int]*WorkerState, workerID int) {
-	if ws, ok := workers[workerID]; ok {
-		ws.Bar.Abort(true)
-		delete(workers, workerID)
+// completeWorker snaps the worker's bar to 100% with the given stage label,
+// marks it complete (triggering BarRemoveOnComplete), and deletes it from
+// the workers map. This ensures the final rendered frame shows the outcome
+// label at 100% rather than an intermediate state.
+func completeWorker(workers map[int]*WorkerState, workerID int, stage string) {
+	ws, ok := workers[workerID]
+	if !ok {
+		return
 	}
+	ws.setStage(stage)
+	ws.Bar.SetCurrent(ws.BarTotal)
+	ws.Bar.SetTotal(ws.BarTotal, true)
+	delete(workers, workerID)
 }
 
 // buildStatusLine renders the status counter line for the given mode.

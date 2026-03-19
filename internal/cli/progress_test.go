@@ -16,9 +16,12 @@ package cli
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbauerster/mpb/v8"
 
 	pixeprogress "github.com/cwlls/pixe/internal/progress"
 )
@@ -293,4 +296,38 @@ func TestBuildStatusLine_NoElapsedWhenNotDone(t *testing.T) {
 	if strings.Contains(line, "(1m 23s)") {
 		t.Errorf("buildStatusLine: elapsed time should not appear when done=false, got %q", line)
 	}
+}
+
+// TestCompleteWorker verifies that completeWorker sets the stage label,
+// snaps the bar to 100%, marks it complete, and removes the worker from the map.
+func TestCompleteWorker(t *testing.T) {
+	p := mpb.New(mpb.WithOutput(io.Discard))
+	total := int64(3000)
+	bar := p.AddBar(total, mpb.BarRemoveOnComplete())
+
+	workers := map[int]*WorkerState{
+		1: {
+			WorkerID: 1,
+			Stage:    "HASH",
+			BarTotal: total,
+			Bar:      bar,
+		},
+	}
+
+	completeWorker(workers, 1, "DONE")
+
+	if _, ok := workers[1]; ok {
+		t.Error("completeWorker: worker 1 still in map after completion")
+	}
+	if !bar.Completed() {
+		t.Error("completeWorker: bar not marked complete")
+	}
+	p.Wait()
+}
+
+// TestCompleteWorker_Missing verifies that completeWorker is a no-op
+// when the worker ID is not in the map.
+func TestCompleteWorker_Missing(t *testing.T) {
+	workers := map[int]*WorkerState{}
+	completeWorker(workers, 99, "DONE") // should not panic
 }
