@@ -82,6 +82,7 @@ type destAssignment struct {
 type workerFinalResult struct {
 	df                    discovery.DiscoveredFile
 	fileID                int64
+	workerID              int // which worker produced this result
 	checksum              string
 	relDest               string
 	isDuplicate           bool
@@ -455,7 +456,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					RelPath:   fr.df.RelPath,
 					Reason:    fr.err.Error(),
 					Err:       fr.err,
-					WorkerID:  -1,
+					WorkerID:  fr.workerID,
 					Completed: result.Skipped + result.Processed + result.Errors,
 				})
 			} else if fr.skipCopy {
@@ -489,7 +490,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 					IsDuplicate: true,
 					MatchesDest: fr.existingDestForLedger,
 					Checksum:    fr.checksum,
-					WorkerID:    -1,
+					WorkerID:    fr.workerID,
 					Completed:   result.Skipped + result.Processed + result.Errors,
 				})
 			} else {
@@ -605,7 +606,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						Destination: finalRelDest,
 						Checksum:    fr.checksum,
 						SidecarExts: sidecarExts(fr.df.Sidecars, finalSidecars),
-						WorkerID:    -1,
+						WorkerID:    fr.workerID,
 						Completed:   result.Skipped + result.Processed + result.Errors,
 					})
 				} else {
@@ -628,7 +629,7 @@ func runConcurrentCtx(ctx context.Context, opts SortOptions, discovered []discov
 						Destination: finalRelDest,
 						Checksum:    fr.checksum,
 						SidecarExts: sidecarExts(fr.df.Sidecars, finalSidecars),
-						WorkerID:    -1,
+						WorkerID:    fr.workerID,
 						Completed:   result.Skipped + result.Processed + result.Errors,
 					})
 				}
@@ -776,9 +777,10 @@ func runWorker(ctx context.Context, id int,
 			// completed counter advances correctly.
 			if assign.skip {
 				doneCh <- workerFinalResult{
-					df:      item.df,
-					fileID:  item.fileID,
-					skipped: true,
+					df:       item.df,
+					fileID:   item.fileID,
+					workerID: id,
+					skipped:  true,
 				}
 				continue
 			}
@@ -788,6 +790,7 @@ func runWorker(ctx context.Context, id int,
 				doneCh <- workerFinalResult{
 					df:                    item.df,
 					fileID:                item.fileID,
+					workerID:              id,
 					checksum:              checksum,
 					relDest:               assign.relDest,
 					isDuplicate:           true,
@@ -817,8 +820,11 @@ func runWorker(ctx context.Context, id int,
 						archivedb.WithIsDuplicate(assign.isDuplicate))
 				}
 				doneCh <- workerFinalResult{
-					df: item.df, fileID: item.fileID,
-					checksum: checksum, relDest: assign.relDest,
+					df:                    item.df,
+					fileID:                item.fileID,
+					workerID:              id,
+					checksum:              checksum,
+					relDest:               assign.relDest,
 					isDuplicate:           assign.isDuplicate,
 					existingDestForLedger: assign.existingDestForLedger,
 					captureDate:           captureDate,
@@ -841,7 +847,7 @@ func runWorker(ctx context.Context, id int,
 				if db != nil {
 					copyDBErr = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
 				}
-				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr, dbErr: copyDBErr}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, workerID: id, err: ferr, dbErr: copyDBErr}
 				continue
 			}
 			// Emit a final 100% byte-progress event so the UI sees completion
@@ -875,6 +881,7 @@ func runWorker(ctx context.Context, id int,
 					doneCh <- workerFinalResult{
 						df:          item.df,
 						fileID:      item.fileID,
+						workerID:    id,
 						checksum:    checksum,
 						relDest:     assign.relDest,
 						isDuplicate: true,
@@ -886,7 +893,7 @@ func runWorker(ctx context.Context, id int,
 				if db != nil {
 					mmDBErr = db.UpdateFileStatus(item.fileID, "mismatch", archivedb.WithError(vr.Error.Error()))
 				}
-				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: vr.Error, dbErr: mmDBErr}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, workerID: id, err: vr.Error, dbErr: mmDBErr}
 				continue
 			}
 
@@ -901,6 +908,7 @@ func runWorker(ctx context.Context, id int,
 					doneCh <- workerFinalResult{
 						df:          item.df,
 						fileID:      item.fileID,
+						workerID:    id,
 						checksum:    checksum,
 						relDest:     assign.relDest,
 						isDuplicate: true,
@@ -912,7 +920,7 @@ func runWorker(ctx context.Context, id int,
 				if db != nil {
 					promDBErr = db.UpdateFileStatus(item.fileID, "failed", archivedb.WithError(ferr.Error()))
 				}
-				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, err: ferr, dbErr: promDBErr}
+				doneCh <- workerFinalResult{df: item.df, fileID: item.fileID, workerID: id, err: ferr, dbErr: promDBErr}
 				continue
 			}
 			verifiedAt := time.Now().UTC()
@@ -990,6 +998,7 @@ func runWorker(ctx context.Context, id int,
 			doneCh <- workerFinalResult{
 				df:                    item.df,
 				fileID:                item.fileID,
+				workerID:              id,
 				checksum:              checksum,
 				relDest:               assign.relDest,
 				isDuplicate:           assign.isDuplicate,

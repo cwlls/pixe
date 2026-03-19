@@ -273,8 +273,13 @@ func RunProgress(ctx context.Context, bus *pixeprogress.Bus, source, dest, mode 
 
 			case pixeprogress.EventFileVerified:
 				if ws, ok := workers[e.WorkerID]; ok {
-					ws.setStage("TAG")
+					ws.setStage("DONE")
 					ws.BytesWritten = 0
+				}
+
+			case pixeprogress.EventFileTagged:
+				if ws, ok := workers[e.WorkerID]; ok {
+					ws.setStage("TAG")
 				}
 
 			case pixeprogress.EventFileComplete:

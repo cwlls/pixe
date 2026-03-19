@@ -119,6 +119,52 @@ func TestRunProgress_MultipleWorkers(t *testing.T) {
 	runProgressAndWait(t, "sort", events)
 }
 
+// TestRunProgress_SortLifecycleWithTagging exercises the full sort event
+// sequence including EventFileTagged, verifying the TAG stage label path works.
+func TestRunProgress_SortLifecycleWithTagging(t *testing.T) {
+	events := []pixeprogress.Event{
+		{Kind: pixeprogress.EventDiscoverDone, Total: 1},
+		{Kind: pixeprogress.EventFileStart, WorkerID: 1, RelPath: "IMG_001.jpg", FileSize: 1024},
+		{Kind: pixeprogress.EventFileHashed, WorkerID: 1},
+		{Kind: pixeprogress.EventFileCopied, WorkerID: 1},
+		{Kind: pixeprogress.EventFileVerified, WorkerID: 1},
+		{Kind: pixeprogress.EventFileTagged, WorkerID: 1},
+		{Kind: pixeprogress.EventFileComplete, WorkerID: 1, Completed: 1},
+		{Kind: pixeprogress.EventRunComplete, Summary: &pixeprogress.RunSummary{
+			Processed: 1,
+			Duration:  5 * time.Second,
+		}},
+	}
+	runProgressAndWait(t, "sort", events)
+}
+
+// TestRunProgress_WorkerIDCleanup is a regression test for the bug where
+// terminal events used WorkerID: -1 while bars were keyed by actual worker ID,
+// causing bars to accumulate until EventRunComplete. With the fix, each bar is
+// removed immediately when its terminal event arrives.
+//
+// The test uses a high WorkerID (5) that would never match -1, and verifies
+// that p.Wait() returns cleanly without needing EventRunComplete to drain bars.
+func TestRunProgress_WorkerIDCleanup(t *testing.T) {
+	events := []pixeprogress.Event{
+		{Kind: pixeprogress.EventDiscoverDone, Total: 3},
+		// Worker 5: complete via EventFileComplete with matching WorkerID.
+		{Kind: pixeprogress.EventFileStart, WorkerID: 5, RelPath: "a.jpg", FileSize: 1000},
+		{Kind: pixeprogress.EventFileComplete, WorkerID: 5, Completed: 1},
+		// Worker 7: complete via EventFileDuplicate with matching WorkerID.
+		{Kind: pixeprogress.EventFileStart, WorkerID: 7, RelPath: "b.jpg", FileSize: 2000},
+		{Kind: pixeprogress.EventFileDuplicate, WorkerID: 7, Completed: 2},
+		// Worker 9: complete via EventFileError with matching WorkerID.
+		{Kind: pixeprogress.EventFileStart, WorkerID: 9, RelPath: "c.jpg", FileSize: 3000},
+		{Kind: pixeprogress.EventFileError, WorkerID: 9, Completed: 3},
+		{Kind: pixeprogress.EventRunComplete, Summary: &pixeprogress.RunSummary{
+			Processed: 1,
+			Errors:    1,
+		}},
+	}
+	runProgressAndWait(t, "sort", events)
+}
+
 // TestRunProgress_ContextCancel verifies that cancelling the context causes
 // p.Wait() to return even if the bus is not closed.
 func TestRunProgress_ContextCancel(t *testing.T) {
