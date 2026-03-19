@@ -15,456 +15,236 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	pixeprogress "github.com/cwlls/pixe/internal/progress"
 )
 
-// newTestModel creates a ProgressModel with a real bus for testing.
-func newTestModel(mode string) (ProgressModel, *pixeprogress.Bus) {
-	bus := pixeprogress.NewBus(64)
-	m := NewProgressModel(bus, "/src", "/dst", mode)
-	return m, bus
-}
-
-// sendEvent sends an eventMsg to the model and returns the updated model.
-func sendEvent(t *testing.T, m ProgressModel, e pixeprogress.Event) ProgressModel {
+// runProgressAndWait is a test helper that creates a RunProgress container,
+// emits the provided events, closes the bus, and waits for p.Wait() to return.
+// It fails the test if p.Wait() does not return within 5 seconds.
+func runProgressAndWait(t *testing.T, mode string, events []pixeprogress.Event) {
 	t.Helper()
-	updated, _ := m.Update(eventMsg{event: e})
-	return updated.(ProgressModel)
-}
+	bus := pixeprogress.NewBus(128)
+	ctx := context.Background()
+	p := RunProgress(ctx, bus, "/src", "/dst", mode)
 
-func TestProgressModel_Init(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
+	for _, e := range events {
+		bus.Emit(e)
+	}
+	bus.Close()
 
-	cmd := m.Init()
-	if cmd == nil {
-		t.Fatal("Init() returned nil cmd, want non-nil")
+	done := make(chan struct{})
+	go func() {
+		p.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("p.Wait() did not return within 5s — possible deadlock in event consumer")
 	}
 }
 
-func TestProgressModel_CounterUpdates(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileComplete, Completed: 1})
-	if m.copied != 1 {
-		t.Errorf("copied = %d, want 1", m.copied)
-	}
-
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileDuplicate, Completed: 2})
-	if m.duplicates != 1 {
-		t.Errorf("duplicates = %d, want 1", m.duplicates)
-	}
-
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileSkipped, Completed: 3})
-	if m.skipped != 1 {
-		t.Errorf("skipped = %d, want 1", m.skipped)
-	}
-
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileError, Completed: 4})
-	if m.errors != 1 {
-		t.Errorf("errors = %d, want 1", m.errors)
-	}
+// TestRunProgress_BusClose verifies that closing the bus causes p.Wait() to return.
+func TestRunProgress_BusClose(t *testing.T) {
+	runProgressAndWait(t, "sort", nil)
 }
 
-func TestProgressModel_DiscoverDone(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventDiscoverDone, Total: 100})
-	if m.total != 100 {
-		t.Errorf("total = %d, want 100", m.total)
+// TestRunProgress_SortLifecycle exercises the full sort event sequence and
+// verifies p.Wait() returns cleanly.
+func TestRunProgress_SortLifecycle(t *testing.T) {
+	events := []pixeprogress.Event{
+		{Kind: pixeprogress.EventDiscoverDone, Total: 2},
+		{Kind: pixeprogress.EventFileStart, WorkerID: 1, RelPath: "IMG_001.jpg", FileSize: 1024},
+		{Kind: pixeprogress.EventByteProgress, WorkerID: 1, BytesWritten: 512, Stage: "HASH"},
+		{Kind: pixeprogress.EventFileHashed, WorkerID: 1},
+		{Kind: pixeprogress.EventByteProgress, WorkerID: 1, BytesWritten: 512, Stage: "COPY"},
+		{Kind: pixeprogress.EventFileCopied, WorkerID: 1},
+		{Kind: pixeprogress.EventByteProgress, WorkerID: 1, BytesWritten: 512, Stage: "VERIFY"},
+		{Kind: pixeprogress.EventFileVerified, WorkerID: 1},
+		{Kind: pixeprogress.EventFileComplete, WorkerID: 1, Completed: 1},
+		{Kind: pixeprogress.EventFileStart, WorkerID: 1, RelPath: "IMG_002.jpg", FileSize: 2048},
+		{Kind: pixeprogress.EventFileDuplicate, WorkerID: 1, Completed: 2},
+		{Kind: pixeprogress.EventRunComplete, Summary: &pixeprogress.RunSummary{
+			Processed:  2,
+			Duplicates: 1,
+			Duration:   83 * time.Second,
+		}},
 	}
+	runProgressAndWait(t, "sort", events)
 }
 
-func TestProgressModel_WorkerTracking(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	// EventFileStart should create a WorkerState entry.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileStart,
-		RelPath:  "IMG_001.jpg",
-		WorkerID: 1,
-		FileSize: 1024,
-	})
-	ws, ok := m.workers[1]
-	if !ok {
-		t.Fatal("workers[1] not found after EventFileStart")
+// TestRunProgress_VerifyLifecycle exercises the full verify event sequence.
+func TestRunProgress_VerifyLifecycle(t *testing.T) {
+	events := []pixeprogress.Event{
+		{Kind: pixeprogress.EventVerifyStart, Total: 3},
+		{Kind: pixeprogress.EventVerifyFileStart, WorkerID: 1, RelPath: "20210101_120000-1-abc.jpg", FileSize: 4096},
+		{Kind: pixeprogress.EventByteProgress, WorkerID: 1, BytesWritten: 2048, Stage: "HASH"},
+		{Kind: pixeprogress.EventVerifyOK, WorkerID: 1, Completed: 1},
+		{Kind: pixeprogress.EventVerifyFileStart, WorkerID: 1, RelPath: "20210101_120001-1-def.jpg", FileSize: 4096},
+		{Kind: pixeprogress.EventVerifyMismatch, WorkerID: 1, Completed: 2},
+		{Kind: pixeprogress.EventVerifyFileStart, WorkerID: 1, RelPath: "unknown.txt", FileSize: 100},
+		{Kind: pixeprogress.EventVerifyUnrecognised, WorkerID: 1, Completed: 3},
+		{Kind: pixeprogress.EventVerifyDone, Summary: &pixeprogress.RunSummary{
+			Verified:     1,
+			Mismatches:   1,
+			Unrecognised: 1,
+			Duration:     45 * time.Second,
+		}},
 	}
-	if ws.RelPath != "IMG_001.jpg" {
-		t.Errorf("workers[1].RelPath = %q, want %q", ws.RelPath, "IMG_001.jpg")
-	}
-	if ws.Stage != "HASH" {
-		t.Errorf("workers[1].Stage = %q, want %q", ws.Stage, "HASH")
-	}
-	if ws.FileSize != 1024 {
-		t.Errorf("workers[1].FileSize = %d, want 1024", ws.FileSize)
-	}
-
-	// EventByteProgress should update BytesWritten.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:         pixeprogress.EventByteProgress,
-		RelPath:      "IMG_001.jpg",
-		WorkerID:     1,
-		Stage:        "HASH",
-		BytesWritten: 512,
-		BytesTotal:   1024,
-	})
-	if m.workers[1].BytesWritten != 512 {
-		t.Errorf("workers[1].BytesWritten = %d, want 512", m.workers[1].BytesWritten)
-	}
-
-	// EventFileHashed should advance stage to COPY and reset BytesWritten.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileHashed,
-		RelPath:  "IMG_001.jpg",
-		WorkerID: 1,
-	})
-	if m.workers[1].Stage != "COPY" {
-		t.Errorf("workers[1].Stage = %q, want %q", m.workers[1].Stage, "COPY")
-	}
-	if m.workers[1].BytesWritten != 0 {
-		t.Errorf("workers[1].BytesWritten = %d, want 0 after stage reset", m.workers[1].BytesWritten)
-	}
-
-	// EventFileComplete should remove the worker entry.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:      pixeprogress.EventFileComplete,
-		RelPath:   "IMG_001.jpg",
-		WorkerID:  1,
-		Completed: 1,
-	})
-	if _, ok := m.workers[1]; ok {
-		t.Error("workers[1] still present after EventFileComplete, want removed")
-	}
+	runProgressAndWait(t, "verify", events)
 }
 
-func TestProgressModel_DoneOnRunComplete(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	updated, cmd := m.Update(eventMsg{event: pixeprogress.Event{
-		Kind:    pixeprogress.EventRunComplete,
-		Summary: &pixeprogress.RunSummary{Processed: 5},
-	}})
-	m = updated.(ProgressModel)
-
-	if !m.done {
-		t.Error("done = false, want true after EventRunComplete")
+// TestRunProgress_MultipleWorkers verifies that multiple concurrent workers
+// can be tracked without deadlock.
+func TestRunProgress_MultipleWorkers(t *testing.T) {
+	events := []pixeprogress.Event{
+		{Kind: pixeprogress.EventDiscoverDone, Total: 3},
+		{Kind: pixeprogress.EventFileStart, WorkerID: 1, RelPath: "a.jpg", FileSize: 1000},
+		{Kind: pixeprogress.EventFileStart, WorkerID: 2, RelPath: "b.jpg", FileSize: 2000},
+		{Kind: pixeprogress.EventFileStart, WorkerID: 3, RelPath: "c.jpg", FileSize: 3000},
+		{Kind: pixeprogress.EventFileComplete, WorkerID: 1, Completed: 1},
+		{Kind: pixeprogress.EventFileSkipped, WorkerID: 2, Completed: 2},
+		{Kind: pixeprogress.EventFileError, WorkerID: 3, Completed: 3},
+		{Kind: pixeprogress.EventRunComplete, Summary: &pixeprogress.RunSummary{
+			Processed: 1,
+			Skipped:   1,
+			Errors:    1,
+		}},
 	}
-	if cmd == nil {
-		t.Error("cmd should be tea.Quit, got nil")
-	}
+	runProgressAndWait(t, "sort", events)
 }
 
-func TestProgressModel_DoneOnBusClosed(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
+// TestRunProgress_ContextCancel verifies that cancelling the context causes
+// p.Wait() to return even if the bus is not closed.
+func TestRunProgress_ContextCancel(t *testing.T) {
+	bus := pixeprogress.NewBus(128)
+	ctx, cancel := context.WithCancel(context.Background())
+	p := RunProgress(ctx, bus, "/src", "/dst", "sort")
 
-	updated, cmd := m.Update(busClosedMsg{})
-	m = updated.(ProgressModel)
+	// Cancel the context without closing the bus.
+	cancel()
 
-	if !m.done {
-		t.Error("done = false, want true after busClosedMsg")
+	done := make(chan struct{})
+	go func() {
+		p.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("p.Wait() did not return within 5s after context cancel")
 	}
-	if cmd == nil {
-		t.Error("cmd should be tea.Quit, got nil")
-	}
+	bus.Close() // cleanup
 }
 
-func TestProgressModel_WindowResize(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(ProgressModel)
-
-	if m.width != 120 {
-		t.Errorf("width = %d, want 120", m.width)
+// TestRunProgress_ReturnsNonNil verifies that RunProgress returns a non-nil container.
+func TestRunProgress_ReturnsNonNil(t *testing.T) {
+	bus := pixeprogress.NewBus(64)
+	ctx := context.Background()
+	p := RunProgress(ctx, bus, "/src", "/dst", "sort")
+	if p == nil {
+		t.Fatal("RunProgress returned nil")
 	}
+	bus.Close()
+	p.Wait()
 }
 
-func TestProgressModel_ViewContainsCounters(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
+// --- Helper function unit tests ---
 
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventDiscoverDone, Total: 10})
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileComplete, Completed: 1})
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileDuplicate, Completed: 2})
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileSkipped, Completed: 3})
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventFileError, Completed: 4})
-
-	view := m.View()
-	wantStrings := []string{"copied", "dupes", "skipped", "errors"}
-	for _, want := range wantStrings {
-		if !strings.Contains(view, want) {
-			t.Errorf("View() missing %q\ngot:\n%s", want, view)
+func TestTruncName(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxWidth int
+		want     string
+	}{
+		{"short.jpg", 24, "short.jpg               "},
+		{"exactly24characters.jpg", 24, "exactly24characters.jpg "},
+		{"this_is_a_very_long_filename_that_exceeds_limit.jpg", 24, "this_is_a_very_long_file"},
+	}
+	for _, tc := range tests {
+		got := truncName(tc.name, tc.maxWidth)
+		if len(got) != tc.maxWidth {
+			t.Errorf("truncName(%q, %d): len=%d, want %d", tc.name, tc.maxWidth, len(got), tc.maxWidth)
+		}
+		if len(tc.name) > tc.maxWidth && !strings.HasSuffix(got, "...") {
+			t.Errorf("truncName(%q, %d): want suffix '...', got %q", tc.name, tc.maxWidth, got)
 		}
 	}
 }
 
-func TestProgressModel_VerifyMode(t *testing.T) {
-	m, bus := newTestModel("verify")
-	defer bus.Close()
-
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventVerifyStart, Total: 20})
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventVerifyOK, Completed: 1})
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventVerifyMismatch, Completed: 2})
-
-	if m.verified != 1 {
-		t.Errorf("verified = %d, want 1", m.verified)
+func TestHumanSize(t *testing.T) {
+	tests := []struct {
+		bytes int64
+		want  string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1 KB"},
+		{1536, "2 KB"},
+		{1048576, "1.0 MB"},
+		{1572864, "1.5 MB"},
+		{1073741824, "1.0 GB"},
 	}
-	if m.mismatches != 1 {
-		t.Errorf("mismatches = %d, want 1", m.mismatches)
-	}
-
-	view := m.View()
-	if !strings.Contains(view, "verified") {
-		t.Errorf("View() missing 'verified' in verify mode\ngot:\n%s", view)
-	}
-	if !strings.Contains(view, "mismatches") {
-		t.Errorf("View() missing 'mismatches' in verify mode\ngot:\n%s", view)
+	for _, tc := range tests {
+		got := humanSize(tc.bytes)
+		if got != tc.want {
+			t.Errorf("humanSize(%d) = %q, want %q", tc.bytes, got, tc.want)
+		}
 	}
 }
 
-// TestProgressModel_DiscoveringState verifies that discovering is true initially
-// and becomes false after EventDiscoverDone.
-func TestProgressModel_DiscoveringState(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	// Initially discovering should be true.
-	if !m.discovering {
-		t.Error("discovering = false initially, want true")
+func TestBuildStatusLine_Sort(t *testing.T) {
+	cnt := &counters{
+		copied:  5,
+		dupes:   2,
+		skipped: 1,
+		errors:  0,
 	}
-
-	// After EventDiscoverDone, discovering should be false.
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventDiscoverDone, Total: 10})
-	if m.discovering {
-		t.Error("discovering = true after EventDiscoverDone, want false")
+	line := buildStatusLine(cnt, "sort")
+	for _, want := range []string{"copied", "dupes", "skipped", "errors"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("buildStatusLine sort: missing %q in %q", want, line)
+		}
 	}
 }
 
-// TestProgressModel_MultipleWorkers verifies that multiple workers are tracked
-// independently.
-func TestProgressModel_MultipleWorkers(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	// Send EventFileStart for workers 1, 2, 3 simultaneously.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileStart,
-		RelPath:  "IMG_001.jpg",
-		WorkerID: 1,
-		FileSize: 1024,
-	})
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileStart,
-		RelPath:  "IMG_002.jpg",
-		WorkerID: 2,
-		FileSize: 2048,
-	})
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileStart,
-		RelPath:  "IMG_003.jpg",
-		WorkerID: 3,
-		FileSize: 4096,
-	})
-
-	// All three workers should be tracked.
-	if len(m.workers) != 3 {
-		t.Errorf("len(workers) = %d, want 3", len(m.workers))
+func TestBuildStatusLine_Verify(t *testing.T) {
+	cnt := &counters{
+		verified:     10,
+		mismatches:   1,
+		unrecognised: 2,
 	}
-
-	// Each should have correct RelPath and FileSize.
-	if m.workers[1].RelPath != "IMG_001.jpg" || m.workers[1].FileSize != 1024 {
-		t.Errorf("worker 1: RelPath=%q FileSize=%d, want IMG_001.jpg 1024", m.workers[1].RelPath, m.workers[1].FileSize)
-	}
-	if m.workers[2].RelPath != "IMG_002.jpg" || m.workers[2].FileSize != 2048 {
-		t.Errorf("worker 2: RelPath=%q FileSize=%d, want IMG_002.jpg 2048", m.workers[2].RelPath, m.workers[2].FileSize)
-	}
-	if m.workers[3].RelPath != "IMG_003.jpg" || m.workers[3].FileSize != 4096 {
-		t.Errorf("worker 3: RelPath=%q FileSize=%d, want IMG_003.jpg 4096", m.workers[3].RelPath, m.workers[3].FileSize)
+	line := buildStatusLine(cnt, "verify")
+	for _, want := range []string{"verified", "mismatches", "unrecognised"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("buildStatusLine verify: missing %q in %q", want, line)
+		}
 	}
 }
 
-// TestProgressModel_StageTransitions verifies the full lifecycle of a single
-// worker through HASH → COPY → VERIFY → TAG → complete.
-func TestProgressModel_StageTransitions(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	workerID := 1
-
-	// EventFileStart: stage should be HASH.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileStart,
-		RelPath:  "photo.jpg",
-		WorkerID: workerID,
-		FileSize: 1000,
-	})
-	if m.workers[workerID].Stage != "HASH" {
-		t.Errorf("after EventFileStart: Stage=%q, want HASH", m.workers[workerID].Stage)
+func TestBuildStatusLine_ElapsedOnDone(t *testing.T) {
+	cnt := &counters{
+		done:     true,
+		duration: 83 * time.Second,
 	}
-
-	// EventFileHashed: stage should advance to COPY.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileHashed,
-		RelPath:  "photo.jpg",
-		WorkerID: workerID,
-	})
-	if m.workers[workerID].Stage != "COPY" {
-		t.Errorf("after EventFileHashed: Stage=%q, want COPY", m.workers[workerID].Stage)
-	}
-
-	// EventFileCopied: stage should advance to VERIFY.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileCopied,
-		RelPath:  "photo.jpg",
-		WorkerID: workerID,
-	})
-	if m.workers[workerID].Stage != "VERIFY" {
-		t.Errorf("after EventFileCopied: Stage=%q, want VERIFY", m.workers[workerID].Stage)
-	}
-
-	// EventFileVerified: stage should advance to TAG.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileVerified,
-		RelPath:  "photo.jpg",
-		WorkerID: workerID,
-	})
-	if m.workers[workerID].Stage != "TAG" {
-		t.Errorf("after EventFileVerified: Stage=%q, want TAG", m.workers[workerID].Stage)
-	}
-
-	// EventFileComplete: worker should be removed.
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:      pixeprogress.EventFileComplete,
-		RelPath:   "photo.jpg",
-		WorkerID:  workerID,
-		Completed: 1,
-	})
-	if _, ok := m.workers[workerID]; ok {
-		t.Error("after EventFileComplete: worker still present, want removed")
+	line := buildStatusLine(cnt, "sort")
+	if !strings.Contains(line, "(1m 23s)") {
+		t.Errorf("buildStatusLine: missing elapsed time '(1m 23s)' when done=true, got %q", line)
 	}
 }
 
-// TestProgressModel_ViewContainsWorkerLine verifies that after EventFileStart,
-// View() contains the stage label and filename.
-func TestProgressModel_ViewContainsWorkerLine(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind:     pixeprogress.EventFileStart,
-		RelPath:  "vacation_photo.jpg",
-		WorkerID: 1,
-		FileSize: 2048,
-	})
-
-	view := m.View()
-	if !strings.Contains(view, "vacation_photo.jpg") {
-		t.Errorf("View() missing filename 'vacation_photo.jpg'\ngot:\n%s", view)
+func TestBuildStatusLine_NoElapsedWhenNotDone(t *testing.T) {
+	cnt := &counters{
+		done:     false,
+		duration: 83 * time.Second,
 	}
-	if !strings.Contains(view, "HASH") {
-		t.Errorf("View() missing stage label 'HASH'\ngot:\n%s", view)
-	}
-}
-
-// TestProgressModel_ViewDiscoverySpinner verifies that before EventDiscoverDone,
-// View() contains "Discovering" or similar discovery indicator.
-func TestProgressModel_ViewDiscoverySpinner(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	// Before EventDiscoverDone, discovering is true.
-	view := m.View()
-	if !strings.Contains(view, "Discovering") {
-		t.Errorf("View() missing 'Discovering' before EventDiscoverDone\ngot:\n%s", view)
-	}
-
-	// After EventDiscoverDone, "Discovering" should no longer appear.
-	m = sendEvent(t, m, pixeprogress.Event{Kind: pixeprogress.EventDiscoverDone, Total: 10})
-	view = m.View()
-	if strings.Contains(view, "Discovering") {
-		t.Errorf("View() still contains 'Discovering' after EventDiscoverDone\ngot:\n%s", view)
-	}
-}
-
-// TestProgressModel_DurationStoredOnRunComplete verifies that the duration from
-// RunSummary is stored on the model when EventRunComplete is received.
-func TestProgressModel_DurationStoredOnRunComplete(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	const wantDuration = 83 * time.Second
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind: pixeprogress.EventRunComplete,
-		Summary: &pixeprogress.RunSummary{
-			Processed: 5,
-			Duration:  wantDuration,
-		},
-	})
-
-	if m.duration != wantDuration {
-		t.Errorf("duration = %v, want %v", m.duration, wantDuration)
-	}
-	if !m.done {
-		t.Error("done = false, want true after EventRunComplete")
-	}
-}
-
-// TestProgressModel_ViewShowsElapsedOnDone verifies that View() appends the
-// formatted elapsed time to the status counter line once the run is complete.
-func TestProgressModel_ViewShowsElapsedOnDone(t *testing.T) {
-	m, bus := newTestModel("sort")
-	defer bus.Close()
-
-	// Before completion, elapsed time must not appear.
-	viewBefore := m.View()
-	if strings.Contains(viewBefore, "(1m 23s)") {
-		t.Errorf("View() contains elapsed time before run complete\ngot:\n%s", viewBefore)
-	}
-
-	// 83 seconds → "1m 23s"
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind: pixeprogress.EventRunComplete,
-		Summary: &pixeprogress.RunSummary{
-			Processed: 10,
-			Duration:  83 * time.Second,
-		},
-	})
-
-	viewAfter := m.View()
-	if !strings.Contains(viewAfter, "(1m 23s)") {
-		t.Errorf("View() missing elapsed time '(1m 23s)' after run complete\ngot:\n%s", viewAfter)
-	}
-}
-
-// TestProgressModel_VerifyViewShowsElapsedOnDone verifies that verify mode also
-// appends the formatted elapsed time after EventVerifyDone.
-func TestProgressModel_VerifyViewShowsElapsedOnDone(t *testing.T) {
-	m, bus := newTestModel("verify")
-	defer bus.Close()
-
-	// 45 seconds → "45s"
-	m = sendEvent(t, m, pixeprogress.Event{
-		Kind: pixeprogress.EventVerifyDone,
-		Summary: &pixeprogress.RunSummary{
-			Verified: 48,
-			Duration: 45 * time.Second,
-		},
-	})
-
-	view := m.View()
-	if !strings.Contains(view, "(45s)") {
-		t.Errorf("View() missing elapsed time '(45s)' after verify done\ngot:\n%s", view)
+	line := buildStatusLine(cnt, "sort")
+	if strings.Contains(line, "(1m 23s)") {
+		t.Errorf("buildStatusLine: elapsed time should not appear when done=false, got %q", line)
 	}
 }

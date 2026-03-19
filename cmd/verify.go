@@ -15,14 +15,12 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -81,25 +79,21 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		Workers:  workers,
 	}
 
+	// Wire SIGINT/SIGTERM to a cancellable context so verify can drain
+	// gracefully. signal.NotifyContext restores default signal behaviour on the
+	// second signal, allowing a hard exit. Both progress and non-progress modes
+	// share this context — mpb has no signal handler of its own.
+	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	opts.Context = ctx
+
 	var result verify.Result
 	if useProgress {
-		// Progress mode: let Bubble Tea own signal handling. Using
-		// signal.NotifyContext here would conflict with Bubble Tea's own
-		// SIGINT handler and cause a startup hang. Instead we use a plain
-		// context.WithCancel and cancel it after p.Run() returns.
-		ctx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
-		opts.Context = ctx
-
 		bus := progress.NewBus(256)
 		opts.EventBus = bus
 		opts.Output = io.Discard
 
-		model := cli.NewProgressModel(bus, dir, "", "verify")
-		// WithoutSignalHandler prevents Bubble Tea from registering its own
-		// OS-level SIGINT handler. Ctrl+C is still delivered as a tea.KeyMsg
-		// from Bubble Tea's raw-mode stdin reader.
-		p := tea.NewProgram(model, tea.WithoutSignalHandler())
+		p := cli.RunProgress(ctx, bus, dir, "", "verify")
 
 		var verifyErr error
 		done := make(chan struct{})
@@ -109,26 +103,12 @@ func runVerify(cmd *cobra.Command, args []string) error {
 			bus.Close()
 		}()
 
-		if _, err := p.Run(); err != nil {
-			cancel()
-			<-done
-			return fmt.Errorf("progress UI: %w", err)
-		}
-		// Bubble Tea exited (bus closed or user quit). Cancel the verify
-		// context so any in-flight work drains gracefully.
-		cancel()
+		p.Wait()
 		<-done
 		if verifyErr != nil {
 			return fmt.Errorf("verify failed: %w", verifyErr)
 		}
 	} else {
-		// Non-progress mode: wire SIGINT/SIGTERM to a cancellable context so
-		// verify can drain gracefully. signal.NotifyContext restores default
-		// signal behaviour on the second signal, allowing a hard exit.
-		ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-		defer stopSignals()
-		opts.Context = ctx
-
 		var err error
 		result, err = verify.Run(opts)
 		if err != nil {

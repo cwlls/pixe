@@ -16,81 +16,73 @@ package pipeline
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 
 	"github.com/cwlls/pixe/internal/discovery"
 )
 
+// ANSI 256-color escape codes for verb coloring.
+// These mid-range palette values are readable on both light and dark terminals.
+const (
+	ansiReset   = "\033[0m"
+	ansiGreen   = "\033[38;5;114m"   // COPY — green
+	ansiYellow  = "\033[38;5;179m"   // DUPE, WARNING — amber/yellow
+	ansiBoldRed = "\033[1;38;5;204m" // ERR — bold red
+	ansiGray    = "\033[38;5;102m"   // SKIP — gray
+)
+
+// ansiWrap wraps text in an ANSI color escape sequence.
+// Returns text unchanged when color is false.
+func ansiWrap(text, code string, color bool) string {
+	if !color {
+		return text
+	}
+	return code + text + ansiReset
+}
+
+// colorForVerb returns the ANSI color code for a given pipeline verb.
+func colorForVerb(verb string) string {
+	switch verb {
+	case "COPY":
+		return ansiGreen
+	case "DUPE":
+		return ansiYellow
+	case "ERR ", "ERR":
+		return ansiBoldRed
+	case "SKIP":
+		return ansiGray
+	default:
+		return ""
+	}
+}
+
 // Formatter produces status lines with optional color.
-// When color is true a dedicated Lip Gloss renderer with TrueColor profile is
-// used so that ANSI escape codes are emitted even when the output writer is not
-// a TTY (e.g. bytes.Buffer in tests, or a pipe where the caller has already
-// confirmed the terminal supports color).
+// When color is true, ANSI 256-color escape codes are used for verb labels.
+// The color bool is set by the caller based on TTY detection and NO_COLOR.
 type Formatter struct {
-	color    bool
-	renderer *lipgloss.Renderer
+	color bool
 }
 
 // NewFormatter creates a Formatter. When color is true, status verbs are
-// rendered with Lip Gloss adaptive colors using a forced TrueColor profile.
-// os.Stdout is passed to the renderer so termenv can probe the terminal's
-// dark/light background preference for AdaptiveColor selection.
+// rendered with ANSI 256-color codes.
 func NewFormatter(color bool) *Formatter {
-	f := &Formatter{color: color}
-	if color {
-		r := lipgloss.NewRenderer(os.Stdout)
-		r.SetColorProfile(termenv.TrueColor)
-		f.renderer = r
-	}
-	return f
-}
-
-// style returns a Lip Gloss style bound to the formatter's renderer.
-func (f *Formatter) style() lipgloss.Style {
-	if f.renderer != nil {
-		return f.renderer.NewStyle()
-	}
-	return lipgloss.NewStyle()
-}
-
-// verbStyle returns the colored style for a given verb.
-func (f *Formatter) verbStyle(verb string) lipgloss.Style {
-	switch verb {
-	case "COPY":
-		return f.style().Foreground(lipgloss.AdaptiveColor{Light: "#22863a", Dark: "#85e89d"})
-	case "DUPE":
-		return f.style().Foreground(lipgloss.AdaptiveColor{Light: "#b08800", Dark: "#ffdf5d"})
-	case "ERR ", "ERR":
-		return f.style().Foreground(lipgloss.AdaptiveColor{Light: "#cb2431", Dark: "#f97583"}).Bold(true)
-	case "SKIP":
-		return f.style().Foreground(lipgloss.AdaptiveColor{Light: "#959da5", Dark: "#6a737d"})
-	default:
-		return f.style()
-	}
+	return &Formatter{color: color}
 }
 
 // FormatOutput returns a single stdout line for a file outcome.
 // verb is one of "COPY", "SKIP", "DUPE", "ERR ".
 func (f *Formatter) FormatOutput(verb, source, detail string) string {
-	if f.color {
-		verb = f.verbStyle(verb).Render(verb)
-	}
-	return fmt.Sprintf("%s %s -> %s\n", verb, source, detail)
+	v := ansiWrap(verb, colorForVerb(verb), f.color)
+	return fmt.Sprintf("%s %s -> %s\n", v, source, detail)
 }
 
-// FormatOutput returns a single stdout line for a file outcome with an optional
-// sidecar annotation appended inline (e.g. " [+xmp]").
+// FormatOutputWithAnnotation returns a single stdout line for a file outcome
+// with an optional sidecar annotation appended inline (e.g. " [+xmp]").
 // verb is one of "COPY", "SKIP", "DUPE", "ERR ".
 // annotation is the result of formatSidecarAnnotation; pass "" for no annotation.
 func (f *Formatter) FormatOutputWithAnnotation(verb, source, detail, annotation string) string {
-	if f.color {
-		verb = f.verbStyle(verb).Render(verb)
-	}
-	return fmt.Sprintf("%s %s -> %s%s\n", verb, source, detail, annotation)
+	v := ansiWrap(verb, colorForVerb(verb), f.color)
+	return fmt.Sprintf("%s %s -> %s%s\n", v, source, detail, annotation)
 }
 
 // formatSidecarAnnotation builds the inline sidecar annotation string from a
@@ -151,10 +143,6 @@ func sidecarExts(sidecars []discovery.SidecarFile, carried []string) []string {
 
 // FormatWarning returns a warning line (sidecar carry failure, tag failure, etc.).
 func (f *Formatter) FormatWarning(msg string) string {
-	prefix := "  WARNING  "
-	if f.color {
-		warnStyle := f.style().Foreground(lipgloss.AdaptiveColor{Light: "#b08800", Dark: "#ffdf5d"})
-		prefix = "  " + warnStyle.Render("WARNING") + "  "
-	}
+	prefix := "  " + ansiWrap("WARNING", ansiYellow, f.color) + "  "
 	return prefix + msg + "\n"
 }
